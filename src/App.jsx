@@ -292,6 +292,7 @@ nav::-webkit-scrollbar-thumb{background:var(--bd);border-radius:2px}
 .btn-p{background:var(--ac);color:#fff;border-color:var(--ac)}.btn-p:hover:not(:disabled){background:var(--ach)}
 .btn-o{background:transparent;color:var(--txm);border-color:var(--bdd)}.btn-o:hover:not(:disabled){border-color:var(--tx);color:var(--tx);background:var(--sf2)}
 .btn-g{background:var(--gn);color:#fff;border-color:var(--gn)}.btn-g:hover:not(:disabled){background:#174530}
+.btn-del{background:transparent;color:var(--ac);border-color:var(--ac)}.btn-del:hover:not(:disabled){background:var(--acl)}
 .btn-nv{background:var(--nv);color:#fff;border-color:var(--nv)}.btn-nv:hover:not(:disabled){background:#111e30}
 
 /* Badges */
@@ -716,7 +717,7 @@ function ColPanel({ cols, setCols, onClose }) {
 /* ═══════════════════════════════════════════════════════════════
    STOCK — Edit Stock Drawer (click any row)
 ═══════════════════════════════════════════════════════════════ */
-function EditStockDrawer({ stock, onSave, onClose }) {
+function EditStockDrawer({ stock, onSave, onDelete, onClose }) {
   const [form, setForm] = useState({ ...stock });
   const [totalPaid, setTotalPaid] = useState(
     stock.costPer && stock.sellable
@@ -827,6 +828,10 @@ function EditStockDrawer({ stock, onSave, onClose }) {
         </div>
         <div className="drw-f">
           <button className="btn btn-o btn-sm" onClick={onClose}>Cancel</button>
+          <button className="btn btn-del btn-sm" onClick={() => {
+            if (window.confirm(`Delete bundle ${stock.bundleSku} — ${stock.name}? This cannot be undone.`))
+              onDelete(stock.bundleSku);
+          }}>🗑 Delete</button>
           <button className="btn btn-p btn-sm" onClick={() => { onSave({ ...form, sellable: parseInt(form.sellable)||0, received: parseInt(form.received)||0 }); onClose(); }}>
             Save Changes
           </button>
@@ -1157,6 +1162,10 @@ function StockTab({ stockData, setStockData, listings }) {
   const visCols = cols.filter(c => c.visible);
 
   const handleAddStock  = (ns) => setStockData(p => [...p, ns]);
+  const handleDeleteStock = (bsku) => {
+    setStockData(prev => prev.filter(s => s.bundleSku !== bsku));
+    setEditStock(null);
+  };
   const handleSaveStock = (updated) =>
     setStockData(p => p.map(s => s.bundleSku===updated.bundleSku ? updated : s));
 
@@ -1171,7 +1180,7 @@ function StockTab({ stockData, setStockData, listings }) {
     <div>
       {showAdd    && <AddStockModal stockData={stockData} onAdd={handleAddStock}  onClose={()=>setShowAdd(false)} />}
       {showImport && <ImportModal   stockData={stockData} onClose={()=>setShowImport(false)} />}
-      {editStock  && <EditStockDrawer stock={editStock} onSave={handleSaveStock} onClose={()=>setEditStock(null)} />}
+      {editStock  && <EditStockDrawer stock={editStock} onSave={handleSaveStock} onDelete={handleDeleteStock} onClose={()=>setEditStock(null)} />}
 
       {/* Summary KPIs */}
       <div className="kg kg4" style={{marginBottom:14}}>
@@ -1288,7 +1297,7 @@ function StockTab({ stockData, setStockData, listings }) {
 /* ═══════════════════════════════════════════════════════════════
    LISTINGS — Edit Drawer (Command 4 — full implementation)
 ═══════════════════════════════════════════════════════════════ */
-function EditListingDrawer({ listing, stockData, onSave, onClose }) {
+function EditListingDrawer({ listing, stockData, onSave, onDelete, onClose }) {
   const [form, setForm] = useState({ ...listing });
   const [dirty, setDirty] = useState(false);
 
@@ -1497,6 +1506,10 @@ function EditListingDrawer({ listing, stockData, onSave, onClose }) {
         {/* Footer */}
         <div className="drw-f">
           <button className="btn btn-o btn-sm" onClick={handleClose}>Cancel</button>
+          <button className="btn btn-del btn-sm" onClick={() => {
+            if (window.confirm(`Delete ${listing.sku} — ${listing.brand} ${listing.type}? This cannot be undone.`))
+              onDelete(listing.sku);
+          }}>🗑 Delete</button>
           <button className="btn btn-p btn-sm" onClick={handleSave}>Save Changes</button>
         </div>
       </div>
@@ -1955,6 +1968,10 @@ function ListingsTab({ listings, setListings, stockData }) {
           stockData={stockData}
           onSave={(updated) => {
             setListings(prev => prev.map(l => l.sku === updated.sku ? updated : l));
+            setEditListing(null);
+          }}
+          onDelete={(sku) => {
+            setListings(prev => prev.filter(l => l.sku !== sku));
             setEditListing(null);
           }}
           onClose={() => setEditListing(null)}
@@ -4175,14 +4192,9 @@ function Dashboard({ listings, stockData, weeklyGoal, setWeeklyGoal, monthlyGoal
 /* ═══════════════════════════════════════════════════════════════
    LIVE DATA — Command 9
 ═══════════════════════════════════════════════════════════════ */
-function LiveData({ listings, stockData }) {
-  const [vinted,    setVinted]    = useState("");
-  const [withdrawn, setWithdrawn] = useState("");
-  const [ebayBal,   setEbayBal]   = useState("");
-  const [ebayPend,  setEbayPend]  = useState("");
-  const [depopPend, setDepopPend] = useState("");
-  const [vintedPend,setVintedPend]= useState("");
-  const [whatnotPend,setWhatnotPend]=useState("");
+function LiveData({ listings, stockData, liveData, setLiveData }) {
+  const set = (k, v) => setLiveData(prev => ({ ...prev, [k]: v }));
+  const { vinted="", withdrawn="", ebayBal="", ebayPend="", depopPend="", vintedPend="", whatnotPend="" } = liveData;
 
   const v=+vinted||0, w=+withdrawn||0, eb=+ebayBal||0;
   const ep=+ebayPend||0, dp=+depopPend||0, vp=+vintedPend||0, wp=+whatnotPend||0;
@@ -4227,23 +4239,23 @@ function LiveData({ listings, stockData }) {
           <div className="lst">💰 Liquid Cash</div>
           <div className="lr">
             <span className="ll">Vinted Balance</span>
-            <input className="ei" placeholder="£0.00" value={vinted} onChange={e=>setVinted(e.target.value)} />
+            <input className="ei" placeholder="£0.00" value={vinted} onChange={e=>set("vinted",e.target.value)} />
           </div>
           <div className="lr">
             <span className="ll">eBay Balance</span>
-            <input className="ei" placeholder="£0.00" value={ebayBal} onChange={e=>setEbayBal(e.target.value)} />
+            <input className="ei" placeholder="£0.00" value={ebayBal} onChange={e=>set("ebayBal",e.target.value)} />
           </div>
           <div className="lr">
             <span className="ll">Withdrawn / Monzo Pot</span>
-            <input className="ei" placeholder="£0.00" value={withdrawn} onChange={e=>setWithdrawn(e.target.value)} />
+            <input className="ei" placeholder="£0.00" value={withdrawn} onChange={e=>set("withdrawn",e.target.value)} />
           </div>
           <div className="lr tot"><span className="ll b">Total Cash</span><span className="lv gn">{fmt(total)}</span></div>
 
           <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".5px",color:"var(--txm)",margin:"11px 0 5px"}}>Pending Payouts</div>
-          <div className="lr"><span className="ll">eBay</span><input className="ei" placeholder="£0.00" value={ebayPend} onChange={e=>setEbayPend(e.target.value)} /></div>
-          <div className="lr"><span className="ll">Depop</span><input className="ei" placeholder="£0.00" value={depopPend} onChange={e=>setDepopPend(e.target.value)} /></div>
-          <div className="lr"><span className="ll">Vinted</span><input className="ei" placeholder="£0.00" value={vintedPend} onChange={e=>setVintedPend(e.target.value)} /></div>
-          <div className="lr"><span className="ll">Whatnot</span><input className="ei" placeholder="£0.00" value={whatnotPend} onChange={e=>setWhatnotPend(e.target.value)} /></div>
+          <div className="lr"><span className="ll">eBay</span><input className="ei" placeholder="£0.00" value={ebayPend} onChange={e=>set("ebayPend",e.target.value)} /></div>
+          <div className="lr"><span className="ll">Depop</span><input className="ei" placeholder="£0.00" value={depopPend} onChange={e=>set("depopPend",e.target.value)} /></div>
+          <div className="lr"><span className="ll">Vinted</span><input className="ei" placeholder="£0.00" value={vintedPend} onChange={e=>set("vintedPend",e.target.value)} /></div>
+          <div className="lr"><span className="ll">Whatnot</span><input className="ei" placeholder="£0.00" value={whatnotPend} onChange={e=>set("whatnotPend",e.target.value)} /></div>
           <div className="lr tot"><span className="ll b">Total + Pending</span><span className="lv gn">{fmt(totalP)}</span></div>
 
           <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".5px",color:"var(--txm)",margin:"11px 0 7px"}}>Cash Breakdown</div>
@@ -4845,6 +4857,10 @@ export default function App() {
   const [stockData,       setStockDataRaw]    = useState(STOCK_INIT);
   const [weeklyGoal,      setWeeklyGoal]      = useState("");
   const [monthlyGoal,     setMonthlyGoal]     = useState("");
+  const [liveData,        setLiveData]        = useState({
+    vinted:"", withdrawn:"", ebayBal:"",
+    ebayPend:"", depopPend:"", vintedPend:"", whatnotPend:"",
+  });
   const [sundayDismissed, setSundayDismissed] = useState(false);
   const [isMobile,        setIsMobile]        = useState(
     () => typeof window !== "undefined" && window.innerWidth <= 768
@@ -4957,6 +4973,7 @@ export default function App() {
           if (data.goals) {
             setWeeklyGoal(data.goals.weekly   || "");
             setMonthlyGoal(data.goals.monthly || "");
+            if (data.goals.liveData) setLiveData(data.goals.liveData);
           }
           setStorageStatus("saved");
         } else {
@@ -4989,6 +5006,7 @@ export default function App() {
           if (payload.new.goals) {
             setWeeklyGoal(payload.new.goals.weekly   || "");
             setMonthlyGoal(payload.new.goals.monthly || "");
+            if (payload.new.goals.liveData) setLiveData(payload.new.goals.liveData);
           }
           setStorageStatus("saved");
         }
@@ -5013,8 +5031,29 @@ export default function App() {
 
   /* Trigger save whenever data changes */
   useEffect(() => {
-    debouncedSave(listings, stockData, { weekly: weeklyGoal, monthly: monthlyGoal });
-  }, [listings, stockData, weeklyGoal, monthlyGoal, debouncedSave]);
+    debouncedSave(listings, stockData, { weekly: weeklyGoal, monthly: monthlyGoal, liveData });
+  }, [listings, stockData, weeklyGoal, monthlyGoal, liveData, debouncedSave]);
+
+  /* ── Manual refresh — re-fetch from Supabase ── */
+  const [refreshing, setRefreshing] = useState(false);
+  const manualRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      const { data, error } = await supabase
+        .from("app_state").select("*").eq("id", 1).single();
+      if (data && !error) {
+        if (data.listings?.length)    setListingsRaw(data.listings);
+        if (data.stock_data?.length)  setStockDataRaw(data.stock_data);
+        if (data.goals) {
+          setWeeklyGoal(data.goals.weekly   || "");
+          setMonthlyGoal(data.goals.monthly || "");
+          if (data.goals.liveData) setLiveData(data.goals.liveData);
+        }
+        setStorageStatus("saved");
+      }
+    } catch (_) {}
+    setRefreshing(false);
+  }, []);
 
   /* Shipping count for nav dot */
   const toShipCount = useMemo(
@@ -5179,6 +5218,9 @@ export default function App() {
               >↪</button>
               <input ref={fileRef} type="file" accept=".json" style={{display:"none"}} onChange={importJSON} />
               <button className="btn btn-o btn-sm tb-import" onClick={()=>fileRef.current?.click()}>↑ Import</button>
+              <button className="btn btn-o btn-sm" onClick={manualRefresh} title="Refresh from database" disabled={refreshing}>
+                {refreshing ? "…" : "↻"}
+              </button>
               <button className="btn btn-o btn-sm" onClick={exportJSON}>↓ Backup</button>
             </div>
           </div>
@@ -5193,7 +5235,7 @@ export default function App() {
             {view==="drafter"     && <ListingDrafter listings={listings} setListings={setListings} />}
             {view==="marksold"    && <QuickMarkSold listings={listings} setListings={setListings} />}
             {view==="shipping"    && <ShippingTab listings={listings} setListings={setListings} />}
-            {view==="livedata"    && <LiveData listings={listings} stockData={stockData} />}
+            {view==="livedata"    && <LiveData listings={listings} stockData={stockData} liveData={liveData} setLiveData={setLiveData} />}
             {view==="calculator"  && <PriceCalculator />}
             {view==="analytics"   && <Analytics listings={listings} stockData={stockData} />}
             {view==="growth"      && <Growth listings={listings} stockData={stockData} />}
