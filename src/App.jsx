@@ -237,29 +237,30 @@ const deriveStock = (stockData, listings) =>
   });
 
 const DEFAULT_COLS = [
-  {id:"sel",      label:"",          visible:true,  locked:true },
-  {id:"photo",    label:"Photo",     visible:true,  locked:false},
-  {id:"bundleSku",label:"Bundle",    visible:true,  locked:false},
-  {id:"name",     label:"Stock Name",visible:true,  locked:false},
-  {id:"brand",    label:"Brand",     visible:true,  locked:false},
-  {id:"type",     label:"Type",      visible:true,  locked:false},
-  {id:"colour",   label:"Colour",    visible:true,  locked:false},
-  {id:"size",     label:"Size",      visible:true,  locked:false},
-  {id:"desc",     label:"Desc",      visible:false, locked:false},
-  {id:"length",   label:"Length",    visible:false, locked:false},
-  {id:"pitToPit", label:"Pit-Pit",   visible:false, locked:false},
-  {id:"listed",   label:"Listed?",   visible:true,  locked:false},
-  {id:"sku",      label:"SKU",       visible:true,  locked:false},
-  {id:"price",    label:"Price",     visible:true,  locked:false},
-  {id:"sold",     label:"Sold?",     visible:true,  locked:false},
-  {id:"soldPrice",label:"Sold £",    visible:true,  locked:false},
-  {id:"profit",   label:"Profit",    visible:true,  locked:false},
-  {id:"notes",    label:"Notes",     visible:false, locked:false},
-  {id:"platform", label:"Platform",  visible:true,  locked:false},
-  {id:"dayListed",label:"Listed On", visible:false, locked:false},
-  {id:"daySold",  label:"Sold On",   visible:false, locked:false},
-  {id:"days",     label:"Days",      visible:true,  locked:false},
-  {id:"shipped",  label:"Shipped?",  visible:true,  locked:false},
+  {id:"sel",       label:"",               visible:true,  locked:true },
+  {id:"photo",     label:"Photo",          visible:false, locked:false},
+  {id:"bundleSku", label:"Bundle SKU",     visible:true,  locked:false},
+  {id:"name",      label:"Stock Name",     visible:true,  locked:false},
+  {id:"brand",     label:"Brand",          visible:true,  locked:false},
+  {id:"type",      label:"Type",           visible:true,  locked:false},
+  {id:"colour",    label:"Colour",         visible:true,  locked:false},
+  {id:"size",      label:"Size",           visible:true,  locked:false},
+  {id:"desc",      label:"Description",    visible:true,  locked:false},
+  {id:"length",    label:"Length",         visible:true,  locked:false},
+  {id:"pitToPit",  label:"Pit to Pit",     visible:true,  locked:false},
+  {id:"listed",    label:"Listed?",        visible:true,  locked:false},
+  {id:"sku",       label:"SKU",            visible:true,  locked:false},
+  {id:"price",     label:"Price £",        visible:true,  locked:false},
+  {id:"sold",      label:"Sold?",          visible:true,  locked:false},
+  {id:"soldPrice", label:"Sold Price £",   visible:true,  locked:false},
+  {id:"profit",    label:"Net Profit £",   visible:true,  locked:false},
+  {id:"notes",     label:"Notes",          visible:true,  locked:false},
+  {id:"platform",  label:"Platform Sold",  visible:true,  locked:false},
+  {id:"platforms", label:"Platforms Listed",visible:true, locked:false},
+  {id:"dayListed", label:"Day Listed",     visible:true,  locked:false},
+  {id:"daySold",   label:"Day Sold",       visible:true,  locked:false},
+  {id:"days",      label:"Days to Sell",   visible:true,  locked:false},
+  {id:"shipped",   label:"Shipped?",       visible:true,  locked:false},
 ];
 
 /* ─── Default column config for Stock tab ─── */
@@ -440,7 +441,7 @@ nav::-webkit-scrollbar-thumb{background:var(--bd);border-radius:2px}
 .tbl td{padding:9px 11px;border-bottom:1px solid var(--bd);color:var(--tx);vertical-align:middle;white-space:nowrap}
 .tbl tr:last-child td{border-bottom:none}
 .tbl tr.clickable:hover td{background:#faf9f6;cursor:pointer}
-.tbl tr.sold-r td{color:var(--txd)}.tbl tr.dim td{opacity:.55}.tbl tr.sel td{background:#fdf4f5}
+.tbl tr.sold-r td{background:#f0faf4;color:var(--txm)}.tbl tr.listed-r td{background:#fff8f0}.tbl tr.dim td{opacity:.55}.tbl tr.sel td{background:#fdf4f5}
 
 /* Forms */
 .fr{margin-bottom:11px}.fr2{display:grid;grid-template-columns:1fr 1fr;gap:10px}.fr3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
@@ -1677,6 +1678,14 @@ function ListingCell({ colId, l, onShipToggle, onSelect, selected }) {
   if (colId === "platform") return l.platform
     ? <span className="badge b-b">{l.platform}</span>
     : <span style={{color:"var(--txd)"}}>—</span>;
+  if (colId === "platforms") {
+    const plats = l.platforms?.length ? l.platforms : l.platform ? [l.platform] : [];
+    return plats.length
+      ? <div style={{display:"flex",flexWrap:"wrap",gap:3}}>
+          {plats.map(p => <span key={p} className="badge b-b" style={{fontSize:9,padding:"1px 5px"}}>{p}</span>)}
+        </div>
+      : <span style={{color:"var(--txd)"}}>—</span>;
+  }
   if (colId === "dayListed") return <span style={{color:"var(--txm)",fontSize:11}}>{l.dayListed || "—"}</span>;
   if (colId === "daySold")   return <span style={{color:"var(--txm)",fontSize:11}}>{l.daySold   || "—"}</span>;
   if (colId === "days")      return (
@@ -2212,8 +2221,9 @@ function ListingsTab({ listings, setListings, stockData }) {
                 const isSel  = selected.has(l.sku);
                 const rowCls = [
                   "clickable",
-                  l.sold ? "sold-r" : "",
-                  isSel ? "sel" : "",
+                  l.sold              ? "sold-r"   : "",
+                  l.listed && !l.sold ? "listed-r"  : "",
+                  isSel               ? "sel"       : "",
                 ].filter(Boolean).join(" ");
 
                 return (
