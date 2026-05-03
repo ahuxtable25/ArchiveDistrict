@@ -9,14 +9,20 @@ const supabase = createClient(
 
 /* ── Save entire app state to Supabase (upsert single row id=1) ── */
 const saveState = async (listings, stockData, goals) => {
-  const { error } = await supabase.from("app_state").upsert({
-    id: 1,
-    listings,
-    stock_data: stockData,
-    goals,
-    updated_at: new Date().toISOString(),
-  }, { onConflict: "id" });
-  return !error;
+  try {
+    const { error } = await supabase.from("app_state").upsert({
+      id: 1,
+      listings,
+      stock_data: stockData,
+      goals,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "id" });
+    if (error) { console.error("Supabase save error:", error.message, error); return false; }
+    return true;
+  } catch (err) {
+    console.error("Supabase save exception:", err);
+    return false;
+  }
 };
 
 
@@ -81,14 +87,15 @@ const getNextBundleSku = (stockData) => {
 const getTag = (name, type, brand, listings) => {
   const items = listings.filter(l=>l.name===name&&l.type===type&&l.brand===brand&&l.listed);
   const sold  = items.filter(l=>l.sold&&l.days!==null);
-  if (!sold.length) return "UNKNOWN";
+  if (!sold.length) return "UNKNOWN";          // 0 sold — no data
+  if (sold.length < 3) return "NEW";           // 1–2 sold — too early to classify
   const t = items.length;
   const p = (n)=>t?Math.round(sold.filter(l=>l.days<=n).length/t*100):0;
-  const [p7,p14,p30] = [p(7),p(14),p(30)];
+  const [p7,p14,p30,p42] = [p(7),p(14),p(30),p(42)];
   if (p7>=60||p14>=80) return "FAST";
-  if (p14>=50&&p30<=80) return "MEDIUM";
-  if (p30<50&&sold.length>0) return "SLOW";
-  return "DEAD";
+  if (p14>=50) return "MEDIUM";
+  if (p42===0&&sold.length>0) return "DEAD";  // sold some but none within 42d
+  return "SLOW";
 };
 
 const deriveStock = (stockData, listings) =>
@@ -173,7 +180,7 @@ const STOCK_COLS = [
    SHARED UI PRIMITIVES
 ═══════════════════════════════════════════════════════════════ */
 function MovTag({tag}) {
-  const map={FAST:"mt mt-f",MEDIUM:"mt mt-m",SLOW:"mt mt-s",UNKNOWN:"mt mt-u",DEAD:"mt mt-d"};
+  const map={FAST:"mt mt-f",MEDIUM:"mt mt-m",SLOW:"mt mt-s",UNKNOWN:"mt mt-u",DEAD:"mt mt-d",NEW:"mt mt-n"};
   return <span className={map[tag]||"mt mt-u"}>{tag}</span>;
 }
 
@@ -296,7 +303,7 @@ nav::-webkit-scrollbar-thumb{background:var(--bd);border-radius:2px}
 /* Movement tags */
 .mt{display:inline-block;padding:2px 8px;font-size:9.5px;font-weight:900;border-radius:3px;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap}
 .mt-f{background:#daeee2;color:#155c2a}.mt-m{background:var(--aml);color:#7a4e0e}
-.mt-s{background:var(--acl);color:var(--ac)}.mt-u{background:var(--sf2);color:var(--txd)}.mt-d{background:#f0e4e6;color:#7a1020}
+.mt-s{background:var(--acl);color:var(--ac)}.mt-u{background:var(--sf2);color:var(--txd)}.mt-d{background:#f0e4e6;color:#7a1020}.mt-n{background:#e8eeff;color:#2a4a9a}
 
 /* KPI cards */
 .kg{display:grid;gap:10px;margin-bottom:16px}
@@ -2534,10 +2541,11 @@ function MovementTracker({ listings }) {
       <div style={{marginTop:8,padding:"8px 12px",background:"var(--sf2)",border:"1px solid var(--bd)",borderRadius:"var(--r)",fontSize:11,color:"var(--txm)"}}>
         <strong style={{color:"var(--tx)"}}>Tag rules:</strong>&nbsp;
         <span style={{color:"#155c2a",fontWeight:700}}>FAST</span> = 60%+ in 7d or 80%+ in 14d &nbsp;·&nbsp;
-        <span style={{color:"#7a4e0e",fontWeight:700}}>MEDIUM</span> = 50–80% in 14–30d &nbsp;·&nbsp;
+        <span style={{color:"#7a4e0e",fontWeight:700}}>MEDIUM</span> = 50%+ in 14d &nbsp;·&nbsp;
         <span style={{color:"var(--ac)",fontWeight:700}}>SLOW</span> = &lt;50% by 30d &nbsp;·&nbsp;
-        <strong>UNKNOWN</strong> = none sold yet &nbsp;·&nbsp;
-        <span style={{color:"#7a1020",fontWeight:700}}>DEAD</span> = nothing by 42d
+        <span style={{color:"#7a1020",fontWeight:700}}>DEAD</span> = sold some but none within 42d &nbsp;·&nbsp;
+        <span style={{color:"#2a4a9a",fontWeight:700}}>NEW</span> = 1–2 sold, too early to classify &nbsp;·&nbsp;
+        <strong>UNKNOWN</strong> = 0 sold yet
       </div>
     </div>
   );
@@ -2707,7 +2715,7 @@ function ListingDataTab({ listings }) {
       <div className="two-col" style={{marginBottom:4}}>
         <div className="sc">
           <div className="st" style={{marginBottom:8}}>Active by Mover Tag</div>
-          {[["FAST","mt-f"],["MEDIUM","mt-m"],["SLOW","mt-s"],["UNKNOWN","mt-u"],["DEAD","mt-d"]].map(([tag,cls])=>(
+          {[["FAST","mt-f"],["MEDIUM","mt-m"],["SLOW","mt-s"],["NEW","mt-n"],["UNKNOWN","mt-u"],["DEAD","mt-d"]].map(([tag,cls])=>(
             <div key={tag} className="sr">
               <span className={`mt ${cls}`}>{tag}</span>
               <span className="srv">{byTag(active,tag)}</span>
@@ -4925,23 +4933,41 @@ export default function App() {
   /* ── Load from Supabase on mount ── */
   useEffect(() => {
     (async () => {
+      // First check if Supabase env vars are actually set
+      const sbUrl = import.meta.env.VITE_SUPABASE_URL;
+      const sbKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+      if (!sbUrl || !sbKey || sbUrl === "undefined" || sbKey === "undefined") {
+        console.error("Supabase env vars missing:", { sbUrl: !!sbUrl, sbKey: !!sbKey });
+        setStorageStatus("error");
+        hasLoaded.current = true;
+        return;
+      }
       try {
         const { data, error } = await supabase
           .from("app_state")
           .select("*")
           .eq("id", 1)
           .single();
-        if (data && !error) {
+        if (error) {
+          console.error("Supabase load error:", error);
+          setStorageStatus("error");
+        } else if (data) {
           if (data.listings?.length)    setListingsRaw(data.listings);
           if (data.stock_data?.length)  setStockDataRaw(data.stock_data);
           if (data.goals) {
             setWeeklyGoal(data.goals.weekly   || "");
             setMonthlyGoal(data.goals.monthly || "");
           }
+          setStorageStatus("saved");
+        } else {
+          // Table exists but no row yet — first time setup
+          setStorageStatus("saved");
         }
-      } catch (_) {}
+      } catch (err) {
+        console.error("Supabase connection failed:", err);
+        setStorageStatus("error");
+      }
       hasLoaded.current = true;
-      setStorageStatus("saved");
     })();
   }, []);
 
@@ -5019,14 +5045,22 @@ export default function App() {
         const d = JSON.parse(ev.target.result);
         if (d.listings) setListingsRaw(d.listings);
         if (d.stock)    setStockDataRaw(d.stock);
-        // Save immediately so all devices get the imported data
-        await saveState(
+        setStorageStatus("loading");
+        const ok = await saveState(
           d.listings || listings,
           d.stock    || stockData,
           { weekly: weeklyGoal, monthly: monthlyGoal }
         );
-        setStorageStatus("saved");
-      } catch (_) { alert("Invalid backup file."); }
+        if (ok) {
+          setStorageStatus("saved");
+        } else {
+          setStorageStatus("error");
+          alert("Data loaded into view but FAILED to save to database. Check your Supabase connection.");
+        }
+      } catch (err) {
+        console.error("Import error:", err);
+        alert("Invalid backup file or save failed: " + err.message);
+      }
     };
     reader.readAsText(file);
     e.target.value = "";
