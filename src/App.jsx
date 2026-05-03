@@ -52,134 +52,12 @@ const WEBSITES = ["Fleek","VWS","Depop","eBay","Vinted","Other"];
 /* ═══════════════════════════════════════════════════════════════
    STOCK DATA — 8 bundles
 ═══════════════════════════════════════════════════════════════ */
-const STOCK_INIT = [
-  { bundleSku:"BDL-001", name:"Ralph Lauren Harrington Jackets",   website:"Fleek", seller:"Retro-Collective",         datePurchased:"2024-11-01", dateArrived:"2024-11-05", contentDetails:"Mixed colours S-XL",   received:26, sellable:26, costPer:17.80, imported:true,  restock:true  },
-  { bundleSku:"BDL-002", name:"Mechanic/Guard Workwear Jackets",   website:"VWS",   seller:"Vintage Wholesale Supply", datePurchased:"2024-11-15", dateArrived:"2024-11-20", contentDetails:"Mixed workwear M-XL",  received:14, sellable:14, costPer:7.21,  imported:true,  restock:true  },
-  { bundleSku:"BDL-003", name:"Majestic Style Jerseys",            website:"VWS",   seller:"Vintage Wholesale Supply", datePurchased:"2024-12-01", dateArrived:"2024-12-06", contentDetails:"Sports jerseys S-XXL", received:40, sellable:38, costPer:3.95,  imported:true,  restock:false },
-  { bundleSku:"BDL-004", name:"Carhartt Detroit Jackets",          website:"Fleek", seller:"Vintage Voyage",           datePurchased:"2025-01-05", dateArrived:"2025-01-09", contentDetails:"Detroit jackets M-XL", received:10, sellable:10, costPer:17.50, imported:true,  restock:false },
-  { bundleSku:"BDL-005", name:"Ralph Lauren Polos",                website:"Fleek", seller:"Old Soul Vintage",         datePurchased:"2025-01-10", dateArrived:"2025-01-14", contentDetails:"RL Polos M-XL",        received:7,  sellable:7,  costPer:14.86, imported:true,  restock:false },
-  { bundleSku:"BDL-006", name:"Branded Track Jackets",             website:"Fleek", seller:"Thrift Kings",             datePurchased:"2025-02-01", dateArrived:"2025-02-05", contentDetails:"Nike, Adidas, Kappa",  received:10, sellable:10, costPer:11.01, imported:true,  restock:false },
-  { bundleSku:"BDL-007", name:"Carhartt Detroit Denim Jacket",     website:"Fleek", seller:"Vintage Voyage",           datePurchased:"2025-02-10", dateArrived:"2025-02-14", contentDetails:"Denim Detroit M-XL",   received:10, sellable:10, costPer:13.26, imported:false, restock:false },
-  { bundleSku:"BDL-008", name:"Stussy Shorts",                     website:"Fleek", seller:"Vintage Voyage",           datePurchased:"2025-02-10", dateArrived:"2025-02-14", contentDetails:"Stussy shorts S-L",    received:13, sellable:13, costPer:10.20, imported:false, restock:false },
-];
+const STOCK_INIT = [];
+
+/* ─── Listings seed data — empty, real data loaded from Supabase ─── */
+const LISTINGS_INIT = [];
 
 /* ═══════════════════════════════════════════════════════════════
-   LISTINGS DATA — 92 items via mkL factory
-═══════════════════════════════════════════════════════════════ */
-const mkL = (
-  bundleSku,name,brand,type,colour,size,desc,
-  length,pitToPit,listed,sku,price,
-  sold,soldPrice,profit,notes,platform,
-  dayListed,daySold,days,shipped,photoUrl=""
-) => ({
-  bundleSku,name,brand,type,colour,size,desc,
-  length,pitToPit,listed,sku,price,
-  sold,soldPrice,profit,notes,platform,
-  dayListed,daySold,days,shipped,
-  shippedDate: shipped ? dayListed : null,
-  photoUrl,
-});
-
-const LISTINGS_INIT = [
-  // BDL-001 Ralph Lauren Harrington Jackets
-  mkL("BDL-001","Ralph Lauren Harrington Jackets","Ralph Lauren","Jacket","Black","M","Classic harrington, excellent condition","68cm","52cm",true,"A001",17,true,31.66,14.66,"","Depop","2024-11-06","2024-11-06",0,true),
-  mkL("BDL-001","Ralph Lauren Harrington Jackets","Ralph Lauren","Jacket","Black","S","Great condition, minor fading","65cm","49cm",true,"A002",17,true,39.99,22.99,"Quick sale","Depop","2024-11-06","2024-11-07",1,true),
-  mkL("BDL-001","Ralph Lauren Harrington Jackets","Ralph Lauren","Jacket","Blue","L","Excellent condition","70cm","54cm",true,"A003",17,true,32,15,"","eBay","2024-11-06","2024-11-08",2,true),
-  mkL("BDL-001","Ralph Lauren Harrington Jackets","Ralph Lauren","Jacket","Navy","M","Good condition","68cm","52cm",true,"A004",17,true,30,13,"","Depop","2024-11-06","2024-11-06",0,true),
-  mkL("BDL-001","Ralph Lauren Harrington Jackets","Ralph Lauren","Jacket","Brown","L","Excellent condition","70cm","55cm",true,"A005",17,true,31,14,"","Vinted","2024-11-07","2024-11-09",2,true),
-  mkL("BDL-001","Ralph Lauren Harrington Jackets","Ralph Lauren","Jacket","Olive","M","Good condition","67cm","51cm",true,"A006",17,true,29,12,"","Vinted","2024-11-07","2024-11-10",3,true),
-  mkL("BDL-001","Ralph Lauren Harrington Jackets","Ralph Lauren","Jacket","Red","L","Excellent condition","70cm","54cm",true,"A007",17,true,32,15,"","Depop","2024-11-07","2024-11-08",1,true),
-  mkL("BDL-001","Ralph Lauren Harrington Jackets","Ralph Lauren","Jacket","Cream","M","Very good condition","68cm","52cm",true,"A008",17,true,35,18,"","Depop","2024-11-07","2024-11-07",0,true),
-  mkL("BDL-001","Ralph Lauren Harrington Jackets","Ralph Lauren","Jacket","Grey","L","Good condition","70cm","54cm",true,"A009",17,true,30,13,"","eBay","2024-11-08","2024-11-09",1,true),
-  mkL("BDL-001","Ralph Lauren Harrington Jackets","Ralph Lauren","Jacket","Black","XL","Excellent condition, large","73cm","57cm",true,"A010",17,true,28,11,"","Depop","2024-11-08","2024-11-13",5,true),
-  mkL("BDL-001","Ralph Lauren Harrington Jackets","Ralph Lauren","Jacket","Blue","M","Excellent condition","68cm","52cm",true,"A011",17,true,32,15,"","Depop","2024-11-08","2024-11-10",2,true),
-  mkL("BDL-001","Ralph Lauren Harrington Jackets","Ralph Lauren","Jacket","Burgundy","S","Great condition","65cm","49cm",true,"A012",17,true,34,17,"","Depop","2024-11-09","2024-11-09",0,true),
-  mkL("BDL-001","Ralph Lauren Harrington Jackets","Ralph Lauren","Jacket","White","M","Very good condition","68cm","52cm",true,"A013",17,true,31,14,"","Vinted","2024-11-09","2024-11-12",3,false),
-  mkL("BDL-001","Ralph Lauren Harrington Jackets","Ralph Lauren","Jacket","Navy","L","Excellent condition","70cm","54cm",true,"A014",17,true,32,15,"","Depop","2024-11-09","2024-11-11",2,false),
-  mkL("BDL-001","Ralph Lauren Harrington Jackets","Ralph Lauren","Jacket","Black","M","Small pull on hem","68cm","52cm",true,"A015",17,true,29.5,12.5,"Pull noted","eBay","2024-11-10","2024-11-11",1,false),
-  mkL("BDL-001","Ralph Lauren Harrington Jackets","Ralph Lauren","Jacket","Tan","L","Excellent condition","70cm","54cm",true,"A016",17,true,33,16,"","Depop","2024-11-10","2024-11-11",1,true),
-  mkL("BDL-001","Ralph Lauren Harrington Jackets","Ralph Lauren","Jacket","Green","M","Good condition","68cm","52cm",true,"A017",17,true,30,13,"","Vinted","2024-11-10","2024-11-14",4,true),
-  mkL("BDL-001","Ralph Lauren Harrington Jackets","Ralph Lauren","Jacket","Grey","M","Very good condition","68cm","51cm",true,"A018",17,true,31,14,"","Depop","2024-11-11","2024-11-11",0,true),
-  mkL("BDL-001","Ralph Lauren Harrington Jackets","Ralph Lauren","Jacket","Black","L","Excellent condition","70cm","54cm",true,"A019",17,true,31.66,14.66,"","Depop","2024-11-11","2024-11-15",4,true),
-  mkL("BDL-001","Ralph Lauren Harrington Jackets","Ralph Lauren","Jacket","Blue","S","Good condition","65cm","49cm",true,"A020",17,false,null,null,"",null,"2024-11-12",null,null,false),
-  mkL("BDL-001","Ralph Lauren Harrington Jackets","Ralph Lauren","Jacket","Olive","L","Good condition","70cm","54cm",true,"A021",17,false,null,null,"",null,"2024-11-12",null,null,false),
-  mkL("BDL-001","Ralph Lauren Harrington Jackets","Ralph Lauren","Jacket","Brown","M","Excellent condition","68cm","52cm",true,"A022",17,false,null,null,"",null,"2024-11-12",null,null,false),
-  mkL("BDL-001","Ralph Lauren Harrington Jackets","Ralph Lauren","Jacket","Red","M","Good condition","68cm","52cm",false,"A023",17,false,null,null,"",null,null,null,null,false),
-  mkL("BDL-001","Ralph Lauren Harrington Jackets","Ralph Lauren","Jacket","Cream","L","Very good condition","70cm","55cm",false,"A024",17,false,null,null,"",null,null,null,null,false),
-  mkL("BDL-001","Ralph Lauren Harrington Jackets","Ralph Lauren","Jacket","Navy","S","Good condition","65cm","49cm",false,"A025",17,false,null,null,"",null,null,null,null,false),
-  mkL("BDL-001","Ralph Lauren Harrington Jackets","Ralph Lauren","Jacket","White","L","Good condition","70cm","54cm",false,"A026",17,false,null,null,"",null,null,null,null,false),
-  // BDL-002 Workwear Jackets
-  mkL("BDL-002","Mechanic/Guard Workwear Jackets","Unbranded","Jacket","Blue","M","Mechanic style, classic workwear","71cm","55cm",true,"A027",8.42,true,22,13.58,"","Depop","2024-11-21","2024-11-27",6,true),
-  mkL("BDL-002","Mechanic/Guard Workwear Jackets","Unbranded","Jacket","Navy","L","Guard style, good condition","73cm","57cm",true,"A028",8.42,true,21,12.58,"","Vinted","2024-11-21","2024-11-28",7,true),
-  mkL("BDL-002","Mechanic/Guard Workwear Jackets","Unbranded","Jacket","Grey","M","Good condition, some wear","70cm","54cm",true,"A029",8.42,true,20,11.58,"","Depop","2024-11-21","2024-11-30",9,true),
-  mkL("BDL-002","Mechanic/Guard Workwear Jackets","Unbranded","Jacket","Blue","L","Classic mechanic jacket","73cm","57cm",true,"A030",8.42,true,22.5,14.08,"","Depop","2024-11-22","2024-11-28",6,true),
-  mkL("BDL-002","Mechanic/Guard Workwear Jackets","Unbranded","Jacket","Tan","M","Good condition","70cm","54cm",true,"A031",8.42,true,21,12.58,"","eBay","2024-11-22","2024-12-01",9,true),
-  mkL("BDL-002","Mechanic/Guard Workwear Jackets","Unbranded","Jacket","Green","L","Military style, good condition","73cm","57cm",true,"A032",8.42,true,23,14.58,"","Depop","2024-11-23","2024-11-30",7,true),
-  mkL("BDL-002","Mechanic/Guard Workwear Jackets","Unbranded","Jacket","Navy","M","Guard style, minor fading","70cm","53cm",true,"A033",8.42,true,20,11.58,"Fading noted","Vinted","2024-11-23","2024-12-03",10,false),
-  mkL("BDL-002","Mechanic/Guard Workwear Jackets","Unbranded","Jacket","Grey","L","Good condition","73cm","57cm",true,"A034",8.42,true,21.5,13.08,"","Depop","2024-11-24","2024-12-02",8,false),
-  mkL("BDL-002","Mechanic/Guard Workwear Jackets","Unbranded","Jacket","Black","M","Excellent condition","70cm","54cm",true,"A035",8.42,true,23,14.58,"","Depop","2024-11-24","2024-11-30",6,true),
-  mkL("BDL-002","Mechanic/Guard Workwear Jackets","Unbranded","Jacket","Brown","L","Good condition","73cm","57cm",true,"A036",8.42,true,22,13.58,"","Vinted","2024-11-24","2024-12-04",10,true),
-  mkL("BDL-002","Mechanic/Guard Workwear Jackets","Unbranded","Jacket","Blue","XL","Good condition, large","75cm","59cm",true,"A037",8.42,false,null,null,"",null,"2024-11-25",null,null,false),
-  mkL("BDL-002","Mechanic/Guard Workwear Jackets","Unbranded","Jacket","Blue","M","Good condition","70cm","54cm",true,"A038",8.42,false,null,null,"",null,"2024-11-25",null,null,false),
-  mkL("BDL-002","Mechanic/Guard Workwear Jackets","Unbranded","Jacket","Blue","L","Good condition","73cm","57cm",true,"A039",8.42,false,null,null,"",null,"2024-11-26",null,null,false),
-  mkL("BDL-002","Mechanic/Guard Workwear Jackets","Unbranded","Jacket","Navy","XL","Good condition","75cm","59cm",false,"A040",8.42,false,null,null,"",null,null,null,null,false),
-  // BDL-003 Majestic Jerseys
-  mkL("BDL-003","Majestic Style Jerseys","Majestic","Jersey Top","Black","L","Sports jersey, excellent","72cm","56cm",true,"A041",3.95,true,17,13.05,"","Depop","2024-12-07","2024-12-21",14,true),
-  mkL("BDL-003","Majestic Style Jerseys","Nike","Jersey Top","Black","L","Nike style jersey","71cm","55cm",true,"A042",3.95,true,15.2,11.25,"","Vinted","2024-12-07","2024-12-29",22,true),
-  mkL("BDL-003","Majestic Style Jerseys","Unbranded","Jersey Top","Blue","M","Basketball jersey style","70cm","54cm",true,"A043",3.95,true,14,10.05,"","Depop","2024-12-08","2024-12-27",19,true),
-  mkL("BDL-003","Majestic Style Jerseys","Majestic","Jersey Top","White","XL","Classic jersey, good condition","74cm","58cm",true,"A044",3.95,true,16,12.05,"","Vinted","2024-12-08","2025-01-04",27,true),
-  mkL("BDL-003","Majestic Style Jerseys","Unbranded","Jersey Top","Red","L","Minor print wear","72cm","56cm",true,"A045",3.95,true,13.5,9.55,"Print wear noted","Depop","2024-12-09","2024-12-30",21,true),
-  mkL("BDL-003","Majestic Style Jerseys","Majestic","Jersey Top","Black","XL","Good condition","74cm","58cm",true,"A046",3.95,true,17,13.05,"","Depop","2024-12-09","2024-12-23",14,false),
-  mkL("BDL-003","Majestic Style Jerseys","Unbranded","Jersey Top","Green","M","Good condition","70cm","54cm",true,"A047",3.95,true,14.5,10.55,"","Vinted","2024-12-10","2025-01-02",23,false),
-  mkL("BDL-003","Majestic Style Jerseys","Nike","Jersey Top","White","L","Excellent condition","72cm","56cm",true,"A048",3.95,true,16,12.05,"","Depop","2024-12-10","2025-01-01",22,true),
-  mkL("BDL-003","Majestic Style Jerseys","Majestic","Jersey Top","Yellow","L","NBA style jersey","72cm","56cm",true,"A049",3.95,true,15,11.05,"","Depop","2024-12-11","2025-01-03",23,true),
-  mkL("BDL-003","Majestic Style Jerseys","Unbranded","Jersey Top","Purple","M","Good condition","70cm","54cm",true,"A050",3.95,true,13,9.05,"","Vinted","2024-12-11","2025-01-06",26,true),
-  mkL("BDL-003","Majestic Style Jerseys","Majestic","Jersey Top","Black","XXL","Good condition","76cm","60cm",true,"A051",3.95,true,14,10.05,"","Depop","2024-12-12","2025-01-05",24,true),
-  mkL("BDL-003","Majestic Style Jerseys","Nike","Jersey Top","Red","S","Great condition","68cm","50cm",true,"A052",3.95,true,15.5,11.55,"","Depop","2024-12-12","2025-01-10",29,true),
-  mkL("BDL-003","Majestic Style Jerseys","Unbranded","Jersey Top","Yellow","S","Good condition","68cm","50cm",true,"A053",3.95,false,null,null,"",null,"2024-12-13",null,null,false),
-  mkL("BDL-003","Majestic Style Jerseys","Majestic","Jersey Top","Blue","L","Good condition","72cm","56cm",true,"A054",3.95,false,null,null,"",null,"2024-12-13",null,null,false),
-  mkL("BDL-003","Majestic Style Jerseys","Nike","Jersey Top","Black","M","Excellent condition","70cm","54cm",true,"A055",3.95,false,null,null,"",null,"2024-12-14",null,null,false),
-  mkL("BDL-003","Majestic Style Jerseys","Unbranded","Jersey Top","White","M","Good condition","70cm","54cm",true,"A056",3.95,false,null,null,"",null,"2024-12-14",null,null,false),
-  mkL("BDL-003","Majestic Style Jerseys","Majestic","Jersey Top","Green","L","Good condition","72cm","56cm",true,"A057",3.95,false,null,null,"",null,"2024-12-15",null,null,false),
-  mkL("BDL-003","Majestic Style Jerseys","Unbranded","Jersey Top","Grey","L","Good condition","72cm","56cm",false,"A058",3.95,false,null,null,"",null,null,null,null,false),
-  mkL("BDL-003","Majestic Style Jerseys","Nike","Jersey Top","Navy","XL","Good condition","74cm","58cm",false,"A059",3.95,false,null,null,"",null,null,null,null,false),
-  mkL("BDL-003","Majestic Style Jerseys","Majestic","Jersey Top","Black","S","Good condition","68cm","50cm",false,"A060",3.95,false,null,null,"",null,null,null,null,false),
-  mkL("BDL-003","Majestic Style Jerseys","Unbranded","Jersey Top","Red","M","Good condition","70cm","54cm",false,"A061",3.95,false,null,null,"",null,null,null,null,false),
-  mkL("BDL-003","Majestic Style Jerseys","Nike","Jersey Top","Green","S","Good condition","68cm","50cm",false,"A062",3.95,false,null,null,"",null,null,null,null,false),
-  mkL("BDL-003","Majestic Style Jerseys","Majestic","Jersey Top","Blue","M","Good condition","70cm","54cm",false,"A063",3.95,false,null,null,"",null,null,null,null,false),
-  mkL("BDL-003","Majestic Style Jerseys","Unbranded","Jersey Top","White","XL","Good condition","74cm","58cm",false,"A064",3.95,false,null,null,"",null,null,null,null,false),
-  mkL("BDL-003","Majestic Style Jerseys","Nike","Jersey Top","Black","XXL","Good condition","76cm","60cm",false,"A065",3.95,false,null,null,"",null,null,null,null,false),
-  // BDL-004 Carhartt Detroit Jackets
-  mkL("BDL-004","Carhartt Detroit Jackets","Carhartt","Jacket","Brown","L","Classic Detroit, great condition","72cm","57cm",true,"A066",17.5,true,32,14.5,"","Depop","2025-01-10","2025-01-12",2,true),
-  mkL("BDL-004","Carhartt Detroit Jackets","Carhartt","Jacket","Grey","M","Good condition","69cm","53cm",true,"A067",17.5,true,32,14.5,"","Vinted","2025-01-10","2025-01-10",0,true),
-  mkL("BDL-004","Carhartt Detroit Jackets","Carhartt","Jacket","Black","M","Excellent condition","69cm","53cm",true,"A068",17.5,true,33,15.5,"","Depop","2025-01-10","2025-01-18",8,false),
-  mkL("BDL-004","Carhartt Detroit Jackets","Carhartt","Jacket","Navy","L","Good condition","72cm","57cm",true,"A069",17.5,false,null,null,"",null,"2025-01-11",null,null,false),
-  mkL("BDL-004","Carhartt Detroit Jackets","Carhartt","Jacket","Tan","M","Good condition","69cm","53cm",true,"A070",17.5,false,null,null,"",null,"2025-01-11",null,null,false),
-  mkL("BDL-004","Carhartt Detroit Jackets","Carhartt","Jacket","Brown","M","Good condition","69cm","53cm",true,"A071",17.5,false,null,null,"",null,"2025-01-12",null,null,false),
-  mkL("BDL-004","Carhartt Detroit Jackets","Carhartt","Jacket","Black","L","Good condition","72cm","57cm",false,"A072",17.5,false,null,null,"",null,null,null,null,false),
-  mkL("BDL-004","Carhartt Detroit Jackets","Carhartt","Jacket","Grey","L","Good condition","72cm","57cm",false,"A073",17.5,false,null,null,"",null,null,null,null,false),
-  mkL("BDL-004","Carhartt Detroit Jackets","Carhartt","Jacket","Tan","L","Good condition","72cm","57cm",false,"A074",17.5,false,null,null,"",null,null,null,null,false),
-  mkL("BDL-004","Carhartt Detroit Jackets","Carhartt","Jacket","Navy","M","Good condition","69cm","53cm",false,"A075",17.5,false,null,null,"",null,null,null,null,false),
-  // BDL-005 Ralph Lauren Polos
-  mkL("BDL-005","Ralph Lauren Polos","Ralph Lauren","Polo","White","M","Classic RL polo, excellent","71cm","54cm",true,"A076",14.86,true,25.83,10.97,"","Depop","2025-01-15","2025-01-15",0,true),
-  mkL("BDL-005","Ralph Lauren Polos","Ralph Lauren","Polo","Navy","L","Excellent condition","73cm","56cm",true,"A077",14.86,true,28,13.14,"","Depop","2025-01-15","2025-01-17",2,false),
-  mkL("BDL-005","Ralph Lauren Polos","Ralph Lauren","Polo","Blue","M","Good condition","71cm","54cm",true,"A078",14.86,true,26,11.14,"","Vinted","2025-01-16","2025-01-20",4,false),
-  mkL("BDL-005","Ralph Lauren Polos","Ralph Lauren","Polo","Black","XL","Good condition","75cm","58cm",true,"A079",14.86,true,25,10.14,"","Depop","2025-01-16","2025-01-20",4,true),
-  mkL("BDL-005","Ralph Lauren Polos","Ralph Lauren","Polo","White","L","Good condition","73cm","56cm",true,"A080",14.86,false,null,null,"",null,"2025-01-17",null,null,false),
-  mkL("BDL-005","Ralph Lauren Polos","Ralph Lauren","Polo","Green","M","Good condition","71cm","54cm",false,"A081",14.86,false,null,null,"",null,null,null,null,false),
-  mkL("BDL-005","Ralph Lauren Polos","Ralph Lauren","Polo","Red","M","Good condition","71cm","54cm",false,"A082",14.86,false,null,null,"",null,null,null,null,false),
-  // BDL-006 Branded Track Jackets
-  mkL("BDL-006","Branded Track Jackets","Nike","Track Jacket","Black","M","Good condition","68cm","52cm",true,"A083",11.01,false,null,null,"",null,"2025-02-06",null,null,false),
-  mkL("BDL-006","Branded Track Jackets","Adidas","Track Jacket","Navy","L","Adidas 3-stripe","70cm","54cm",true,"A084",11.01,false,null,null,"",null,"2025-02-06",null,null,false),
-  mkL("BDL-006","Branded Track Jackets","Kappa","Track Jacket","Red","M","Kappa banda","68cm","52cm",true,"A085",11.01,false,null,null,"",null,"2025-02-07",null,null,false),
-  mkL("BDL-006","Branded Track Jackets","Nike","Track Jacket","Blue","L","Good condition","70cm","54cm",true,"A086",11.01,false,null,null,"",null,"2025-02-07",null,null,false),
-  mkL("BDL-006","Branded Track Jackets","Adidas","Track Jacket","Black","M","Good condition","68cm","52cm",false,"A087",11.01,false,null,null,"",null,null,null,null,false),
-  mkL("BDL-006","Branded Track Jackets","Kappa","Track Jacket","White","L","Good condition","70cm","54cm",false,"A088",11.01,false,null,null,"",null,null,null,null,false),
-  mkL("BDL-006","Branded Track Jackets","Nike","Track Jacket","Grey","M","Good condition","68cm","52cm",false,"A089",11.01,false,null,null,"",null,null,null,null,false),
-  mkL("BDL-006","Branded Track Jackets","Adidas","Track Jacket","Red","L","Good condition","70cm","54cm",false,"A090",11.01,false,null,null,"",null,null,null,null,false),
-  mkL("BDL-006","Branded Track Jackets","Kappa","Track Jacket","Black","XL","Good condition","72cm","56cm",false,"A091",11.01,false,null,null,"",null,null,null,null,false),
-  mkL("BDL-006","Branded Track Jackets","Nike","Track Jacket","Navy","S","Good condition","66cm","50cm",false,"A092",11.01,false,null,null,"",null,null,null,null,false),
-];
 
 /* ═══════════════════════════════════════════════════════════════
    HELPER FUNCTIONS
@@ -188,11 +66,11 @@ const fmt = (n) => `£${(+(n)||0).toFixed(2)}`;
 const copyText = (t) => { try { navigator.clipboard.writeText(t); } catch (_) {} };
 
 const getNextSku = (listings) => {
-  const skus = listings.map(l=>l.sku).filter(s=>/^[A-Z]\d{3}$/.test(s));
-  if (!skus.length) return "A001";
-  const nums = skus.map(s=>(s.charCodeAt(0)-65)*999+parseInt(s.slice(1)));
+  const skus = listings.map(l=>l.sku).filter(s=>/^[A-Z]\d+$/.test(s));
+  if (!skus.length) return "A173"; // starts after last real SKU
+  const nums = skus.map(s => parseInt(s.slice(1)));
   const max  = Math.max(...nums);
-  return String.fromCharCode(65+Math.floor(max/999))+String((max%999)+1).padStart(3,"0");
+  return `A${String(max + 1).padStart(3,"0")}`;
 };
 
 const getNextBundleSku = (stockData) => {
@@ -4187,11 +4065,12 @@ function Dashboard({ listings, stockData, weeklyGoal, setWeeklyGoal, monthlyGoal
   const soldWk  = listings.filter(l => l.sold && l.daySold && l.daySold >= WEEK_START);
   const soldMo  = listings.filter(l => l.sold && l.daySold && l.daySold >= MONTH_START);
 
-  const totalRevenue = sold.reduce((a,l) => a+(l.soldPrice||0), 0);
-  const totalProfit  = sold.reduce((a,l) => a+(l.profit||0), 0);
-  const sellThruPct  = (sold.length+active.length) > 0
-    ? Math.round(sold.length/(sold.length+active.length)*100) : 0;
-  const avgProfit    = sold.length ? totalProfit/sold.length : 0;
+  const totalRevenue  = sold.reduce((a,l) => a+(l.soldPrice||0), 0);
+  const totalStockSpend = stockData.reduce((a,s) => a+(s.totalCost||s.sellable*s.costPer||0), 0);
+  const totalProfit   = totalRevenue - totalStockSpend; // true business P&L
+  // Sell-through = active / sold (matches spreadsheet)
+  const sellThruPct   = sold.length ? Math.round(active.length/sold.length*100) : 0;
+  const avgProfit     = sold.length ? totalProfit/sold.length : 0;
 
   const wkProfit = soldWk.reduce((a,l) => a+(l.profit||0), 0);
   const moProfit = soldMo.reduce((a,l) => a+(l.profit||0), 0);
@@ -4306,13 +4185,15 @@ function LiveData({ listings, stockData }) {
   const active  = listings.filter(l => l.listed && !l.sold);
   const inventory = listings.filter(l => !l.sold);
 
-  const totalSpent   = stockData.reduce((a,s) => a+s.sellable*s.costPer, 0);
+  // Use actual money paid for stock (totalCost field), including undelivered bundles
+  const totalSpent   = stockData.reduce((a,s) => a+(s.totalCost||s.sellable*s.costPer||0), 0);
   const totalProc    = sold.reduce((a,l) => a+(l.soldPrice||0), 0);
-  const totalProfit  = sold.reduce((a,l) => a+(l.profit||0), 0);
+  // True business P&L: proceeds minus all stock spend (including unsold/undelivered)
   const net          = totalProc - totalSpent;
   const avgSP        = sold.length ? totalProc/sold.length : 0;
-  const avgPr        = sold.length ? totalProfit/sold.length : 0;
-  const st           = (sold.length+active.length) ? Math.round(sold.length/(sold.length+active.length)*100) : 0;
+  const avgPr        = sold.length ? sold.reduce((a,l)=>a+(l.profit||0),0)/sold.length : 0;
+  // Sell-through = active listings / total sold (matches spreadsheet formula)
+  const st           = sold.length ? Math.round(active.length/sold.length*100) : 0;
 
   const soldWk  = listings.filter(l => l.sold && l.daySold && l.daySold >= WEEK_START);
   const soldMo  = listings.filter(l => l.sold && l.daySold && l.daySold >= MONTH_START);
@@ -4724,7 +4605,7 @@ function Growth({ listings, stockData }) {
   const soldMo  = listings.filter(l => l.sold && l.daySold && l.daySold >= MONTH_START);
   const totalRevenue = sold.reduce((a,l)=>a+(l.soldPrice||0),0);
   const totalProfit  = sold.reduce((a,l)=>a+(l.profit||0),0);
-  const st = (sold.length+active.length) ? Math.round(sold.length/(sold.length+active.length)*100) : 0;
+  const st = sold.length ? Math.round(active.length/sold.length*100) : 0;
 
   return (
     <div>
