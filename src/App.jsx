@@ -322,7 +322,7 @@ nav::-webkit-scrollbar-thumb{background:var(--bd);border-radius:2px}
 .tw{background:var(--sf);border:1px solid var(--bd);border-radius:var(--r2);overflow:hidden;box-shadow:var(--sh)}
 .ts{overflow-x:auto;overflow-y:auto;max-height:72vh;overscroll-behavior:contain;border-radius:var(--r2);-webkit-overflow-scrolling:touch}.ts::-webkit-scrollbar{height:4px;width:4px}.ts::-webkit-scrollbar-thumb{background:var(--bd);border-radius:2px}
 .tbl{width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed}
-@media(max-width:768px){.ts{overflow-x:auto;overflow-y:auto;max-height:none;-webkit-overflow-scrolling:touch}.content{overflow-y:auto}}
+@media(max-width:768px){.ts{overflow-x:hidden}.tbl{table-layout:auto}.tbl td,.tbl th{white-space:normal;word-break:break-word;min-width:unset}}
 .tbl thead th{position:sticky;top:0;z-index:5;background:var(--sf2);box-shadow:0 1px 0 var(--bd),0 2px 0 var(--bd)}
 .tbl th{padding:8px 11px;font-size:9px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--txm);border-bottom:1px solid var(--bd);text-align:left;background:var(--sf2);white-space:nowrap;cursor:pointer;user-select:none;transition:color .1s}
 .tbl th:hover{color:var(--tx)}.tbl th.no-sort{cursor:default}.tbl th.no-sort:hover{color:var(--txm)}
@@ -444,7 +444,7 @@ nav::-webkit-scrollbar-thumb{background:var(--bd);border-radius:2px}
 .plat-grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}
 @media(max-width:500px){.plat-grid-4{grid-template-columns:repeat(2,1fr)}}
 .hist-g{display:grid;grid-template-columns:1fr 1fr;gap:13px}
-@media(max-width:640px){.hist-g{grid-template-columns:1fr 1fr;gap:6px}.hist-g .tbl{font-size:10px}.hist-g .tbl th{font-size:8px;padding:6px 6px;letter-spacing:.3px}.hist-g .tbl td{padding:6px 6px;font-size:10px}.hist-g .st{font-size:10px}.hist-g .filter-bar{flex-wrap:wrap;gap:4px}.hist-g .btn-sm{font-size:9px;padding:3px 7px}}
+@media(max-width:640px){.hist-g{grid-template-columns:1fr}}
 .calc-box{background:var(--sf);border:1px solid var(--bd);border-radius:var(--r2);padding:18px;box-shadow:var(--sh);margin-bottom:13px}
 .calc-title{font-size:11.5px;font-weight:900;text-transform:uppercase;letter-spacing:.4px;margin-bottom:13px}
 .calc-row{display:flex;align-items:center;gap:10px;margin-bottom:9px}
