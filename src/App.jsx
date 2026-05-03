@@ -319,8 +319,9 @@ nav::-webkit-scrollbar-thumb{background:var(--bd);border-radius:2px}
 .ks{font-size:11px;color:var(--txd)}.kc.empty .kv{color:var(--txd);font-size:20px}
 
 /* Tables */
-.tw{background:var(--sf);border:1px solid var(--bd);border-radius:var(--r2);overflow:hidden;box-shadow:var(--sh)}
-.ts{overflow-x:auto}.ts::-webkit-scrollbar{height:4px}.ts::-webkit-scrollbar-thumb{background:var(--bd);border-radius:2px}
+.tw{background:var(--sf);border:1px solid var(--bd);border-radius:var(--r2);box-shadow:var(--sh)}
+.ts{overflow-x:auto;overflow-y:auto;max-height:72vh;border-radius:var(--r2)}.ts::-webkit-scrollbar{height:4px;width:4px}.ts::-webkit-scrollbar-thumb{background:var(--bd);border-radius:2px}
+.tbl thead th{position:sticky;top:0;z-index:5;background:var(--sf2);box-shadow:0 1px 0 var(--bd),0 2px 0 var(--bd)}
 .tbl{width:100%;border-collapse:collapse;font-size:12px}
 .tbl th{padding:8px 11px;font-size:9px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--txm);border-bottom:1px solid var(--bd);text-align:left;background:var(--sf2);white-space:nowrap;cursor:pointer;user-select:none;transition:color .1s}
 .tbl th:hover{color:var(--tx)}.tbl th.no-sort{cursor:default}.tbl th.no-sort:hover{color:var(--txm)}
@@ -4239,23 +4240,23 @@ function LiveData({ listings, stockData, liveData, setLiveData }) {
           <div className="lst">💰 Liquid Cash</div>
           <div className="lr">
             <span className="ll">Vinted Balance</span>
-            <input className="ei" placeholder="£0.00" value={vinted} onChange={e=>set("vinted",e.target.value)} />
+            <input className="ei" placeholder="£0.00" inputMode="decimal" type="text" pattern="[0-9.]*" value={vinted} onChange={e=>set("vinted",e.target.value)} />
           </div>
           <div className="lr">
             <span className="ll">eBay Balance</span>
-            <input className="ei" placeholder="£0.00" value={ebayBal} onChange={e=>set("ebayBal",e.target.value)} />
+            <input className="ei" placeholder="£0.00" inputMode="decimal" type="text" pattern="[0-9.]*" value={ebayBal} onChange={e=>set("ebayBal",e.target.value)} />
           </div>
           <div className="lr">
             <span className="ll">Withdrawn / Monzo Pot</span>
-            <input className="ei" placeholder="£0.00" value={withdrawn} onChange={e=>set("withdrawn",e.target.value)} />
+            <input className="ei" placeholder="£0.00" inputMode="decimal" type="text" pattern="[0-9.]*" value={withdrawn} onChange={e=>set("withdrawn",e.target.value)} />
           </div>
           <div className="lr tot"><span className="ll b">Total Cash</span><span className="lv gn">{fmt(total)}</span></div>
 
           <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".5px",color:"var(--txm)",margin:"11px 0 5px"}}>Pending Payouts</div>
-          <div className="lr"><span className="ll">eBay</span><input className="ei" placeholder="£0.00" value={ebayPend} onChange={e=>set("ebayPend",e.target.value)} /></div>
-          <div className="lr"><span className="ll">Depop</span><input className="ei" placeholder="£0.00" value={depopPend} onChange={e=>set("depopPend",e.target.value)} /></div>
-          <div className="lr"><span className="ll">Vinted</span><input className="ei" placeholder="£0.00" value={vintedPend} onChange={e=>set("vintedPend",e.target.value)} /></div>
-          <div className="lr"><span className="ll">Whatnot</span><input className="ei" placeholder="£0.00" value={whatnotPend} onChange={e=>set("whatnotPend",e.target.value)} /></div>
+          <div className="lr"><span className="ll">eBay</span><input className="ei" placeholder="£0.00" inputMode="decimal" type="text" pattern="[0-9.]*" value={ebayPend} onChange={e=>set("ebayPend",e.target.value)} /></div>
+          <div className="lr"><span className="ll">Depop</span><input className="ei" placeholder="£0.00" inputMode="decimal" type="text" pattern="[0-9.]*" value={depopPend} onChange={e=>set("depopPend",e.target.value)} /></div>
+          <div className="lr"><span className="ll">Vinted</span><input className="ei" placeholder="£0.00" inputMode="decimal" type="text" pattern="[0-9.]*" value={vintedPend} onChange={e=>set("vintedPend",e.target.value)} /></div>
+          <div className="lr"><span className="ll">Whatnot</span><input className="ei" placeholder="£0.00" inputMode="decimal" type="text" pattern="[0-9.]*" value={whatnotPend} onChange={e=>set("whatnotPend",e.target.value)} /></div>
           <div className="lr tot"><span className="ll b">Total + Pending</span><span className="lv gn">{fmt(totalP)}</span></div>
 
           <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".5px",color:"var(--txm)",margin:"11px 0 7px"}}>Cash Breakdown</div>
@@ -4857,10 +4858,22 @@ export default function App() {
   const [stockData,       setStockDataRaw]    = useState(STOCK_INIT);
   const [weeklyGoal,      setWeeklyGoal]      = useState("");
   const [monthlyGoal,     setMonthlyGoal]     = useState("");
-  const [liveData,        setLiveData]        = useState({
-    vinted:"", withdrawn:"", ebayBal:"",
-    ebayPend:"", depopPend:"", vintedPend:"", whatnotPend:"",
+  const [liveData, setLiveDataRaw] = useState(() => {
+    // Load from localStorage as fallback (survives Supabase failures)
+    try {
+      const saved = localStorage.getItem("ad_livedata");
+      if (saved) return JSON.parse(saved);
+    } catch (_) {}
+    return { vinted:"", withdrawn:"", ebayBal:"", ebayPend:"", depopPend:"", vintedPend:"", whatnotPend:"" };
   });
+
+  const setLiveData = (updater) => {
+    setLiveDataRaw(prev => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      try { localStorage.setItem("ad_livedata", JSON.stringify(next)); } catch (_) {}
+      return next;
+    });
+  };
   const [sundayDismissed, setSundayDismissed] = useState(false);
   const [isMobile,        setIsMobile]        = useState(
     () => typeof window !== "undefined" && window.innerWidth <= 768
@@ -5006,7 +5019,11 @@ export default function App() {
           if (payload.new.goals) {
             setWeeklyGoal(payload.new.goals.weekly   || "");
             setMonthlyGoal(payload.new.goals.monthly || "");
-            if (payload.new.goals.liveData) setLiveData(payload.new.goals.liveData);
+            // Only update liveData if the incoming payload has actual values
+            if (payload.new.goals.liveData &&
+                Object.values(payload.new.goals.liveData).some(v => v !== "")) {
+              setLiveData(payload.new.goals.liveData);
+            }
           }
           setStorageStatus("saved");
         }
@@ -5024,6 +5041,9 @@ export default function App() {
     setStorageStatus("loading");
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(async () => {
+      // Mark as our own save so realtime echo doesn't overwrite state
+      isRemoteUpdate.current = true;
+      setTimeout(() => { isRemoteUpdate.current = false; }, 2000);
       const ok = await saveState(listings, stockData, goals);
       setStorageStatus(ok ? "saved" : "error");
     }, 800);

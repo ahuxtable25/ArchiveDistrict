@@ -1,0 +1,13 @@
+{
+  "name": "ArchiveDistrict",
+  "short_name": "ArchiveDistrict",
+  "description": "Vintage resale business OS",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0c0c14",
+  "theme_color": "#0c0c14",
+  "orientation": "portrait",
+  "icons": [
+    { "src": "/icon.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
