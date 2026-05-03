@@ -1,19 +1,22 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { createClient } from "@supabase/supabase-js";
 
-/* ── localStorage storage adapter (replaces window.storage from Claude env) ── */
-const storage = {
-  get: async (key) => {
-    try {
-      const val = localStorage.getItem(key);
-      return val != null ? { key, value: val } : null;
-    } catch { return null; }
-  },
-  set: async (key, value) => {
-    try {
-      localStorage.setItem(key, value);
-      return { key, value };
-    } catch { return null; }
-  },
+/* ── Supabase client ── */
+const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL,
+  import.meta.env.VITE_SUPABASE_ANON_KEY
+);
+
+/* ── Save entire app state to Supabase (upsert single row id=1) ── */
+const saveState = async (listings, stockData, goals) => {
+  const { error } = await supabase.from("app_state").upsert({
+    id: 1,
+    listings,
+    stock_data: stockData,
+    goals,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: "id" });
+  return !error;
 };
 
 
@@ -5028,44 +5031,73 @@ export default function App() {
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  /* Load from storage */
+  /* ── Load from Supabase on mount ── */
   useEffect(() => {
     (async () => {
-      try { const r = await storage.get("ad_listings"); if (r?.value) setListingsRaw(JSON.parse(r.value)); } catch (_) {}
-      try { const r = await storage.get("ad_stock");    if (r?.value) setStockDataRaw(JSON.parse(r.value)); } catch (_) {}
-      try { const r = await storage.get("ad_goals");    if (r?.value) { const g=JSON.parse(r.value); setWeeklyGoal(g.weekly||""); setMonthlyGoal(g.monthly||""); }} catch (_) {}
-      try { const r = await storage.get("ad_ui");       if (r?.value) { const u=JSON.parse(r.value); if(u.sundayDismissed) setSundayDismissed(true); }} catch (_) {}
+      try {
+        const { data, error } = await supabase
+          .from("app_state")
+          .select("*")
+          .eq("id", 1)
+          .single();
+        if (data && !error) {
+          if (data.listings?.length)    setListingsRaw(data.listings);
+          if (data.stock_data?.length)  setStockDataRaw(data.stock_data);
+          if (data.goals) {
+            setWeeklyGoal(data.goals.weekly   || "");
+            setMonthlyGoal(data.goals.monthly || "");
+          }
+        }
+      } catch (_) {}
       hasLoaded.current = true;
       setStorageStatus("saved");
     })();
   }, []);
 
-  /* Save listings */
+  /* ── Supabase Realtime — push changes from other devices instantly ── */
   useEffect(() => {
+    const channel = supabase
+      .channel("app_state_realtime")
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "app_state", filter: "id=eq.1" },
+        (payload) => {
+          if (!payload.new) return;
+          // Only apply remote change if we're not the one who just saved
+          if (isRemoteUpdate.current) return;
+          isRemoteUpdate.current = true;
+          setTimeout(() => { isRemoteUpdate.current = false; }, 500);
+          if (payload.new.listings)   setListingsRaw(payload.new.listings);
+          if (payload.new.stock_data) setStockDataRaw(payload.new.stock_data);
+          if (payload.new.goals) {
+            setWeeklyGoal(payload.new.goals.weekly   || "");
+            setMonthlyGoal(payload.new.goals.monthly || "");
+          }
+          setStorageStatus("saved");
+        }
+      )
+      .subscribe();
+    return () => supabase.removeChannel(channel);
+  }, []);
+
+  /* ── Debounced save — fires 800ms after last change ── */
+  const saveTimer = useRef(null);
+  const isRemoteUpdate = useRef(false);
+
+  const debouncedSave = useCallback((listings, stockData, goals) => {
     if (!hasLoaded.current) return;
     setStorageStatus("loading");
-    storage.set("ad_listings", JSON.stringify(listings))
-      .then(() => setStorageStatus("saved"))
-      .catch(() => setStorageStatus("error"));
-  }, [listings]);
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(async () => {
+      const ok = await saveState(listings, stockData, goals);
+      setStorageStatus(ok ? "saved" : "error");
+    }, 800);
+  }, []);
 
-  /* Save stock */
+  /* Trigger save whenever data changes */
   useEffect(() => {
-    if (!hasLoaded.current) return;
-    storage.set("ad_stock", JSON.stringify(stockData)).catch(() => {});
-  }, [stockData]);
-
-  /* Save goals */
-  useEffect(() => {
-    if (!hasLoaded.current) return;
-    storage.set("ad_goals", JSON.stringify({ weekly:weeklyGoal, monthly:monthlyGoal })).catch(() => {});
-  }, [weeklyGoal, monthlyGoal]);
-
-  /* Save UI prefs */
-  useEffect(() => {
-    if (!hasLoaded.current) return;
-    storage.set("ad_ui", JSON.stringify({ sundayDismissed })).catch(() => {});
-  }, [sundayDismissed]);
+    debouncedSave(listings, stockData, { weekly: weeklyGoal, monthly: monthlyGoal });
+  }, [listings, stockData, weeklyGoal, monthlyGoal, debouncedSave]);
 
   /* Shipping count for nav dot */
   const toShipCount = useMemo(
@@ -5091,11 +5123,18 @@ export default function App() {
   const importJSON = (e) => {
     const file = e.target.files[0]; if (!file) return;
     const reader = new FileReader();
-    reader.onload = (ev) => {
+    reader.onload = async (ev) => {
       try {
         const d = JSON.parse(ev.target.result);
         if (d.listings) setListingsRaw(d.listings);
         if (d.stock)    setStockDataRaw(d.stock);
+        // Save immediately so all devices get the imported data
+        await saveState(
+          d.listings || listings,
+          d.stock    || stockData,
+          { weekly: weeklyGoal, monthly: monthlyGoal }
+        );
+        setStorageStatus("saved");
       } catch (_) { alert("Invalid backup file."); }
     };
     reader.readAsText(file);

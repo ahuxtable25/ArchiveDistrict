@@ -1,23 +1,43 @@
 # ArchiveDistrict — Business OS
 
-Vintage resale management app. Built with React + Vite, deployed on Vercel.
+Real-time resale management app. React + Vite + Supabase, deployed on Vercel.
+Syncs instantly across all devices. Multiple users at the same time.
 
-## Deploy to Vercel
+---
 
-1. Push this folder to a GitHub repository
-2. Connect the repo to [vercel.com](https://vercel.com)
-3. Add environment variable in Vercel dashboard:
-   - `ANTHROPIC_API_KEY` = your key from [console.anthropic.com](https://console.anthropic.com)
-4. Deploy — done
+## Deploy in 3 steps
 
-## Local development
+### Step 1 — Supabase (free database + real-time)
 
-```bash
-npm install
-npm run dev
-```
+1. Go to supabase.com → Sign up free
+2. Click New project → name it archivedistrict → region: EU West → Create project
+3. Once ready, go to SQL Editor in the left sidebar
+4. Paste the entire contents of supabase_schema.sql and click Run
+5. Go to Project Settings → API and copy:
+   - Project URL (https://xxxx.supabase.co)
+   - anon public key (starts with eyJ...)
 
-Add a `.env.local` file for local AI drafting:
-```
-ANTHROPIC_API_KEY=your_key_here
-```
+### Step 2 — Vercel environment variables
+
+Add all three in Vercel → Project Settings → Environment Variables:
+
+  VITE_SUPABASE_URL        = your Supabase Project URL
+  VITE_SUPABASE_ANON_KEY   = your Supabase anon public key
+  ANTHROPIC_API_KEY        = your Anthropic key (for Listing Drafter AI)
+
+Redeploy after adding variables.
+
+### Step 3 — Import your data
+
+1. Open the live app URL
+2. Click Import in the topbar
+3. Select archivedistrict_import.json
+4. Data saves to Supabase — all devices sync automatically
+
+---
+
+## How sync works
+
+Every change saves to Supabase within 1 second.
+All connected devices receive the update instantly via Supabase Realtime.
+No refresh needed.
