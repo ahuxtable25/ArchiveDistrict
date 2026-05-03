@@ -319,13 +319,14 @@ nav::-webkit-scrollbar-thumb{background:var(--bd);border-radius:2px}
 .ks{font-size:11px;color:var(--txd)}.kc.empty .kv{color:var(--txd);font-size:20px}
 
 /* Tables */
-.tw{background:var(--sf);border:1px solid var(--bd);border-radius:var(--r2);box-shadow:var(--sh)}
-.ts{overflow-x:auto;overflow-y:auto;max-height:72vh;border-radius:var(--r2)}.ts::-webkit-scrollbar{height:4px;width:4px}.ts::-webkit-scrollbar-thumb{background:var(--bd);border-radius:2px}
+.tw{background:var(--sf);border:1px solid var(--bd);border-radius:var(--r2);overflow:hidden;box-shadow:var(--sh)}
+.ts{overflow-x:auto;overflow-y:auto;max-height:72vh;overscroll-behavior:contain;border-radius:var(--r2);-webkit-overflow-scrolling:touch}.ts::-webkit-scrollbar{height:4px;width:4px}.ts::-webkit-scrollbar-thumb{background:var(--bd);border-radius:2px}
+.tbl{width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed}
+@media(max-width:768px){.ts{overflow-x:hidden}.tbl{table-layout:auto}.tbl td,.tbl th{white-space:normal;word-break:break-word;min-width:unset}}
 .tbl thead th{position:sticky;top:0;z-index:5;background:var(--sf2);box-shadow:0 1px 0 var(--bd),0 2px 0 var(--bd)}
-.tbl{width:100%;border-collapse:collapse;font-size:12px}
 .tbl th{padding:8px 11px;font-size:9px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--txm);border-bottom:1px solid var(--bd);text-align:left;background:var(--sf2);white-space:nowrap;cursor:pointer;user-select:none;transition:color .1s}
 .tbl th:hover{color:var(--tx)}.tbl th.no-sort{cursor:default}.tbl th.no-sort:hover{color:var(--txm)}
-.tbl td{padding:9px 11px;border-bottom:1px solid var(--bd);color:var(--tx);vertical-align:middle;white-space:nowrap}
+.tbl td{padding:9px 11px;border-bottom:1px solid var(--bd);color:var(--tx);vertical-align:middle;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px}
 .tbl tr:last-child td{border-bottom:none}
 .tbl tr.clickable:hover td{background:#faf9f6;cursor:pointer}
 .tbl tr.sold-r td{background:#f0faf4;color:var(--txm)}.tbl tr.listed-r td{background:#fff8f0}.tbl tr.dim td{opacity:.55}.tbl tr.sel td{background:#fdf4f5}
