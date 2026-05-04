@@ -55,6 +55,19 @@ const PLAT_FEES = {
 };
 const WEBSITES = ["Fleek","VWS","Depop","eBay","Vinted","Other"];
 
+/* ─── LISTING DROPDOWN OPTIONS (from real data + common extras) ─── */
+const DEFAULT_COLOURS = [
+  "Black","White","Navy","Blue","Grey","Brown","Beige","Green","Red","Yellow",
+  "Dark Blue","Light Blue","Black and Red","White and Grey","Olive","Orange","Purple","Pink","Multicolour",
+];
+const DEFAULT_TYPES = [
+  "Jacket","Denim Jacket","Track Jacket","Jersey Top","Polo","Shorts","Jorts",
+  "T-Shirt","Hoodie","Sweatshirt","Shirt","Trousers","Jeans","Vest","Coat","Gilet",
+];
+const DEFAULT_SIZES = [
+  "XS","S","S/M","M","M/L","L","L/XL","XL","XXL","2XL","Regular","One Size",
+];
+
 /* ═══════════════════════════════════════════════════════════════
    STOCK DATA — 8 bundles
 ═══════════════════════════════════════════════════════════════ */
@@ -179,6 +192,43 @@ const STOCK_COLS = [
 /* ═══════════════════════════════════════════════════════════════
    SHARED UI PRIMITIVES
 ═══════════════════════════════════════════════════════════════ */
+/* ─── ComboSelect — dropdown with "Add new…" option ─── */
+function ComboSelect({ value, onChange, options, placeholder, style }) {
+  const [adding, setAdding] = useState(false);
+  const [newVal, setNewVal] = useState("");
+  const allOpts = [...new Set([...options, value].filter(Boolean))].sort();
+
+  if (adding) {
+    return (
+      <div style={{display:"flex",gap:5}}>
+        <input
+          className="finp" autoFocus
+          placeholder={`Type new ${placeholder||"value"}…`}
+          value={newVal}
+          onChange={e=>setNewVal(e.target.value)}
+          onKeyDown={e=>{
+            if (e.key==="Enter" && newVal.trim()) { onChange(newVal.trim()); setAdding(false); setNewVal(""); }
+            if (e.key==="Escape") { setAdding(false); setNewVal(""); }
+          }}
+          style={{flex:1,...(style||{})}}
+        />
+        <button className="btn btn-p btn-xs" onClick={()=>{ if(newVal.trim()){ onChange(newVal.trim()); setAdding(false); setNewVal(""); }}}>✓</button>
+        <button className="btn btn-o btn-xs" onClick={()=>{ setAdding(false); setNewVal(""); }}>✕</button>
+      </div>
+    );
+  }
+  return (
+    <select className="fsel" value={value||""} onChange={e=>{
+      if (e.target.value==="__add__") { setAdding(true); }
+      else onChange(e.target.value);
+    }} style={style}>
+      {!value && <option value="">— select —</option>}
+      {allOpts.map(o=><option key={o} value={o}>{o}</option>)}
+      <option value="__add__">+ Add new…</option>
+    </select>
+  );
+}
+
 function MovTag({tag}) {
   const map={FAST:"mt mt-f",MEDIUM:"mt mt-m",SLOW:"mt mt-s",UNKNOWN:"mt mt-u",DEAD:"mt mt-d",NEW:"mt mt-n"};
   return <span className={map[tag]||"mt mt-u"}>{tag}</span>;
@@ -319,10 +369,10 @@ nav::-webkit-scrollbar-thumb{background:var(--bd);border-radius:2px}
 .ks{font-size:11px;color:var(--txd)}.kc.empty .kv{color:var(--txd);font-size:20px}
 
 /* Tables */
-.tw{background:var(--sf);border:1px solid var(--bd);border-radius:var(--r2);overflow:hidden;box-shadow:var(--sh)}
+.tw{background:var(--sf);border:1px solid var(--bd);border-radius:var(--r2);box-shadow:var(--sh)}
 .ts{overflow-x:auto;overflow-y:auto;max-height:72vh;overscroll-behavior:contain;border-radius:var(--r2);-webkit-overflow-scrolling:touch}.ts::-webkit-scrollbar{height:4px;width:4px}.ts::-webkit-scrollbar-thumb{background:var(--bd);border-radius:2px}
 .tbl{width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed}
-@media(max-width:768px){.ts{overflow-x:hidden}.tbl{table-layout:auto}.tbl td,.tbl th{white-space:normal;word-break:break-word;min-width:unset}}
+@media(max-width:768px){.ts{overflow-x:auto;-webkit-overflow-scrolling:touch}.tbl{table-layout:auto}}
 .tbl thead th{position:sticky;top:0;z-index:5;background:var(--sf2);box-shadow:0 1px 0 var(--bd),0 2px 0 var(--bd)}
 .tbl th{padding:8px 11px;font-size:9px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--txm);border-bottom:1px solid var(--bd);text-align:left;background:var(--sf2);white-space:nowrap;cursor:pointer;user-select:none;transition:color .1s}
 .tbl th:hover{color:var(--tx)}.tbl th.no-sort{cursor:default}.tbl th.no-sort:hover{color:var(--txm)}
@@ -1241,7 +1291,7 @@ function StockTab({ stockData, setStockData, listings }) {
         </div>
       </div>
 
-      <FilterChips colDefs={cols} activeFilters={activeFilters} clearFilter={clearFilter} />
+      <FilterChips colDefs={cols} activeFilters={activeFilters} clearFilter={clearFilter} clearAll={clearAll} />
 
       {/* Table */}
       <div className="tw">
@@ -1376,17 +1426,17 @@ function EditListingDrawer({ listing, stockData, onSave, onDelete, onClose }) {
             </div>
             <div className="fr">
               <label className="fl">Type</label>
-              <input className="finp" value={form.type} onChange={e=>set("type",e.target.value)} />
+              <ComboSelect value={form.type} onChange={v=>set("type",v)} options={DEFAULT_TYPES} placeholder="type" />
             </div>
           </div>
           <div className="fr2">
             <div className="fr">
               <label className="fl">Colour</label>
-              <input className="finp" value={form.colour} onChange={e=>set("colour",e.target.value)} />
+              <ComboSelect value={form.colour} onChange={v=>set("colour",v)} options={DEFAULT_COLOURS} placeholder="colour" />
             </div>
             <div className="fr">
               <label className="fl">Size</label>
-              <input className="finp" value={form.size} onChange={e=>set("size",e.target.value)} />
+              <ComboSelect value={form.size} onChange={v=>set("size",v)} options={DEFAULT_SIZES} placeholder="size" />
             </div>
           </div>
           <div className="fr">
@@ -1720,20 +1770,17 @@ function AddListingModal({ listings, stockData, onAdd, onClose }) {
             </div>
             <div className="fr">
               <label className="fl">Type</label>
-              <input className="finp" placeholder="e.g. Jacket"
-                value={form.type} onChange={e=>set("type",e.target.value)} />
+              <ComboSelect value={form.type} onChange={v=>set("type",v)} options={DEFAULT_TYPES} placeholder="type" />
             </div>
           </div>
           <div className="fr2">
             <div className="fr">
               <label className="fl">Colour {errors.colour && <span style={{color:"var(--ac)"}}>*</span>}</label>
-              <input className="finp" placeholder="e.g. Navy"
-                value={form.colour} onChange={e=>set("colour",e.target.value)} style={err("colour")} />
+              <ComboSelect value={form.colour} onChange={v=>set("colour",v)} options={DEFAULT_COLOURS} placeholder="colour" />
             </div>
             <div className="fr">
               <label className="fl">Size {errors.size && <span style={{color:"var(--ac)"}}>*</span>}</label>
-              <input className="finp" placeholder="e.g. M"
-                value={form.size} onChange={e=>set("size",e.target.value)} style={err("size")} />
+              <ComboSelect value={form.size} onChange={v=>set("size",v)} options={DEFAULT_SIZES} placeholder="size" />
             </div>
           </div>
           <div className="fr">
@@ -2086,7 +2133,7 @@ function ListingsTab({ listings, setListings, stockData }) {
         </div>
       </div>
 
-      <FilterChips colDefs={cols} activeFilters={activeColFilters} clearFilter={clearColFilter} />
+      <FilterChips colDefs={cols} activeFilters={activeColFilters} clearFilter={clearColFilter} clearAll={clearColAll} />
 
       {/* ── Table ── */}
       <div className="tw">
@@ -2368,7 +2415,7 @@ function FilterPanel({ colDefs, rows, filters, setFilter, clearAll, onClose }) {
 }
 
 /* ── Active filter chips ── */
-function FilterChips({ colDefs, activeFilters, clearFilter }) {
+function FilterChips({ colDefs, activeFilters, clearFilter, clearAll }) {
   if (!activeFilters.length) return null;
   const getLabel = (id) => colDefs.find(c => c.id === id)?.label || id;
   const getChipText = (id, fv) => {
@@ -2384,7 +2431,7 @@ function FilterChips({ colDefs, activeFilters, clearFilter }) {
   };
 
   return (
-    <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:10}}>
+    <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:10,alignItems:"center"}}>
       {activeFilters.map(([id, fv]) => (
         <div key={id} style={{
           display:"inline-flex",alignItems:"center",gap:5,
@@ -2399,6 +2446,16 @@ function FilterChips({ colDefs, activeFilters, clearFilter }) {
           }}>×</button>
         </div>
       ))}
+      {clearAll && (
+        <button
+          onClick={clearAll}
+          style={{
+            fontSize:11,fontWeight:700,color:"var(--txm)",
+            background:"var(--sf2)",border:"1px solid var(--bdd)",
+            borderRadius:20,padding:"2px 10px",cursor:"pointer",
+          }}
+        >↺ Clear all filters</button>
+      )}
     </div>
   );
 }
@@ -2524,7 +2581,7 @@ function MovementTracker({ listings }) {
         </button>
       </div>
 
-      <FilterChips colDefs={cols} activeFilters={activeFilters} clearFilter={clearFilter} />
+      <FilterChips colDefs={cols} activeFilters={activeFilters} clearFilter={clearFilter} clearAll={clearAll} />
 
       <div className="sh">
         <div className="st">
@@ -2686,7 +2743,7 @@ function ListingDataTab({ listings }) {
             ↓ CSV
           </button>
         </div>
-        <FilterChips colDefs={cols} activeFilters={fHook.activeFilters} clearFilter={fHook.clearFilter} />
+        <FilterChips colDefs={cols} activeFilters={fHook.activeFilters} clearFilter={fHook.clearFilter} clearAll={fHook.clearAll} />
         <div className="tw"><div className="ts">
           <table className="tbl">
             <thead>
@@ -3278,7 +3335,7 @@ Rules:
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
+          model: "claude-sonnet-4-5",
           max_tokens: 1000,
           messages: [{
             role: "user",
@@ -3294,26 +3351,40 @@ Return exactly this JSON shape:
           }]
         })
       });
+      if (!r1.ok) {
+        const errText = await r1.text();
+        throw new Error(`API error ${r1.status}: ${errText}`);
+      }
       const d1   = await r1.json();
       const raw1 = d1.content?.find(c => c.type === "text")?.text?.trim() || "{}";
-      const meta = JSON.parse(raw1);
+      let meta = {};
+      try { meta = JSON.parse(raw1); } catch (_) {
+        // Try to extract JSON from response if wrapped in text
+        const m = raw1.match(/\{[\s\S]*\}/);
+        if (m) meta = JSON.parse(m[0]);
+      }
 
       /* Call 2 — description */
       const r2 = await fetch("/api/claude", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
+          model: "claude-sonnet-4-5",
           max_tokens: 400,
           messages: [{ role: "user", content: buildDescPrompt(item, condition, notes) }]
         })
       });
+      if (!r2.ok) {
+        const errText = await r2.text();
+        throw new Error(`API error ${r2.status}: ${errText}`);
+      }
       const d2  = await r2.json();
       const desc = d2.content?.find(c => c.type === "text")?.text?.trim() || "";
 
       setGenerated({ ...meta, description: desc });
     } catch (e) {
-      setError("Generation failed. Check your connection and try again.");
+      console.error("Drafter error:", e);
+      setError(`Generation failed: ${e.message}`);
     }
     setLoading(false);
   };
@@ -3327,7 +3398,7 @@ Return exactly this JSON shape:
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
+          model: "claude-sonnet-4-5",
           max_tokens: 400,
           messages: [{ role: "user", content: buildDescPrompt(item, condition, notes, true) }]
         })
@@ -3788,124 +3859,178 @@ function DrafterMarkListed({ item, setListings }) {
    MARK AS SOLD — Command 8
 ═══════════════════════════════════════════════════════════════ */
 function QuickMarkSold({ listings, setListings }) {
-  const [input,   setInput]   = useState("");
-  const [parsed,  setParsed]  = useState([]);
-  const [done,    setDone]    = useState(false);
-  const [history, setHistory] = useState([]);
+  const unsold = useMemo(() => listings.filter(l => l.listed && !l.sold), [listings]);
 
-  const parse = () => {
-    const lines = input.trim().split("\n").filter(l => l.trim());
-    setParsed(lines.map(line => {
-      const clean = line.replace(/£/g,"").replace(/,/g," ").replace(/\|/g," ").trim();
-      const parts = clean.split(/\s+/);
-      const sku      = parts[0]?.toUpperCase();
-      const price    = parseFloat(parts[1]) || null;
-      const platform = parts.slice(2).join(" ") || "";
-      const existing = listings.find(l => l.sku === sku);
-      return { sku, price, platform, found:!!existing, alreadySold: existing?.sold ?? false, existing };
-    }));
-    setDone(false);
-  };
+  // Single mode
+  const [selSku,    setSelSku]    = useState("");
+  const [skuSearch, setSkuSearch] = useState("");
+  const [soldPrice, setSoldPrice] = useState("");
+  const [platSel,   setPlatSel]   = useState(null);
+  const [soldDate,  setSoldDate]  = useState(TODAY);
+  const [done,      setDone]      = useState(false);
+  const [history,   setHistory]   = useState([]);
+
+  const item = listings.find(l => l.sku === selSku);
+  const prevSku = useRef(null);
+  useEffect(() => {
+    if (selSku !== prevSku.current) {
+      setDone(false); setSoldPrice(""); setPlatSel(null);
+      prevSku.current = selSku;
+    }
+  }, [selSku]);
+
+  const skuDropdown = useMemo(() => {
+    if (!skuSearch.trim()) return unsold.slice(0,8);
+    const s = skuSearch.toLowerCase();
+    return unsold.filter(l =>
+      l.sku.toLowerCase().includes(s) ||
+      l.brand.toLowerCase().includes(s) ||
+      l.colour.toLowerCase().includes(s) ||
+      l.size.toLowerCase().includes(s)
+    ).slice(0,8);
+  }, [unsold, skuSearch]);
 
   const confirm = () => {
-    const valid = parsed.filter(p => p.found && !p.alreadySold && p.price);
-    if (!valid.length) return;
-    setListings(prev => prev.map(l => {
-      const u = valid.find(v => v.sku === l.sku);
-      if (!u) return l;
-      const days = l.dayListed
-        ? Math.max(0, Math.floor((new Date(TODAY) - new Date(l.dayListed)) / 86400000))
-        : 0;
-      return {
-        ...l, sold:true, soldPrice:u.price,
-        profit: parseFloat((u.price - l.price).toFixed(2)),
-        platform: u.platform || l.platform,
-        daySold: TODAY, days, shipped:false,
-      };
-    }));
+    if (!item || !soldPrice || !platSel) return;
+    const price = parseFloat(soldPrice);
+    const days  = item.dayListed
+      ? Math.max(0, Math.floor((new Date(soldDate) - new Date(item.dayListed)) / 86400000))
+      : 0;
+    setListings(prev => prev.map(l => l.sku === item.sku
+      ? { ...l, sold:true, soldPrice:price,
+          profit: parseFloat((price - l.price).toFixed(2)),
+          platform: platSel, daySold: soldDate, days, shipped:false }
+      : l
+    ));
     setHistory(prev => [{
       time: new Date().toLocaleTimeString(),
-      count: valid.length,
-      skus: valid.map(v=>v.sku).join(", "),
+      sku: item.sku, name: item.name, price: fmt(price), plat: platSel,
     }, ...prev.slice(0,9)]);
     setDone(true);
-    setInput(""); setParsed([]);
   };
 
-  const valid = parsed.filter(p => p.found && !p.alreadySold && p.price);
+  const canConfirm = item && soldPrice && platSel;
 
   return (
     <div>
       <div className="info-banner">
-        <strong>Format:</strong> one item per line →&nbsp;
-        <code style={{background:"rgba(0,0,0,.07)",padding:"1px 6px",borderRadius:3,fontSize:11}}>
-          SKU&nbsp;&nbsp;SoldPrice&nbsp;&nbsp;Platform
-        </code>
-        &nbsp;&nbsp;e.g.&nbsp;
-        <code style={{background:"rgba(0,0,0,.07)",padding:"1px 6px",borderRadius:3,fontSize:11}}>
-          A001&nbsp;32.50&nbsp;Depop
-        </code>
-        &nbsp;— Platform is optional.
+        <strong>Mark as Sold</strong> — search for the item, enter the sold price,
+        tap the platform it sold on, then confirm. One item at a time.
       </div>
 
       <div className="qu-wrap">
         {/* Left — input */}
         <div className="qu-box">
-          <div className="qu-title">Paste Sold Items</div>
-          <textarea
-            className="qu-ta"
-            placeholder={"A001 32.50 Depop\nA002 39.99 Vinted\nA005 31.00 eBay"}
-            value={input}
-            onChange={e => { setInput(e.target.value); setParsed([]); setDone(false); }}
-          />
-          <div style={{marginTop:10,display:"flex",gap:8}}>
-            <button className="btn btn-o btn-sm" onClick={parse} disabled={!input.trim()}>
-              Preview →
-            </button>
-            {parsed.length > 0 && (
-              <button className="btn btn-g btn-sm" onClick={confirm} disabled={!valid.length}>
-                ✓ Confirm {valid.length} update{valid.length!==1?"s":""}
-              </button>
+          <div className="qu-title">1 · Find Item</div>
+
+          {/* SKU search */}
+          <div style={{position:"relative",marginBottom:12}}>
+            <label className="fl">Search SKU, brand, colour, size</label>
+            <div className="sw" style={{width:"100%"}}>
+              <span className="si">⌕</span>
+              <input className="fi" style={{width:"100%"}}
+                placeholder="e.g. A023 or Navy M"
+                value={skuSearch}
+                onChange={e=>{ setSkuSearch(e.target.value); if(!e.target.value){ setSelSku(""); setDone(false); }}}
+              />
+              {item && (
+                <button onClick={()=>{ setSelSku(""); setSkuSearch(""); setDone(false); }}
+                  style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",
+                    background:"none",border:"none",cursor:"pointer",color:"var(--txd)",fontSize:14}}>✕</button>
+              )}
+            </div>
+            {skuSearch && !item && skuDropdown.length > 0 && (
+              <div style={{position:"absolute",top:"100%",left:0,right:0,
+                background:"var(--sf)",border:"1px solid var(--bd)",borderRadius:"var(--r)",
+                boxShadow:"var(--shm)",zIndex:50,maxHeight:220,overflowY:"auto",marginTop:2}}>
+                {skuDropdown.map(l=>(
+                  <div key={l.sku} onClick={()=>{ setSelSku(l.sku); setSkuSearch(`${l.sku} · ${l.brand} ${l.colour} ${l.size}`); }}
+                    style={{padding:"9px 12px",cursor:"pointer",fontSize:12,borderBottom:"1px solid var(--bd)",
+                      display:"flex",justifyContent:"space-between"}}
+                    onMouseEnter={e=>e.currentTarget.style.background="var(--sf2)"}
+                    onMouseLeave={e=>e.currentTarget.style.background=""}>
+                    <div><span className="sku" style={{marginRight:8}}>{l.sku}</span>
+                      <span style={{color:"var(--txm)"}}>{l.brand} · {l.colour} · {l.size}</span></div>
+                    <span style={{color:"var(--txd)",fontSize:11}}>{l.bundleSku}</span>
+                  </div>
+                ))}
+              </div>
             )}
+            {item && <div style={{marginTop:5,fontSize:11}}><span className="badge b-g">✓ {item.sku} selected</span></div>}
           </div>
+
+          <div className="qu-title" style={{marginTop:14}}>2 · Sold Price</div>
+          <div className="sw" style={{width:"100%",marginBottom:12}}>
+            <span style={{padding:"0 10px",color:"var(--txm)",fontWeight:700}}>£</span>
+            <input className="fi" style={{width:"100%"}} type="text" inputMode="decimal"
+              placeholder="0.00" value={soldPrice}
+              onChange={e=>{ if(/^\d*\.?\d*$/.test(e.target.value)) setSoldPrice(e.target.value); }}/>
+          </div>
+
+          <div className="qu-title" style={{marginTop:4}}>3 · Platform Sold On</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginTop:6}}>
+            {MARK_LISTED_PLATS.map(p=>(
+              <button key={p} onClick={()=>setPlatSel(p===platSel?null:p)} style={{
+                padding:"7px 4px",fontSize:11,fontWeight:700,textAlign:"center",
+                border:`1.5px solid ${platSel===p?"var(--ac)":"var(--bd)"}`,
+                borderRadius:"var(--r)",cursor:"pointer",
+                background:platSel===p?"var(--acl)":"var(--sf2)",
+                color:platSel===p?"var(--ac)":"var(--txm)",
+                transition:"all .12s",
+              }}>{p}{platSel===p&&" ✓"}</button>
+            ))}
+          </div>
+
+          <div style={{marginTop:12}}>
+            <label className="fl">Date Sold</label>
+            <input className="finp" type="date" value={soldDate}
+              onChange={e=>setSoldDate(e.target.value)} style={{width:"100%"}} />
+          </div>
+
+          <button className="btn btn-p" disabled={!canConfirm}
+            style={{marginTop:14,width:"100%",justifyContent:"center"}} onClick={confirm}>
+            ✓ Mark as Sold
+          </button>
+          {!platSel && item && <div style={{fontSize:11,color:"var(--ac)",marginTop:6,fontWeight:700}}>● Select the platform it sold on</div>}
+          {!soldPrice && item && <div style={{fontSize:11,color:"var(--ac)",marginTop:4,fontWeight:700}}>● Enter the sold price</div>}
+
           {done && (
-            <div style={{marginTop:9,background:"var(--gnl)",border:"1px solid rgba(31,92,53,.2)",borderRadius:"var(--r)",padding:"9px 11px",fontSize:12,color:"var(--gn)",fontWeight:700}}>
-              ✓ Listings updated!
+            <div style={{marginTop:10,background:"var(--gnl)",border:"1px solid rgba(31,92,53,.2)",borderRadius:"var(--r)",padding:"9px 11px",fontSize:12,color:"var(--gn)",fontWeight:700}}>
+              ✓ {item?.sku || "Item"} marked as sold on {platSel} for {fmt(parseFloat(soldPrice)||0)}
             </div>
           )}
         </div>
 
         {/* Right — preview */}
         <div className="qu-box">
-          <div className="qu-title">
-            Preview {parsed.length > 0 && <span className="ss">{parsed.length} lines</span>}
-          </div>
-          {!parsed.length ? (
-            <div style={{fontSize:12,color:"var(--txd)",padding:"18px 0",textAlign:"center"}}>
-              Paste SKUs above and click Preview.
-            </div>
+          <div className="qu-title">Preview</div>
+          {!item ? (
+            <div style={{fontSize:12,color:"var(--txd)",padding:"24px 0",textAlign:"center"}}>Select an item on the left.</div>
           ) : (
             <div>
-              {parsed.map((p,i) => (
-                <div key={i} className="qu-row">
-                  <div style={{display:"flex",gap:7,alignItems:"center",flexWrap:"wrap"}}>
-                    <span className="sku">{p.sku}</span>
-                    {!p.found         && <span className="badge b-r">Not found</span>}
-                    {p.found && p.alreadySold && <span className="badge b-a">Already sold</span>}
-                    {p.found && !p.alreadySold && p.price  && <span className="badge b-g">Ready</span>}
-                    {p.found && !p.alreadySold && !p.price && <span className="badge b-a">No price</span>}
-                    {p.platform && <span style={{fontSize:11,color:"var(--txd)"}}>{p.platform}</span>}
-                  </div>
-                  <div style={{fontSize:11,color:"var(--txm)",textAlign:"right",flexShrink:0}}>
-                    {p.price ? fmt(p.price) : "—"}
-                  </div>
+              <div style={{background:"var(--sf2)",border:"1px solid var(--bd)",borderRadius:"var(--r)",padding:"11px 13px",marginBottom:10}}>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+                  <span className="sku">{item.sku}</span>
+                  <span className="bsku">{item.bundleSku}</span>
                 </div>
-              ))}
-              <div style={{marginTop:9,padding:"7px 9px",background:"var(--sf2)",borderRadius:"var(--r)",fontSize:11,color:"var(--txm)"}}>
-                <strong style={{color:"var(--gn)"}}>{valid.length} will update</strong>
-                {" · "}{parsed.filter(p=>!p.found).length} not found
-                {" · "}{parsed.filter(p=>p.alreadySold).length} already sold
+                <div style={{fontWeight:700,fontSize:13,marginBottom:3}}>{item.name}</div>
+                <div style={{fontSize:12,color:"var(--txm)"}}>
+                  {item.brand} · {item.colour} · Size {item.size}
+                </div>
+                <div style={{fontSize:12,marginTop:6}}>
+                  Cost: <strong>{fmt(item.price)}</strong>
+                  {soldPrice && <span> · Profit: <strong style={{color:parseFloat(soldPrice)-item.price>0?"var(--gn)":"var(--ac)"}}>{fmt(parseFloat(soldPrice)-item.price)}</strong></span>}
+                </div>
               </div>
+              {soldPrice && platSel && (
+                <div style={{background:"var(--gnl)",border:"1px solid rgba(31,92,53,.2)",borderRadius:"var(--r)",padding:"9px 12px",fontSize:12,color:"var(--gn)"}}>
+                  <div style={{fontWeight:700,marginBottom:3}}>Will be updated:</div>
+                  <div>Sold: <strong>Yes</strong></div>
+                  <div>Sold Price: <strong>{fmt(parseFloat(soldPrice))}</strong></div>
+                  <div>Platform: <strong>{platSel}</strong></div>
+                  <div>Date: <strong>{soldDate}</strong></div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -3915,13 +4040,11 @@ function QuickMarkSold({ listings, setListings }) {
       {history.length > 0 && (
         <div style={{marginTop:14}}>
           <div className="st" style={{marginBottom:8}}>Session History</div>
-          {history.map((h,i) => (
-            <div key={i} style={{
-              background:"var(--gnl)",border:"1px solid rgba(31,92,53,.15)",
+          {history.map((h,i)=>(
+            <div key={i} style={{background:"var(--gnl)",border:"1px solid rgba(31,92,53,.15)",
               borderRadius:"var(--r)",padding:"8px 12px",marginBottom:7,
-              fontSize:12,color:"var(--gn)",display:"flex",justifyContent:"space-between",
-            }}>
-              <span>✓ <strong>{h.count}</strong> marked sold — {h.skus}</span>
+              fontSize:12,color:"var(--gn)",display:"flex",justifyContent:"space-between"}}>
+              <span>✓ <strong>{h.sku}</strong> — {h.name} sold for <strong>{h.price}</strong> on {h.plat}</span>
               <span style={{fontSize:11,opacity:.6,flexShrink:0,marginLeft:10}}>{h.time}</span>
             </div>
           ))}
@@ -4020,7 +4143,7 @@ function ShippingTab({ listings, setListings }) {
                 ↓ CSV
               </button>
             </div>
-            <FilterChips colDefs={cols} activeFilters={shippedF.activeFilters} clearFilter={shippedF.clearFilter} />
+            <FilterChips colDefs={cols} activeFilters={shippedF.activeFilters} clearFilter={shippedF.clearFilter} clearAll={shippedF.clearAll} />
             <div className="tw"><div className="ts">
               <table className="tbl">
                 <thead><tr>{visCols.map(c=><th key={c.id} className="no-sort">{c.label}</th>)}</tr></thead>
@@ -4113,10 +4236,15 @@ function Dashboard({ listings, stockData, weeklyGoal, setWeeklyGoal, monthlyGoal
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
         <span style={{fontSize:11,color:"var(--txm)"}}>Target: £</span>
         <input
+          type="text"
+          inputMode="decimal"
           value={val}
-          onChange={e=>setGoal(e.target.value)}
+          onChange={e => {
+            const v = e.target.value;
+            if (/^\d*\.?\d*$/.test(v)) setGoal(v);
+          }}
           placeholder="0"
-          style={{width:80,background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:"var(--r)",padding:"4px 8px",fontFamily:"Arial,sans-serif",fontSize:13,fontWeight:700,outline:"none"}}
+          style={{width:80,background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:"var(--r)",padding:"4px 8px",fontFamily:"Arial,sans-serif",fontSize:13,fontWeight:700,outline:"none",color:"var(--tx)"}}
         />
         {goal > 0 && (
           <span style={{fontSize:12,fontWeight:700,color:pct>=100?"var(--gn)":pct>=60?"var(--am)":"var(--txm)"}}>
@@ -4567,7 +4695,7 @@ function Analytics({ listings, stockData }) {
         </button>
       </div>
 
-      <FilterChips colDefs={slowCols} activeFilters={slowF.activeFilters} clearFilter={slowF.clearFilter} />
+      <FilterChips colDefs={slowCols} activeFilters={slowF.activeFilters} clearFilter={slowF.clearFilter} clearAll={slowF.clearAll} />
 
       <div className="tw"><div className="ts">
         <table className="tbl">
@@ -4675,19 +4803,182 @@ const MONTH_HIST_COLS = [
   {id:"stockSpend", label:"Stock Spend",  visible:true },
 ];
 const WEEK_HIST_COLS = [
-  {id:"label",      label:"Week Starting",visible:true },
-  {id:"listed",     label:"Listed",       visible:true },
-  {id:"sold",       label:"Sold",         visible:true },
-  {id:"revenue",    label:"Revenue",      visible:true },
-  {id:"profit",     label:"Profit",       visible:true },
-  {id:"stockSpend", label:"Stock Spend",  visible:true },
+  {id:"label",      label:"Week Starting", visible:true },
+  {id:"listed",     label:"Listed",        visible:true },
+  {id:"sold",       label:"Sold",          visible:true },
+  {id:"revenue",    label:"Revenue",       visible:true },
+  {id:"profit",     label:"Profit",        visible:true },
+  {id:"stockSpend", label:"Stock Spend",   visible:true },
+  {id:"activeLive", label:"Active at EOW", visible:true },
 ];
 
 function History({ listings, stockData }) {
-  const [monthCols,    setMonthCols]    = useState(MONTH_HIST_COLS);
-  const [weekCols,     setWeekCols]     = useState(WEEK_HIST_COLS);
-  const [showMonthCP,  setShowMonthCP]  = useState(false);
-  const [showWeekCP,   setShowWeekCP]   = useState(false);
+  const [monthCols, setMonthCols] = useState(MONTH_HIST_COLS);
+  const [weekCols,  setWeekCols]  = useState(WEEK_HIST_COLS);
+  const [showMonthCP, setShowMonthCP] = useState(false);
+  const [showWeekCP,  setShowWeekCP]  = useState(false);
+  const [weekRange,   setWeekRange]   = useState("all");
+  const [monthRange,  setMonthRange]  = useState("all");
+
+  const { months, weeks } = useMemo(() => {
+    // Build month keys from Nov 2024 to now
+    const monthKeys = [];
+    let d = new Date(2024, 10, 1);
+    while (d <= NOW) {
+      monthKeys.push(d.toISOString().slice(0,7));
+      d = new Date(d.getFullYear(), d.getMonth()+1, 1);
+    }
+
+    const months = monthKeys.map(mk => {
+      const [y,mo] = mk.split("-");
+      const mListings = listings.filter(l => l.sold && l.daySold?.startsWith(mk));
+      const mStock    = stockData.filter(s => s.datePurchased?.startsWith(mk));
+      return {
+        label: new Date(+y,+mo-1,1).toLocaleDateString("en-GB",{month:"short",year:"numeric"}),
+        sold: mListings.length,
+        proceeds: mListings.reduce((a,l)=>a+(l.soldPrice||0),0),
+        profit:   mListings.reduce((a,l)=>a+(l.profit||0),0),
+        stockQty: mStock.length,
+        stockSpend: mStock.reduce((a,s)=>a+(s.totalCost||s.sellable*s.costPer||0),0),
+      };
+    }).reverse(); // newest first
+
+    // Build last 16 weeks
+    const weeks = [];
+    for (let i=15; i>=0; i--) {
+      const ws = new Date(_wsd); ws.setDate(ws.getDate()-i*7);
+      const we = new Date(ws);   we.setDate(we.getDate()+6);
+      const wsStr = ws.toISOString().split("T")[0];
+      const weStr = we.toISOString().split("T")[0];
+      const wListed = listings.filter(l => l.dayListed && l.dayListed>=wsStr && l.dayListed<=weStr);
+      const wSold   = listings.filter(l => l.daySold   && l.daySold  >=wsStr && l.daySold  <=weStr);
+      const wStock  = stockData.filter(s => s.datePurchased && s.datePurchased>=wsStr && s.datePurchased<=weStr);
+      // Active at end of week = listed & not sold by end of that week
+      const activeLive = listings.filter(l => l.listed && l.dayListed && l.dayListed<=weStr && (!l.sold || l.daySold>weStr)).length;
+      weeks.push({
+        label:      ws.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"2-digit"}),
+        listed:     wListed.length,
+        sold:       wSold.length,
+        revenue:    wSold.reduce((a,l)=>a+(l.soldPrice||0),0),
+        profit:     wSold.reduce((a,l)=>a+(l.profit||0),0),
+        stockSpend: wStock.reduce((a,s)=>a+(s.totalCost||s.sellable*s.costPer||0),0),
+        activeLive,
+      });
+    }
+    weeks.reverse(); // newest first
+    return { months, weeks };
+  }, [listings, stockData]);
+
+  const filteredWeeks = useMemo(() => {
+    if (weekRange === "all") return weeks;
+    const n = parseInt(weekRange);
+    return weeks.slice(0, n);
+  }, [weeks, weekRange]);
+
+  const filteredMonths = useMemo(() => {
+    if (monthRange === "all") return months;
+    const n = parseInt(monthRange);
+    return months.slice(0, n);
+  }, [months, monthRange]);
+
+  const weekF  = useTableFilters(filteredWeeks,  weekCols);
+  const monthF = useTableFilters(filteredMonths, monthCols);
+
+  const renderNum = (v, colour) =>
+    v > 0
+      ? <span style={{fontWeight:700, color:colour||"var(--tx)"}}>{fmt(v)}</span>
+      : <span style={{color:"var(--txd)"}}>—</span>;
+
+  const renderWeekCell = (col, r) => {
+    if (col==="label")      return <span style={{fontWeight:700,whiteSpace:"nowrap"}}>{r.label}</span>;
+    if (col==="listed")     return r.listed > 0 ? r.listed : <span style={{color:"var(--txd)"}}>—</span>;
+    if (col==="sold")       return r.sold > 0 ? <span style={{fontWeight:700}}>{r.sold}</span> : <span style={{color:"var(--txd)"}}>—</span>;
+    if (col==="revenue")    return renderNum(r.revenue, "var(--gn)");
+    if (col==="profit")     return renderNum(r.profit,  "var(--gn)");
+    if (col==="stockSpend") return renderNum(r.stockSpend, "var(--ac)");
+    if (col==="activeLive") return r.activeLive > 0 ? <span style={{fontWeight:700}}>{r.activeLive}</span> : <span style={{color:"var(--txd)"}}>—</span>;
+    return "—";
+  };
+
+  const renderMonthCell = (col, r) => {
+    if (col==="label")      return <span style={{fontWeight:700}}>{r.label}</span>;
+    if (col==="sold")       return r.sold > 0 ? <span style={{fontWeight:700}}>{r.sold}</span> : <span style={{color:"var(--txd)"}}>—</span>;
+    if (col==="proceeds")   return renderNum(r.proceeds, "var(--gn)");
+    if (col==="profit")     return renderNum(r.profit,   "var(--gn)");
+    if (col==="stockQty")   return r.stockQty > 0 ? r.stockQty : <span style={{color:"var(--txd)"}}>—</span>;
+    if (col==="stockSpend") return renderNum(r.stockSpend, "var(--ac)");
+    return "—";
+  };
+
+  const HistTable = ({ title, rows, fHook, cols, setCols, showCP, setShowCP,
+                       renderCell, exportName, rangeVal, setRange, rangeOpts }) => {
+    const visCols = cols.filter(c => c.visible);
+    return (
+      <div style={{marginBottom:18}}>
+        <div className="filter-bar" style={{paddingBottom:8}}>
+          <div className="st">{title}<span className="ss">{fHook.filtered.length} rows</span></div>
+          <div style={{flex:1}}/>
+          <select className="fs" value={rangeVal} onChange={e=>setRange(e.target.value)}>
+            <option value="all">All time</option>
+            {rangeOpts.map(([v,l])=><option key={v} value={v}>{l}</option>)}
+          </select>
+          <div style={{position:"relative"}}>
+            <button className="btn btn-o btn-sm" onClick={()=>fHook.setShowPanel(v=>!v)}>
+              ⚡ Filters {fHook.activeFilters.length>0 && <span style={{background:"var(--ac)",color:"#fff",borderRadius:10,padding:"0 5px",fontSize:9,marginLeft:3}}>{fHook.activeFilters.length}</span>}
+            </button>
+            {fHook.showPanel && (
+              <FilterPanel colDefs={cols} rows={rows}
+                filters={fHook.filters} setFilter={fHook.setFilter}
+                clearAll={fHook.clearAll} onClose={()=>fHook.setShowPanel(false)} />
+            )}
+          </div>
+          <div style={{position:"relative"}}>
+            <button className="btn btn-o btn-sm" onClick={()=>setShowCP(v=>!v)}>⚙ Columns</button>
+            {showCP && <ColPanel cols={cols} setCols={setCols} onClose={()=>setShowCP(false)} />}
+          </div>
+          <button className="btn btn-o btn-sm" onClick={()=>exportTableCSV(fHook.filtered, cols, exportName)}>↓ CSV</button>
+        </div>
+        <FilterChips colDefs={cols} activeFilters={fHook.activeFilters} clearFilter={fHook.clearFilter} clearAll={fHook.clearAll} />
+        <div className="tw"><div className="ts" style={{maxHeight:"none"}}>
+          <table className="tbl" style={{minWidth:"100%"}}>
+            <thead><tr>{visCols.map(c=><th key={c.id} className="no-sort" style={{whiteSpace:"nowrap"}}>{c.label}</th>)}</tr></thead>
+            <tbody>
+              {fHook.filtered.length===0
+                ? <tr><td colSpan={visCols.length} style={{textAlign:"center",padding:22,color:"var(--txd)"}}>No data.</td></tr>
+                : fHook.filtered.map((r,i)=>(
+                  <tr key={i}>{visCols.map(c=><td key={c.id} style={{whiteSpace:"nowrap"}}>{renderCell(c.id,r)}</td>)}</tr>
+                ))
+              }
+            </tbody>
+          </table>
+        </div></div>
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <HistTable
+        title="Weekly History"
+        rows={filteredWeeks} fHook={weekF}
+        cols={weekCols} setCols={setWeekCols}
+        showCP={showWeekCP} setShowCP={setShowWeekCP}
+        renderCell={renderWeekCell} exportName="history_weekly"
+        rangeVal={weekRange} setRange={setWeekRange}
+        rangeOpts={[["4","Last 4 weeks"],["8","Last 8 weeks"],["12","Last 12 weeks"],["16","Last 16 weeks"]]}
+      />
+      <HistTable
+        title="Monthly History"
+        rows={filteredMonths} fHook={monthF}
+        cols={monthCols} setCols={setMonthCols}
+        showCP={showMonthCP} setShowCP={setShowMonthCP}
+        renderCell={renderMonthCell} exportName="history_monthly"
+        rangeVal={monthRange} setRange={setMonthRange}
+        rangeOpts={[["3","Last 3 months"],["6","Last 6 months"],["12","Last 12 months"]]}
+      />
+    </div>
+  );
+}
 
   const { months, weeks } = useMemo(() => {
     /* Build month keys from Nov 2024 to now */
@@ -4788,7 +5079,7 @@ function History({ listings, stockData }) {
             ↓ CSV
           </button>
         </div>
-        <FilterChips colDefs={cols} activeFilters={fHook.activeFilters} clearFilter={fHook.clearFilter} />
+        <FilterChips colDefs={cols} activeFilters={fHook.activeFilters} clearFilter={fHook.clearFilter} clearAll={fHook.clearAll} />
         <div className="tw"><div className="ts">
           <table className="tbl">
             <thead><tr>{visCols.map(c=><th key={c.id} className="no-sort">{c.label}</th>)}</tr></thead>
@@ -4810,26 +5101,6 @@ function History({ listings, stockData }) {
       </div>
     );
   };
-
-  return (
-    <div className="hist-g">
-      <HistTable
-        title="Monthly History" subtitle={`${monthF.filtered.length} months`}
-        rows={months} fHook={monthF}
-        cols={monthCols} setCols={setMonthCols}
-        showCP={showMonthCP} setShowCP={setShowMonthCP}
-        renderCell={renderMonthCell} exportName="history_monthly"
-      />
-      <HistTable
-        title="Weekly History" subtitle="Last 12 weeks"
-        rows={weeks} fHook={weekF}
-        cols={weekCols} setCols={setWeekCols}
-        showCP={showWeekCP} setShowCP={setShowWeekCP}
-        renderCell={renderWeekCell} exportName="history_weekly"
-      />
-    </div>
-  );
-}
 
 function Placeholder({ title, icon, note }) {
   return (
