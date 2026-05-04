@@ -4980,51 +4980,6 @@ function History({ listings, stockData }) {
   );
 }
 
-  const { months, weeks } = useMemo(() => {
-    /* Build month keys from Nov 2024 to now */
-    const monthKeys = [];
-    let d = new Date(2024, 10, 1);
-    while (d <= NOW) {
-      monthKeys.push(d.toISOString().slice(0,7));
-      d = new Date(d.getFullYear(), d.getMonth()+1, 1);
-    }
-
-    const months = monthKeys.map(mk => {
-      const [y,mo] = mk.split("-");
-      const mListings = listings.filter(l => l.sold && l.daySold && l.daySold.startsWith(mk));
-      const mStock    = stockData.filter(s => s.datePurchased && s.datePurchased.startsWith(mk));
-      return {
-        label:      new Date(+y,+mo-1,1).toLocaleDateString("en-GB",{month:"short",year:"numeric"}),
-        sold:       mListings.length,
-        proceeds:   mListings.reduce((a,l)=>a+(l.soldPrice||0),0),
-        profit:     mListings.reduce((a,l)=>a+(l.profit||0),0),
-        stockQty:   mStock.length,
-        stockSpend: mStock.reduce((a,s)=>a+s.sellable*s.costPer,0),
-      };
-    }).reverse();
-
-    /* Build last 12 weeks */
-    const weeks = [];
-    for (let i=11; i>=0; i--) {
-      const ws = new Date(_wsd); ws.setDate(ws.getDate()-i*7);
-      const we = new Date(ws);   we.setDate(we.getDate()+6);
-      const wsStr = ws.toISOString().split("T")[0];
-      const weStr = we.toISOString().split("T")[0];
-      const wListed = listings.filter(l => l.dayListed && l.dayListed>=wsStr && l.dayListed<=weStr);
-      const wSold   = listings.filter(l => l.daySold   && l.daySold  >=wsStr && l.daySold  <=weStr);
-      const wStock  = stockData.filter(s => s.datePurchased && s.datePurchased>=wsStr && s.datePurchased<=weStr);
-      weeks.push({
-        label:      ws.toLocaleDateString("en-GB",{day:"numeric",month:"short"}),
-        listed:     wListed.length,
-        sold:       wSold.length,
-        revenue:    wSold.reduce((a,l)=>a+(l.soldPrice||0),0),
-        profit:     wSold.reduce((a,l)=>a+(l.profit||0),0),
-        stockSpend: wStock.reduce((a,s)=>a+s.sellable*s.costPer,0),
-      });
-    }
-    return { months, weeks };
-  }, [listings, stockData]);
-
 
 function Placeholder({ title, icon, note }) {
   return (
