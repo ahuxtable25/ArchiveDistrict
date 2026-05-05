@@ -296,6 +296,10 @@ function ZoomBar({ zoom, zoomIn, zoomOut, setPreset, fitView, presets }) {
 }
 
 function MovTag({tag}) {
+  const map={FAST:"mt mt-f",MEDIUM:"mt mt-m",SLOW:"mt mt-s",UNKNOWN:"mt mt-u",DEAD:"mt mt-d",NEW:"mt mt-n"};
+  return <span className={map[tag]||"mt mt-u"}>{tag}</span>;
+}
+
 function useColWidths(cols) {
   const [widths, setWidths] = useState({});
   const startX   = useRef(null);
