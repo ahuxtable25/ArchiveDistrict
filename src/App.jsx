@@ -667,7 +667,7 @@ nav::-webkit-scrollbar-thumb{background:var(--bd);border-radius:2px}
    Exports filtered rows + visible columns as a .csv file.
    Used by every table in the app.
 ═══════════════════════════════════════════════════════════════ */
-export function exportToCSV(rows, colDefs, filename) {
+function exportToCSV(rows, colDefs, filename) {
   if (!rows.length) { alert("Nothing to export — check your filters."); return; }
   const header = colDefs.map(c => c.label);
   const body   = rows.map(row =>
