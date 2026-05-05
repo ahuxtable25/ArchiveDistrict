@@ -2730,6 +2730,7 @@ function MovementTracker({ listings }) {
   const [showFilterPanel, setShowFilterPanel] = useState(false);
   const [sortCol, setSortCol]         = useState("howManySold");
   const [sortDir, setSortDir]         = useState("desc");
+  const movZoom = useZoom(100);
 
   const groups = useMemo(() => {
     const map = {};
@@ -2830,28 +2831,33 @@ function MovementTracker({ listings }) {
         <div style={{fontSize:11,color:"var(--txd)"}}>Click headers to sort</div>
       </div>
 
-      <div className="tw"><div className="ts">
-        <table className="tbl">
-          <thead>
-            <tr>
-              {visCols.map(c => (
-                <STh key={c.id} col={c.id} sortCol={sortCol} sortDir={sortDir} onSort={onSort}>
-                  {c.label}
-                </STh>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {sorted.length===0 ? (
-              <tr><td colSpan={visCols.length} style={{textAlign:"center",padding:28,color:"var(--txd)"}}>No groups match filters.</td></tr>
-            ) : sorted.map((row,i) => (
-              <tr key={i}>
-                {visCols.map(c => <td key={c.id}>{renderCell(c.id, row)}</td>)}
+      <div className="tw">
+        <ZoomBar {...movZoom} />
+        <div className="ts">
+          <div style={movZoom.style()}>
+          <table className="tbl">
+            <thead>
+              <tr>
+                {visCols.map(c => (
+                  <STh key={c.id} col={c.id} sortCol={sortCol} sortDir={sortDir} onSort={onSort}>
+                    {c.label}
+                  </STh>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div></div>
+            </thead>
+            <tbody>
+              {sorted.length===0 ? (
+                <tr><td colSpan={visCols.length} style={{textAlign:"center",padding:28,color:"var(--txd)"}}>No groups match filters.</td></tr>
+              ) : sorted.map((row,i) => (
+                <tr key={i}>
+                  {visCols.map(c => <td key={c.id}>{renderCell(c.id, row)}</td>)}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          </div>
+        </div>
+      </div>
 
       <div style={{marginTop:8,padding:"8px 12px",background:"var(--sf2)",border:"1px solid var(--bd)",borderRadius:"var(--r)",fontSize:11,color:"var(--txm)"}}>
         <strong style={{color:"var(--tx)"}}>Tag rules:</strong>&nbsp;
@@ -2902,6 +2908,8 @@ function ListingDataTab({ listings }) {
   const [activeCols, setActiveCols]   = useState(ACTIVE_COLS);
   const [showToListCP,  setShowToListCP]  = useState(false);
   const [showActiveCP,  setShowActiveCP]  = useState(false);
+  const activeZoom  = useZoom(100);
+  const toListZoom  = useZoom(100);
 
   const active      = listings.filter(l => l.listed && !l.sold);
   const toBeListed  = listings.filter(l => !l.listed && !l.sold);
@@ -2962,7 +2970,7 @@ function ListingDataTab({ listings }) {
   };
 
   const TableSection = ({ title, subtitle, fHook, cols, setCols, showCP, setShowCP,
-                          renderCell, exportName }) => {
+                          renderCell, exportName, zoom }) => {
     const visCols = cols.filter(c => c.visible);
     return (
       <div style={{marginTop:16}}>
@@ -2989,10 +2997,12 @@ function ListingDataTab({ listings }) {
           </button>
         </div>
         <FilterChips colDefs={cols} activeFilters={fHook.activeFilters} clearFilter={fHook.clearFilter} clearAll={fHook.clearAll} />
-        <div className="tw"><div className="ts">
-          <table className="tbl">
+        <div className="tw">
+          {zoom && <ZoomBar {...zoom} />}
+          <div className="ts"><div style={zoom ? zoom.style() : {}}>
+          <table className="tbl" style={{minWidth:"100%"}}>
             <thead>
-              <tr>{visCols.map(c=><th key={c.id} className="no-sort">{c.label}</th>)}</tr>
+              <tr>{visCols.map(c=><th key={c.id} className="no-sort" style={{minWidth:80}}>{c.label}</th>)}</tr>
             </thead>
             <tbody>
               {fHook.filtered.length===0
@@ -3005,7 +3015,8 @@ function ListingDataTab({ listings }) {
               }
             </tbody>
           </table>
-        </div></div>
+          </div></div>
+        </div>
         <div style={{marginTop:6,fontSize:11,color:"var(--txd)",textAlign:"right"}}>
           {fHook.filtered.length} item{fHook.filtered.length!==1?"s":""}
           {fHook.activeFilters.length>0?" (filtered)":""}
@@ -3077,6 +3088,7 @@ function ListingDataTab({ listings }) {
         showCP={showToListCP} setShowCP={setShowToListCP}
         renderCell={renderToListCell}
         exportName="to_be_listed"
+        zoom={toListZoom}
       />
 
       <TableSection
@@ -3087,6 +3099,7 @@ function ListingDataTab({ listings }) {
         showCP={showActiveCP} setShowCP={setShowActiveCP}
         renderCell={renderActiveCell}
         exportName="active_listings"
+        zoom={activeZoom}
       />
     </div>
   );
@@ -4717,10 +4730,32 @@ function LiveData({ listings, stockData, liveData, setLiveData }) {
 /* ═══════════════════════════════════════════════════════════════
    PRICE CALCULATOR — Command 9
 ═══════════════════════════════════════════════════════════════ */
-function PriceCalculator() {
-  const [cost,         setCost]         = useState("");
-  const [targetProfit, setTargetProfit] = useState("");
-  const [targetMargin, setTargetMargin] = useState("");
+function PriceCalculator({ listings=[] }) {
+  const [mode,          setMode]         = useState("manual"); // "manual" | "sku"
+  const [skuSearch,     setSkuSearch]    = useState("");
+  const [selectedSku,   setSelectedSku]  = useState(null);
+  const [cost,          setCost]         = useState("");
+  const [targetProfit,  setTargetProfit] = useState("");
+  const [targetMargin,  setTargetMargin] = useState("");
+
+  // SKU picker dropdown
+  const unsold = listings.filter(l => !l.sold);
+  const skuMatches = useMemo(() => {
+    if (!skuSearch.trim()) return [];
+    const s = skuSearch.toLowerCase();
+    return unsold.filter(l =>
+      l.sku.toLowerCase().includes(s) ||
+      (l.brand||"").toLowerCase().includes(s) ||
+      (l.colour||"").toLowerCase().includes(s) ||
+      (l.size||"").toLowerCase().includes(s)
+    ).slice(0, 8);
+  }, [skuSearch, unsold]);
+
+  const selectItem = (item) => {
+    setSelectedSku(item);
+    setSkuSearch(`${item.sku} · ${item.brand} ${item.colour} ${item.size}`);
+    setCost(String(item.price || ""));
+  };
 
   const c  = parseFloat(cost)         || 0;
   const tp = parseFloat(targetProfit) || 0;
@@ -4752,10 +4787,59 @@ function PriceCalculator() {
     <div>
       <div className="calc-box">
         <div className="calc-title">Price Calculator</div>
+
+        {/* Mode toggle */}
+        <div style={{display:"flex",gap:8,marginBottom:14}}>
+          <button
+            onClick={()=>{ setMode("manual"); setSelectedSku(null); setSkuSearch(""); }}
+            style={{flex:1,padding:"7px",border:`1.5px solid ${mode==="manual"?"var(--ac)":"var(--bd)"}`,borderRadius:"var(--r)",background:mode==="manual"?"var(--acl)":"var(--sf2)",color:mode==="manual"?"var(--ac)":"var(--txm)",cursor:"pointer",fontSize:12,fontWeight:700}}
+          >✎ Manual entry</button>
+          <button
+            onClick={()=>setMode("sku")}
+            style={{flex:1,padding:"7px",border:`1.5px solid ${mode==="sku"?"var(--ac)":"var(--bd)"}`,borderRadius:"var(--r)",background:mode==="sku"?"var(--acl)":"var(--sf2)",color:mode==="sku"?"var(--ac)":"var(--txm)",cursor:"pointer",fontSize:12,fontWeight:700}}
+          >🔍 Select SKU</button>
+        </div>
+
+        {/* SKU picker */}
+        {mode==="sku" && (
+          <div style={{marginBottom:14,position:"relative"}}>
+            <label className="fl">Search SKU, brand, colour, size</label>
+            <div className="sw" style={{width:"100%"}}>
+              <span className="si">⌕</span>
+              <input className="fi" style={{width:"100%"}} placeholder="e.g. A127 or Navy M"
+                value={skuSearch}
+                onChange={e=>{ setSkuSearch(e.target.value); setSelectedSku(null); setCost(""); }}
+              />
+            </div>
+            {skuSearch && !selectedSku && skuMatches.length > 0 && (
+              <div style={{position:"absolute",top:"100%",left:0,right:0,background:"var(--sf)",border:"1px solid var(--bd)",borderRadius:"var(--r)",zIndex:50,boxShadow:"var(--shm)",maxHeight:220,overflowY:"auto",marginTop:2}}>
+                {skuMatches.map(l=>(
+                  <div key={l.sku} onClick={()=>selectItem(l)}
+                    style={{padding:"9px 12px",cursor:"pointer",fontSize:12,borderBottom:"1px solid var(--bd)",display:"flex",justifyContent:"space-between"}}
+                    onMouseEnter={e=>e.currentTarget.style.background="var(--sf2)"}
+                    onMouseLeave={e=>e.currentTarget.style.background=""}>
+                    <div>
+                      <span className="sku" style={{marginRight:8}}>{l.sku}</span>
+                      <span style={{color:"var(--txm)"}}>{l.brand} · {l.colour} · {l.size}</span>
+                    </div>
+                    <span style={{fontWeight:700,color:"var(--tx)"}}>£{l.price?.toFixed(2)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {selectedSku && (
+              <div style={{marginTop:5,fontSize:11,color:"var(--gn)",fontWeight:700}}>
+                ✓ {selectedSku.sku} — cost £{selectedSku.price?.toFixed(2)} loaded
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="calc-row">
           <span className="calc-lbl">Cost paid for item £</span>
           <input className="calc-in" placeholder="e.g. 17.80"
-            value={cost} onChange={e=>setCost(e.target.value)} />
+            inputMode="decimal" type="text"
+            value={cost} onChange={e=>{ if(/^\d*\.?\d*$/.test(e.target.value)) setCost(e.target.value); }} />
         </div>
         <div style={{margin:"4px 0 10px",fontSize:11,color:"var(--txd)"}}>
           Set either a target profit <strong>or</strong> a target margin — not both:
@@ -4763,14 +4847,16 @@ function PriceCalculator() {
         <div className="calc-row">
           <span className="calc-lbl">Target profit £</span>
           <input className="calc-in" placeholder="e.g. 15.00"
+            inputMode="decimal" type="text"
             value={targetProfit}
-            onChange={e=>{ setTargetProfit(e.target.value); setTargetMargin(""); }} />
+            onChange={e=>{ if(/^\d*\.?\d*$/.test(e.target.value)){ setTargetProfit(e.target.value); setTargetMargin(""); }}} />
         </div>
         <div className="calc-row">
           <span className="calc-lbl">Target margin %</span>
           <input className="calc-in" placeholder="e.g. 45"
+            inputMode="decimal" type="text"
             value={targetMargin}
-            onChange={e=>{ setTargetMargin(e.target.value); setTargetProfit(""); }} />
+            onChange={e=>{ if(/^\d*\.?\d*$/.test(e.target.value)){ setTargetMargin(e.target.value); setTargetProfit(""); }}} />
         </div>
       </div>
 
@@ -5674,7 +5760,7 @@ export default function App() {
             {view==="marksold"    && <QuickMarkSold listings={listings} setListings={setListings} />}
             {view==="shipping"    && <ShippingTab listings={listings} setListings={setListings} />}
             {view==="livedata"    && <LiveData listings={listings} stockData={stockData} liveData={liveData} setLiveData={setLiveData} />}
-            {view==="calculator"  && <PriceCalculator />}
+            {view==="calculator"  && <PriceCalculator listings={listings} />}
             {view==="analytics"   && <Analytics listings={listings} stockData={stockData} />}
             {view==="growth"      && <Growth listings={listings} stockData={stockData} />}
             {view==="history"     && <History listings={listings} stockData={stockData} />}
