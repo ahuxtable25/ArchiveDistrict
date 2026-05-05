@@ -193,35 +193,6 @@ const STOCK_COLS = [
 /* ═══════════════════════════════════════════════════════════════
    SHARED UI PRIMITIVES
 ═══════════════════════════════════════════════════════════════ */
-/* ─── Table zoom ─── */
-function useZoom(initial=100) {
-  const [zoom, setZoomRaw] = useState(initial);
-  const setZoom = (z) => setZoomRaw(Math.min(150, Math.max(50, z)));
-  const PRESETS = [50,75,100,125,150];
-  const stepUp   = () => setZoom(PRESETS.find(p=>p>zoom)||Math.min(zoom+10,150));
-  const stepDown = () => setZoom([...PRESETS].reverse().find(p=>p<zoom)||Math.max(zoom-10,50));
-  return { zoom, setZoom, stepUp, stepDown, PRESETS };
-}
-
-function ZoomBar({ zoom, setZoom, stepUp, stepDown, PRESETS, rowCount, label="" }) {
-  return (
-    <div className="zoom-bar">
-      <span style={{color:"var(--txd)",marginRight:2}}>Zoom</span>
-      <button className="zoom-btn2" onClick={stepDown}>−</button>
-      <span style={{minWidth:34,textAlign:"center",fontWeight:700,color:"var(--txm)"}}>{zoom}%</span>
-      <button className="zoom-btn2" onClick={stepUp}>+</button>
-      <div style={{display:"flex",gap:4,marginLeft:4}}>
-        {PRESETS.map(p=>(
-          <button key={p} className={`zoom-preset${zoom===p?" zap":""}`} onClick={()=>setZoom(p)}>{p}%</button>
-        ))}
-      </div>
-      <div style={{width:"0.5px",height:16,background:"var(--bdd)",margin:"0 4px"}}/>
-      <button className="zoom-preset" onClick={()=>setZoom(65)} title="Fit all columns in view">⊡ Fit</button>
-      {rowCount!=null && <span style={{marginLeft:"auto",color:"var(--txd)"}}>{rowCount} rows{label}</span>}
-    </div>
-  );
-}
-
 /* ─── ComboSelect — dropdown with "Add new…" option ─── */
 function ComboSelect({ value, onChange, options, placeholder, style }) {
   const [adding, setAdding] = useState(false);
@@ -329,11 +300,6 @@ function useColWidths(cols) {
 
   const getStyle = (id) => widths[id] ? { width: widths[id], minWidth: widths[id] } : {};
   return { getStyle, onMouseDown };
-}
-
-function MovTag({tag}) {
-  const map={FAST:"mt mt-f",MEDIUM:"mt mt-m",SLOW:"mt mt-s",UNKNOWN:"mt mt-u",DEAD:"mt mt-d",NEW:"mt mt-n"};
-  return <span className={map[tag]||"mt mt-u"}>{tag}</span>;
 }
 
 function STh({col,sortCol,sortDir,onSort,children,style,noSort,onResize}) {
