@@ -639,12 +639,17 @@ nav::-webkit-scrollbar-thumb{background:var(--bd);border-radius:2px}
 ═══════════════════════════════════════════════════════════════ */
 function exportToCSV(rows, colDefs, filename) {
   if (!rows.length) { alert("Nothing to export — check your filters."); return; }
-  const header = colDefs.map(c => c.label);
-  const body   = rows.map(row =>
-    colDefs.map(c => {
+  const visCols = colDefs.filter(c => c.visible !== false && c.id !== "sel" && c.id !== "photo");
+  const header  = visCols.map(c => c.label || c.id);
+  const body    = rows.map(row =>
+    visCols.map(c => {
       const v = row[c.id];
-      if (v == null)            return "";
+      if (v == null)              return "";
       if (typeof v === "boolean") return v ? "Yes" : "No";
+      if (c.id === "sellThru")    return `${v}%`;
+      if (["costPer","totalCost","totalProfit","netProceeds","stockValLeft",
+           "avgSoldPrice","avgProfit","price","soldPrice","profit"].includes(c.id))
+        return (+(v)||0).toFixed(2);
       return String(v);
     })
   );
@@ -653,7 +658,7 @@ function exportToCSV(rows, colDefs, filename) {
     .join("\n");
   const a = document.createElement("a");
   a.href     = "data:text/csv;charset=utf-8," + encodeURIComponent(csv);
-  a.download = filename;
+  a.download = filename + ".csv";
   a.click();
 }
 
@@ -1374,7 +1379,7 @@ function StockTab({ stockData, setStockData, listings }) {
             {showColPanel && <ColPanel cols={cols} setCols={setCols} onClose={()=>setShowColPanel(false)} />}
           </div>
           <button className="btn btn-o btn-sm"
-            onClick={()=>exportTableCSV(filtered, cols, "stock")}>
+            onClick={()=>exportToCSV(filtered, cols, "stock")}>
             ↓ CSV
           </button>
           <button className="btn btn-o btn-sm" onClick={()=>setShowImport(true)}>↓ Import</button>
@@ -2388,7 +2393,7 @@ function ListingsTab({ listings, setListings, stockData }) {
             )}
           </div>
           <button className="btn btn-o btn-sm"
-            onClick={()=>exportTableCSV(rows, cols, `listings_${activeTab}`)}>
+            onClick={()=>exportToCSV(rows, cols, `listings_${activeTab}`)}>
             ↓ CSV
           </button>
         </div>
@@ -2493,34 +2498,6 @@ function ListingsTab({ listings, setListings, stockData }) {
   );
 }
 
-
-/* ═══════════════════════════════════════════════════════════════
-   SHARED — Export CSV utility (used by every table)
-═══════════════════════════════════════════════════════════════ */
-function exportTableCSV(rows, cols, filename) {
-  if (!rows.length) return;
-  const visCols = cols.filter(c => c.visible !== false && c.id !== "sel" && c.id !== "photo");
-  const headers = visCols.map(c => c.label || c.id);
-  const body = rows.map(row =>
-    visCols.map(c => {
-      const v = row[c.id];
-      if (v == null) return "";
-      if (typeof v === "boolean") return v ? "Yes" : "No";
-      if (c.id === "sellThru") return `${v}%`;
-      if (["costPer","totalCost","totalProfit","netProceeds","stockValLeft",
-           "avgSoldPrice","avgProfit","price","soldPrice","profit"].includes(c.id))
-        return (+(v)||0).toFixed(2);
-      return String(v);
-    })
-  );
-  const csv = [headers, ...body]
-    .map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(","))
-    .join("\n");
-  const a = document.createElement("a");
-  a.href = "data:text/csv;charset=utf-8," + encodeURIComponent(csv);
-  a.download = `${filename}_${TODAY}.csv`;
-  a.click();
-}
 
 /* ═══════════════════════════════════════════════════════════════
    SHARED — Column-aware filter system
@@ -2840,7 +2817,7 @@ function MovementTracker({ listings }) {
           {showColPanel && <ColPanel cols={cols} setCols={setCols} onClose={()=>setShowColPanel(false)} />}
         </div>
         <button className="btn btn-o btn-sm"
-          onClick={()=>exportTableCSV(sorted, cols, "movement_tracker")}>
+          onClick={()=>exportToCSV(sorted, cols, "movement_tracker")}>
           ↓ CSV
         </button>
       </div>
@@ -3009,7 +2986,7 @@ function ListingDataTab({ listings }) {
             {showCP && <ColPanel cols={cols} setCols={setCols} onClose={()=>setShowCP(false)} />}
           </div>
           <button className="btn btn-o btn-sm"
-            onClick={()=>exportTableCSV(fHook.filtered, cols, exportName)}>
+            onClick={()=>exportToCSV(fHook.filtered, cols, exportName)}>
             ↓ CSV
           </button>
         </div>
@@ -4431,7 +4408,7 @@ function ShippingTab({ listings, setListings }) {
                 {showColPanel && <ColPanel cols={cols} setCols={setCols} onClose={()=>setShowColPanel(false)} />}
               </div>
               <button className="btn btn-o btn-sm"
-                onClick={()=>exportTableCSV(shippedF.filtered, cols, "shipped_today")}>
+                onClick={()=>exportToCSV(shippedF.filtered, cols, "shipped_today")}>
                 ↓ CSV
               </button>
             </div>
@@ -4982,7 +4959,7 @@ function Analytics({ listings, stockData }) {
           {showSlowCP && <ColPanel cols={slowCols} setCols={setSlowCols} onClose={()=>setShowSlowCP(false)} />}
         </div>
         <button className="btn btn-o btn-sm"
-          onClick={()=>exportTableCSV(slowSorted, slowCols, "slow_movers")}>
+          onClick={()=>exportToCSV(slowSorted, slowCols, "slow_movers")}>
           ↓ CSV
         </button>
       </div>
@@ -5228,7 +5205,7 @@ function History({ listings, stockData }) {
             <button className="btn btn-o btn-sm" onClick={()=>setShowCP(v=>!v)}>⚙ Columns</button>
             {showCP && <ColPanel cols={cols} setCols={setCols} onClose={()=>setShowCP(false)} />}
           </div>
-          <button className="btn btn-o btn-sm" onClick={()=>exportTableCSV(fHook.filtered, cols, exportName)}>↓ CSV</button>
+          <button className="btn btn-o btn-sm" onClick={()=>exportToCSV(fHook.filtered, cols, exportName)}>↓ CSV</button>
         </div>
         <FilterChips colDefs={cols} activeFilters={fHook.activeFilters} clearFilter={fHook.clearFilter} clearAll={fHook.clearAll} />
         <div className="tw"><div className="ts" style={{maxHeight:"none"}}>
