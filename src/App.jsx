@@ -135,31 +135,31 @@ const deriveStock = (stockData, listings) =>
   });
 
 const DEFAULT_COLS = [
-  {id:"sel",       label:"",               visible:true,  locked:true },
-  {id:"photo",     label:"Photo",          visible:false, locked:false},
-  {id:"bundleSku", label:"Bundle SKU",     visible:true,  locked:false},
-  {id:"name",      label:"Stock Name",     visible:true,  locked:false},
-  {id:"brand",     label:"Brand",          visible:true,  locked:false},
-  {id:"type",      label:"Type",           visible:true,  locked:false},
-  {id:"colour",    label:"Colour",         visible:true,  locked:false},
-  {id:"size",      label:"Size",           visible:true,  locked:false},
-  {id:"desc",      label:"Description",    visible:true,  locked:false},
-  {id:"length",    label:"Length",         visible:true,  locked:false},
-  {id:"pitToPit",  label:"Pit to Pit",     visible:true,  locked:false},
-  {id:"listed",    label:"Listed?",        visible:true,  locked:false},
-  {id:"sku",       label:"SKU",            visible:true,  locked:false},
-  {id:"price",     label:"Price £",        visible:true,  locked:false},
-  {id:"sold",      label:"Sold?",          visible:true,  locked:false},
-  {id:"soldPrice", label:"Sold Price £",   visible:true,  locked:false},
-  {id:"profit",    label:"Net Profit £",   visible:true,  locked:false},
-  {id:"notes",     label:"Notes",          visible:true,  locked:false},
-  {id:"platform",  label:"Platform Sold",  visible:true,  locked:false},
-  {id:"platforms",  label:"Platforms Listed",visible:true, locked:false},
-  {id:"platformDates",label:"Listed Dates",  visible:true, locked:false},
-  {id:"dayListed", label:"Day Listed",     visible:true,  locked:false},
-  {id:"daySold",   label:"Day Sold",       visible:true,  locked:false},
-  {id:"days",      label:"Days to Sell",   visible:true,  locked:false},
-  {id:"shipped",   label:"Shipped?",       visible:true,  locked:false},
+  {id:"sel",          label:"",               visible:true,  locked:true },
+  {id:"photo",        label:"Photo",          visible:false, locked:false},
+  {id:"bundleSku",    label:"Bundle SKU",     visible:true,  locked:false},
+  {id:"name",         label:"Stock Name",     visible:true,  locked:false},
+  {id:"brand",        label:"Brand",          visible:true,  locked:false},
+  {id:"type",         label:"Type",           visible:true,  locked:false},
+  {id:"colour",       label:"Colour",         visible:true,  locked:false},
+  {id:"size",         label:"Size",           visible:true,  locked:false},
+  {id:"sku",          label:"SKU",            visible:true,  locked:false},
+  {id:"desc",         label:"Description",    visible:true,  locked:false},
+  {id:"length",       label:"Length",         visible:true,  locked:false},
+  {id:"pitToPit",     label:"Pit to Pit",     visible:true,  locked:false},
+  {id:"listed",       label:"Listed?",        visible:true,  locked:false},
+  {id:"price",        label:"Price £",        visible:true,  locked:false},
+  {id:"sold",         label:"Sold?",          visible:true,  locked:false},
+  {id:"soldPrice",    label:"Sold Price £",   visible:true,  locked:false},
+  {id:"profit",       label:"Net Profit £",   visible:true,  locked:false},
+  {id:"notes",        label:"Notes",          visible:true,  locked:false},
+  {id:"platform",     label:"Platform Sold",  visible:true,  locked:false},
+  {id:"platforms",    label:"Platforms Listed",visible:true, locked:false},
+  {id:"platformDates",label:"Listed Dates",   visible:true,  locked:false},
+  {id:"dayListed",    label:"Day Listed",     visible:true,  locked:false},
+  {id:"daySold",      label:"Day Sold",       visible:true,  locked:false},
+  {id:"days",         label:"Days to Sell",   visible:true,  locked:false},
+  {id:"shipped",      label:"Shipped?",       visible:true,  locked:false},
 ];
 
 /* ─── Default column config for Stock tab ─── */
@@ -230,20 +230,57 @@ function ComboSelect({ value, onChange, options, placeholder, style }) {
   );
 }
 
+/* ─── Column resize hook ─── */
+function useColWidths(cols) {
+  const [widths, setWidths] = useState({});
+  const startX   = useRef(null);
+  const startW   = useRef(null);
+  const colId    = useRef(null);
+  const thRef    = useRef(null);
+
+  const onMouseDown = (e, id, th) => {
+    e.preventDefault();
+    e.stopPropagation();
+    startX.current  = e.clientX;
+    colId.current   = id;
+    thRef.current   = th;
+    startW.current  = widths[id] || th.offsetWidth;
+
+    const onMove = (ev) => {
+      const diff = ev.clientX - startX.current;
+      setWidths(prev => ({ ...prev, [colId.current]: Math.max(60, startW.current + diff) }));
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
+
+  const getStyle = (id) => widths[id] ? { width: widths[id], minWidth: widths[id] } : {};
+  return { getStyle, onMouseDown };
+}
+
 function MovTag({tag}) {
   const map={FAST:"mt mt-f",MEDIUM:"mt mt-m",SLOW:"mt mt-s",UNKNOWN:"mt mt-u",DEAD:"mt mt-d",NEW:"mt mt-n"};
   return <span className={map[tag]||"mt mt-u"}>{tag}</span>;
 }
 
-function STh({col,sortCol,sortDir,onSort,children,style,noSort}) {
-  if (noSort) return <th className="no-sort" style={style}>{children}</th>;
+function STh({col,sortCol,sortDir,onSort,children,style,noSort,onResize}) {
+  const thRef = useRef(null);
+  const handle = onResize ? (
+    <span className="col-resize" onMouseDown={e=>onResize(e,col,thRef.current)} onClick={e=>e.stopPropagation()} />
+  ) : null;
+  if (noSort) return <th ref={thRef} className="no-sort" style={style}>{children}{handle}</th>;
   const active = sortCol===col;
   return (
-    <th onClick={()=>onSort(col)} style={style}>
+    <th ref={thRef} onClick={()=>onSort(col)} style={style}>
       {children}
       <span style={{marginLeft:4,fontSize:9,opacity:active?1:0.25}}>
         {active?(sortDir==="asc"?"▲":"▼"):"↕"}
       </span>
+      {handle}
     </th>
   );
 }
@@ -375,9 +412,11 @@ nav::-webkit-scrollbar-thumb{background:var(--bd);border-radius:2px}
 .tbl{width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed}
 @media(max-width:768px){.ts{overflow-x:auto;-webkit-overflow-scrolling:touch}.tbl{table-layout:auto}}
 .tbl thead th{position:sticky;top:0;z-index:5;background:var(--sf2);box-shadow:0 1px 0 var(--bd),0 2px 0 var(--bd)}
-.tbl th{padding:8px 11px;font-size:9px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--txm);border-bottom:1px solid var(--bd);text-align:left;background:var(--sf2);white-space:nowrap;cursor:pointer;user-select:none;transition:color .1s}
+.tbl th{padding:8px 11px;font-size:9px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--txm);border-bottom:1px solid var(--bd);text-align:left;background:var(--sf2);white-space:nowrap;cursor:pointer;user-select:none;transition:color .1s;position:relative;overflow:visible}
+.col-resize{position:absolute;right:-2px;top:0;bottom:0;width:6px;cursor:col-resize;z-index:10;background:transparent}
+.col-resize:hover{background:var(--ac);opacity:.4}
 .tbl th:hover{color:var(--tx)}.tbl th.no-sort{cursor:default}.tbl th.no-sort:hover{color:var(--txm)}
-.tbl td{padding:9px 11px;border-bottom:1px solid var(--bd);color:var(--tx);vertical-align:middle;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px}
+.tbl td{padding:9px 11px;border-bottom:1px solid var(--bd);color:var(--tx);vertical-align:middle;white-space:nowrap}
 .tbl tr:last-child td{border-bottom:none}
 .tbl tr.clickable:hover td{background:#faf9f6;cursor:pointer}
 .tbl tr.sold-r td{background:#f0faf4;color:var(--txm)}.tbl tr.listed-r td{background:#fff8f0}.tbl tr.dim td{opacity:.55}.tbl tr.sel td{background:#fdf4f5}
@@ -1213,8 +1252,7 @@ function StockTab({ stockData, setStockData, listings }) {
   }, [colFiltered, search, websiteFilter, restockFilter, sortCol, sortDir]);
 
   const visCols = cols.filter(c => c.visible);
-
-  const handleAddStock  = (ns) => setStockData(p => [...p, ns]);
+  const { getStyle: getStockColStyle, onMouseDown: onStockColResize } = useColWidths(cols);
   const handleDeleteStock = (bsku) => {
     setStockData(prev => prev.filter(s => s.bundleSku !== bsku));
     setEditStock(null);
@@ -1302,9 +1340,10 @@ function StockTab({ stockData, setStockData, listings }) {
               <tr>
                 {visCols.map(c => {
                   const sortable = NUMERIC_STOCK_COLS.has(c.id) || c.id==="bundleSku" || c.id==="name";
+                  const style = getStockColStyle(c.id);
                   return sortable
-                    ? <STh key={c.id} col={c.id} sortCol={sortCol} sortDir={sortDir} onSort={onSort}>{c.label}</STh>
-                    : <th key={c.id} className="no-sort">{c.label}</th>;
+                    ? <STh key={c.id} col={c.id} sortCol={sortCol} sortDir={sortDir} onSort={onSort} style={style} onResize={onStockColResize}>{c.label}</STh>
+                    : <th key={c.id} className="no-sort" style={style}><span>{c.label}</span><span className="col-resize" onMouseDown={e=>onStockColResize(e,c.id,e.currentTarget.parentElement)} onClick={e=>e.stopPropagation()}/></th>;
                 })}
               </tr>
             </thead>
@@ -1711,7 +1750,7 @@ function ListingCell({ colId, l, onShipToggle, onSelect, selected }) {
   }
   if (colId === "bundleSku") return <span className="bsku">{l.bundleSku}</span>;
   if (colId === "name")      return (
-    <span style={{fontWeight:600,maxWidth:160,display:"block",overflow:"hidden",textOverflow:"ellipsis"}}>
+    <span style={{fontWeight:600}}>
       {l.name}
     </span>
   );
@@ -2109,6 +2148,7 @@ function ListingsTab({ listings, setListings, stockData }) {
   }, [colFiltered, activeTab, showSold, search, bundleFilter, platFilter, sizeFilter, sortCol, sortDir]);
 
   const visCols = cols.filter(c => c.visible);
+  const { getStyle: getColStyle, onMouseDown: onColResize } = useColWidths(cols);
 
   const onSort = (col) => {
     if (!SORTABLE_LISTING_COLS.has(col)) return;
@@ -2317,9 +2357,10 @@ function ListingsTab({ listings, setListings, stockData }) {
                 </th>
                 {visCols.filter(c=>c.id!=="sel").map(c => {
                   const sortable = SORTABLE_LISTING_COLS.has(c.id);
+                  const style = getColStyle(c.id);
                   return sortable
-                    ? <STh key={c.id} col={c.id} sortCol={sortCol} sortDir={sortDir} onSort={onSort}>{c.label}</STh>
-                    : <th key={c.id} className="no-sort">{c.label}</th>;
+                    ? <STh key={c.id} col={c.id} sortCol={sortCol} sortDir={sortDir} onSort={onSort} style={style} onResize={onColResize}>{c.label}</STh>
+                    : <th key={c.id} className="no-sort" style={style}><span>{c.label}</span><span className="col-resize" onMouseDown={e=>onColResize(e,c.id,e.currentTarget.parentElement)} onClick={e=>e.stopPropagation()}/></th>;
                 })}
               </tr>
             </thead>
@@ -2704,7 +2745,7 @@ function MovementTracker({ listings }) {
   const visCols = cols.filter(c => c.visible);
 
   const renderCell = (col, row) => {
-    if (col==="name")     return <span style={{fontWeight:700,minWidth:155,display:"block"}}>{row.name}</span>;
+    if (col==="name")     return <span style={{fontWeight:700}}>{row.name}</span>;
     if (col==="type")     return <span className="badge b-0">{row.type}</span>;
     if (col==="brand")    return <span style={{color:"var(--txm)"}}>{row.brand}</span>;
     if (col==="tag")      return <MovTag tag={row.tag} />;
@@ -4293,7 +4334,7 @@ function ShippingTab({ listings, setListings }) {
 
   const renderCell = (col, l) => {
     if (col==="sku")       return <span className="sku">{l.sku}</span>;
-    if (col==="name")      return <span style={{fontWeight:600,maxWidth:150,display:"block",overflow:"hidden",textOverflow:"ellipsis"}}>{l.name}</span>;
+    if (col==="name")      return <span style={{fontWeight:600}}>{l.name}</span>;
     if (col==="colour")    return l.colour;
     if (col==="size")      return <span style={{color:"var(--txm)"}}>{l.size}</span>;
     if (col==="platform")  return l.platform ? <span className="badge b-b">{l.platform}</span> : <span style={{color:"var(--txd)"}}>—</span>;
@@ -4817,7 +4858,7 @@ function Analytics({ listings, stockData }) {
 
   const renderSlowCell = (col, l) => {
     if (col==="sku")      return <span className="sku">{l.sku}</span>;
-    if (col==="name")     return <span style={{fontWeight:600,maxWidth:160,display:"block",overflow:"hidden",textOverflow:"ellipsis"}}>{l.name}</span>;
+    if (col==="name")     return <span style={{fontWeight:600}}>{l.name}</span>;
     if (col==="colour")   return l.colour;
     if (col==="size")     return <span style={{color:"var(--txm)"}}>{l.size}</span>;
     if (col==="tag")      return <MovTag tag={l.tag}/>;
