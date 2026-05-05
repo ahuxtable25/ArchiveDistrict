@@ -2477,8 +2477,9 @@ function ListingsTab({ listings, setListings, stockData }) {
               })}
             </tbody>
           </table>
-        </div>
-      </div>
+          </div>{/* end zoom wrap */}
+        </div>{/* end .ts */}
+      </div>{/* end .tw */}
 
       {/* ── Floating bulk action bar ── */}
       {selected.size > 0 && (
