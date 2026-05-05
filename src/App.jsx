@@ -1490,12 +1490,54 @@ function EditListingDrawer({ listing, stockData, onSave, onDelete, onClose }) {
 
           <Sec label="Listing Info" />
           <div className="fr">
-            <label className="fl">Platform</label>
-            <select className="fsel" value={form.platform||""}
-              onChange={e=>set("platform", e.target.value||null)}>
-              <option value="">— none —</option>
-              {PLATFORMS.map(p => <option key={p}>{p}</option>)}
-            </select>
+            <label className="fl">Platforms Listed On</label>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,marginTop:4}}>
+              {MARK_LISTED_PLATS.map(p => {
+                const isSelected = (form.platforms||[]).includes(p) || form.platform === p;
+                const PLAT_DOTS = {
+                  Depop:"#ff2300",Vinted:"#09b1ba",eBay:"#e53238",
+                  Whatnot:"#7c3aed","Facebook Marketplace":"#1877f2",
+                  Tilt:"#f59e0b",Grailed:"#1a1a1a",
+                };
+                const col = isSelected ? (PLAT_DOTS[p]||"var(--ac)") : null;
+                return (
+                  <button key={p}
+                    onClick={() => {
+                      setDirty(true);
+                      const current = [...new Set([...(form.platforms||[]), form.platform].filter(Boolean))];
+                      const next = current.includes(p)
+                        ? current.filter(x=>x!==p)
+                        : [...current, p];
+                      setForm(prev => ({
+                        ...prev,
+                        platforms: next,
+                        platform: next[0] || null,
+                        platformDates: {
+                          ...(prev.platformDates||{}),
+                          ...(current.includes(p) ? {} : {[p]: prev.dayListed || TODAY}),
+                        },
+                      }));
+                    }}
+                    style={{
+                      padding:"6px 4px",fontSize:10,fontWeight:700,textAlign:"center",
+                      border:`1.5px solid ${col||"var(--bd)"}`,
+                      borderRadius:"var(--r)",cursor:"pointer",
+                      background:col ? col+"18" : "var(--sf2)",
+                      color:col||"var(--txm)",
+                      transition:"all .12s",
+                    }}
+                  >
+                    {p}{isSelected?" ✓":""}
+                  </button>
+                );
+              })}
+            </div>
+            {(form.platforms||[]).length > 0 && (
+              <div style={{fontSize:10,color:"var(--txd)",marginTop:5}}>
+                Primary: <strong style={{color:"var(--tx)"}}>{form.platforms?.[0]||form.platform}</strong>
+                {" · "}Tap to toggle
+              </div>
+            )}
           </div>
           <div className="fr2">
             <div className="fr">
@@ -1784,6 +1826,7 @@ function AddListingModal({ listings, stockData, onAdd, onClose }) {
     photoUrl:   "",
     notes:      "",
     platform:   null,
+    platforms:  [],
   });
   const [errors, setErrors] = useState({});
 
@@ -1927,12 +1970,29 @@ function AddListingModal({ listings, stockData, onAdd, onClose }) {
 
           {/* Platform + dates */}
           <div className="fr">
-            <label className="fl">Platform (if already live)</label>
-            <select className="fsel" value={form.platform||""}
-              onChange={e=>set("platform",e.target.value||null)}>
-              <option value="">— none yet —</option>
-              {PLATFORMS.map(p => <option key={p}>{p}</option>)}
-            </select>
+            <label className="fl">Platforms (if already live)</label>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,marginTop:4}}>
+              {MARK_LISTED_PLATS.map(p => {
+                const isSelected = (form.platforms||[]).includes(p);
+                return (
+                  <button key={p}
+                    onClick={() => {
+                      const current = form.platforms||[];
+                      const next = current.includes(p) ? current.filter(x=>x!==p) : [...current,p];
+                      set("platforms", next);
+                      set("platform", next[0]||null);
+                    }}
+                    style={{
+                      padding:"6px 4px",fontSize:10,fontWeight:700,textAlign:"center",
+                      border:`1.5px solid ${isSelected?"var(--ac)":"var(--bd)"}`,
+                      borderRadius:"var(--r)",cursor:"pointer",
+                      background:isSelected?"var(--acl)":"var(--sf2)",
+                      color:isSelected?"var(--ac)":"var(--txm)",
+                    }}
+                  >{p}{isSelected?" ✓":""}</button>
+                );
+              })}
+            </div>
           </div>
           <div className="fr2">
             <div className="fr">
@@ -2966,7 +3026,8 @@ const MARK_LISTED_PLATS = [
 ];
 
 function MarkAsListed({ listings, setListings }) {
-  const unlisted   = useMemo(() => listings.filter(l => !l.listed && !l.sold), [listings]);
+  // Search all non-sold items — allows adding platforms to already-listed items
+  const unlisted   = useMemo(() => listings.filter(l => !l.sold), [listings]);
 
   // ── Single-item mode ──
   const [skuInput,    setSkuInput]    = useState("");
@@ -3064,12 +3125,12 @@ function MarkAsListed({ listings, setListings }) {
     const lines = bulkInput.trim().split("\n").filter(l => l.trim());
     const parsed = lines.map(line => {
       const sku  = line.trim().toUpperCase();
-      const item = unlisted.find(l => l.sku === sku);
+      const item = listings.find(l => l.sku === sku && !l.sold);
       return {
-        sku,
-        item,
-        found:       !!item,
-        alreadyListed: listings.find(l => l.sku === sku)?.listed ?? false,
+        sku, item,
+        found: !!item,
+        alreadyListed: item?.listed ?? false,
+        existingPlats: item?.platforms || [],
       };
     });
     setBulkParsed(parsed);
@@ -3077,12 +3138,19 @@ function MarkAsListed({ listings, setListings }) {
   };
 
   const confirmBulk = () => {
-    const valid  = bulkParsed.filter(p => p.found && !p.alreadyListed);
+    const valid = bulkParsed.filter(p => p.found);
     if (!valid.length || bulkPlats.size === 0) return;
     const platsArr = [...bulkPlats];
     setListings(prev => prev.map(l => {
-      if (!valid.find(v => v.sku === l.sku)) return l;
-      return { ...l, listed:true, dayListed:bulkDate, platform:l.platform||platsArr[0], platforms:[...new Set([...(l.platforms||[]),...platsArr])], platformDates:{...(l.platformDates||{}), ...Object.fromEntries(platsArr.map(p=>[p,bulkDate]))} };
+      const u = valid.find(v => v.sku === l.sku);
+      if (!u) return l;
+      return {
+        ...l, listed:true,
+        dayListed: l.dayListed || bulkDate,
+        platform: l.platform || platsArr[0],
+        platforms: [...new Set([...(l.platforms||[]),...platsArr])],
+        platformDates: {...(l.platformDates||{}), ...Object.fromEntries(platsArr.map(p=>[p,bulkDate]))},
+      };
     }));
     setHistory(prev => [{
       time: new Date().toLocaleTimeString(),
@@ -3095,14 +3163,12 @@ function MarkAsListed({ listings, setListings }) {
     setBulkPlats(new Set());
   };
 
-  const bulkValid = bulkParsed.filter(p => p.found && !p.alreadyListed);
+  const bulkValid = bulkParsed.filter(p => p.found);
 
   /* ── Info banner ── */
   const Banner = () => (
     <div className="info-banner" style={{marginBottom:14}}>
-      <strong>Mark as Listed</strong> — select one item or paste multiple SKUs, tick the platforms
-      it's been listed on, then confirm. Supports cross-listing (multiple platforms at once).
-      Primary platform is set to the first one ticked.
+      <strong>Mark as Listed</strong> — search any unsold item. Already-listed platforms show as 🔒 — you can add new platforms on top. Use this for first-time listing and cross-listing updates.
     </div>
   );
 
@@ -3120,7 +3186,7 @@ function MarkAsListed({ listings, setListings }) {
           {bulkParsed.length>0 && <span className="tc">{bulkParsed.length}</span>}
         </div>
         <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:8,paddingBottom:8}}>
-          <span style={{fontSize:11,color:"var(--txd)"}}>{unlisted.length} items to list</span>
+          <span style={{fontSize:11,color:"var(--txd)"}}>{listings.filter(l=>!l.sold).length} unsold items</span>
         </div>
       </div>
 
@@ -3345,9 +3411,9 @@ function MarkAsListed({ listings, setListings }) {
                   }}>
                     <div style={{display:"flex",alignItems:"center",gap:8}}>
                       <span className="sku">{p.sku}</span>
-                      {!p.found && <span className="badge b-r">Not found</span>}
-                      {p.found && p.alreadyListed && <span className="badge b-a">Already listed</span>}
-                      {p.found && !p.alreadyListed && <span className="badge b-g">Ready</span>}
+                      {!p.found && <span className="badge b-r">Not found / sold</span>}
+                      {p.found && p.alreadyListed && <span className="badge b-b">Update platforms</span>}
+                      {p.found && !p.alreadyListed && <span className="badge b-g">New listing</span>}
                     </div>
                     {p.item && (
                       <div style={{fontSize:11,color:"var(--txm)",textAlign:"right"}}>
@@ -3359,7 +3425,7 @@ function MarkAsListed({ listings, setListings }) {
                 <div style={{marginTop:10,padding:"8px 10px",background:"var(--sf2)",borderRadius:"var(--r)",fontSize:11,color:"var(--txm)"}}>
                   <strong style={{color:"var(--gn)"}}>{bulkValid.length} ready</strong>
                   {" · "}{bulkParsed.filter(p=>!p.found).length} not found
-                  {" · "}{bulkParsed.filter(p=>p.alreadyListed).length} already listed
+                  {" · "}{bulkParsed.filter(p=>p.alreadyListed).length} updating platforms
                 </div>
                 {bulkPlats.size>0 && (
                   <div style={{marginTop:8,padding:"8px 10px",background:"var(--gnl)",borderRadius:"var(--r)",fontSize:11,color:"var(--gn)"}}>
