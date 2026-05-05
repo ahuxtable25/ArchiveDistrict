@@ -154,7 +154,8 @@ const DEFAULT_COLS = [
   {id:"profit",    label:"Net Profit £",   visible:true,  locked:false},
   {id:"notes",     label:"Notes",          visible:true,  locked:false},
   {id:"platform",  label:"Platform Sold",  visible:true,  locked:false},
-  {id:"platforms", label:"Platforms Listed",visible:true, locked:false},
+  {id:"platforms",  label:"Platforms Listed",visible:true, locked:false},
+  {id:"platformDates",label:"Listed Dates",  visible:true, locked:false},
   {id:"dayListed", label:"Day Listed",     visible:true,  locked:false},
   {id:"daySold",   label:"Day Sold",       visible:true,  locked:false},
   {id:"days",      label:"Days to Sell",   visible:true,  locked:false},
@@ -1499,13 +1500,29 @@ function EditListingDrawer({ listing, stockData, onSave, onDelete, onClose }) {
           <div className="fr2">
             <div className="fr">
               <label className="fl">Day Listed</label>
-              <input className="finp" type="date" value={form.dayListed||""}
-                onChange={e=>set("dayListed", e.target.value||null)} />
+              <div style={{display:"flex",gap:5,alignItems:"center"}}>
+                <input className="finp" type="date" value={form.dayListed||""}
+                  onChange={e=>set("dayListed", e.target.value||null)}
+                  style={{flex:1}} />
+                {form.dayListed && (
+                  <button onClick={()=>set("dayListed",null)}
+                    style={{background:"none",border:"none",cursor:"pointer",color:"var(--txd)",fontSize:14,lineHeight:1,padding:"0 2px"}}
+                    title="Clear date">✕</button>
+                )}
+              </div>
             </div>
             <div className="fr">
               <label className="fl">Day Sold</label>
-              <input className="finp" type="date" value={form.daySold||""}
-                onChange={e=>set("daySold", e.target.value||null)} />
+              <div style={{display:"flex",gap:5,alignItems:"center"}}>
+                <input className="finp" type="date" value={form.daySold||""}
+                  onChange={e=>set("daySold", e.target.value||null)}
+                  style={{flex:1}} />
+                {form.daySold && (
+                  <button onClick={()=>set("daySold",null)}
+                    style={{background:"none",border:"none",cursor:"pointer",color:"var(--txd)",fontSize:14,lineHeight:1,padding:"0 2px"}}
+                    title="Clear date">✕</button>
+                )}
+              </div>
             </div>
           </div>
           {form.dayListed && form.daySold && (
@@ -1548,6 +1565,63 @@ function EditListingDrawer({ listing, stockData, onSave, onDelete, onClose }) {
               Shipped
             </label>
           </div>
+
+          {/* Process Return — only shows when item is sold */}
+          {form.sold && (
+            <div style={{
+              marginTop:14,padding:"12px 13px",
+              background:"#fff8f0",border:"1px solid #f0c040",
+              borderRadius:"var(--r)",
+            }}>
+              <div style={{fontSize:11,fontWeight:700,color:"#7a4e0e",marginBottom:8}}>
+                📦 Process a Return
+              </div>
+              <div style={{fontSize:11,color:"#7a4e0e",marginBottom:10,lineHeight:1.5}}>
+                Choose what happens after the return is received:
+              </div>
+              <div style={{display:"flex",gap:7}}>
+                <button
+                  className="btn btn-o btn-sm"
+                  style={{flex:1,justifyContent:"center",fontSize:11}}
+                  onClick={() => {
+                    const returnDate = new Date().toISOString().split("T")[0];
+                    setForm(prev => ({
+                      ...prev,
+                      sold:false, soldPrice:null, profit:null,
+                      daySold:null, days:null, shipped:false, shippedDate:null,
+                      listed:true,
+                      notes:(prev.notes ? prev.notes + "\n" : "") + `Returned ${returnDate} — relisted`,
+                    }));
+                    setDirty(true);
+                  }}
+                >
+                  ↩ Relist (keep live)
+                </button>
+                <button
+                  className="btn btn-o btn-sm"
+                  style={{flex:1,justifyContent:"center",fontSize:11}}
+                  onClick={() => {
+                    const returnDate = new Date().toISOString().split("T")[0];
+                    setForm(prev => ({
+                      ...prev,
+                      sold:false, soldPrice:null, profit:null,
+                      daySold:null, days:null, shipped:false, shippedDate:null,
+                      listed:false, dayListed:null,
+                      platforms:[], platformDates:{},
+                      notes:(prev.notes ? prev.notes + "\n" : "") + `Returned ${returnDate} — pulled from platforms`,
+                    }));
+                    setDirty(true);
+                  }}
+                >
+                  ↩ Pull down (relist later)
+                </button>
+              </div>
+              <div style={{fontSize:10,color:"#7a4e0e",marginTop:7,opacity:.7}}>
+                Both options clear sold data and add a return note. Save Changes to confirm.
+              </div>
+            </div>
+          )}
+
           {dirty && (
             <div style={{marginTop:12,fontSize:11,color:"var(--am)",fontWeight:700}}>
               ● Unsaved changes
@@ -1635,6 +1709,37 @@ function ListingCell({ colId, l, onShipToggle, onSelect, selected }) {
           {plats.map(p => <span key={p} className="badge b-b" style={{fontSize:9,padding:"1px 5px"}}>{p}</span>)}
         </div>
       : <span style={{color:"var(--txd)"}}>—</span>;
+  }
+  if (colId === "platformDates") {
+    const pd = l.platformDates || {};
+    const plats = l.platforms?.length ? l.platforms : l.platform ? [l.platform] : [];
+    if (!plats.length) return <span style={{color:"var(--txd)"}}>—</span>;
+    const PLAT_DOTS = {
+      Depop:"#ff2300",Vinted:"#09b1ba",eBay:"#e53238",
+      Whatnot:"#7c3aed",Grailed:"#1a1a1a",
+      "Facebook Marketplace":"#1877f2",Tilt:"#f59e0b",
+    };
+    return (
+      <div style={{display:"flex",flexDirection:"column",gap:2}}>
+        {plats.map(p => {
+          const date = pd[p] || l.dayListed;
+          const col  = PLAT_DOTS[p] || "var(--txm)";
+          return (
+            <div key={p} style={{
+              display:"inline-flex",alignItems:"center",gap:5,
+              background:col+"18",border:`1px solid ${col}55`,
+              borderRadius:20,padding:"2px 7px",fontSize:10,whiteSpace:"nowrap",
+            }}>
+              <span style={{width:6,height:6,borderRadius:"50%",background:col,flexShrink:0,display:"inline-block"}}/>
+              <span style={{fontWeight:700,color:col}}>{p}</span>
+              {date && <span style={{color:"#666",fontSize:9}}>
+                {new Date(date).toLocaleDateString("en-GB",{day:"numeric",month:"short"})}
+              </span>}
+            </div>
+          );
+        })}
+      </div>
+    );
   }
   if (colId === "dayListed") return <span style={{color:"var(--txm)",fontSize:11}}>{l.dayListed || "—"}</span>;
   if (colId === "daySold")   return <span style={{color:"var(--txm)",fontSize:11}}>{l.daySold   || "—"}</span>;
@@ -2683,9 +2788,15 @@ function ListingDataTab({ listings }) {
 
   // By-tag breakdown
   const byTag = (arr, tag) => arr.filter(l => getTag(l.name,l.type,l.brand,listings)===tag).length;
-  const bySku = (arr) => {
+
+  // Group by name+bundleSku so BDL-008 Detroit and BDL-008 Active show separately
+  const byNameSku = (arr) => {
     const m={};
-    arr.forEach(l => { if(!m[l.bundleSku]) m[l.bundleSku]={name:l.name,bsku:l.bundleSku,count:0}; m[l.bundleSku].count++; });
+    arr.forEach(l => {
+      const k = `${l.bundleSku}||${l.name}`;
+      if(!m[k]) m[k]={name:l.name, bsku:l.bundleSku, count:0};
+      m[k].count++;
+    });
     return Object.values(m).sort((a,b)=>b.count-a.count);
   };
 
@@ -2787,8 +2898,8 @@ function ListingDataTab({ listings }) {
         ))}
       </div>
 
-      {/* Breakdowns */}
-      <div className="two-col" style={{marginBottom:4}}>
+      {/* Breakdowns — 3 columns */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:11,marginBottom:4}}>
         <div className="sc">
           <div className="st" style={{marginBottom:8}}>Active by Mover Tag</div>
           {[["FAST","mt-f"],["MEDIUM","mt-m"],["SLOW","mt-s"],["NEW","mt-n"],["UNKNOWN","mt-u"],["DEAD","mt-d"]].map(([tag,cls])=>(
@@ -2799,11 +2910,23 @@ function ListingDataTab({ listings }) {
           ))}
         </div>
         <div className="sc">
+          <div className="st" style={{marginBottom:8}}>Active by Bundle</div>
+          {byNameSku(active).length===0
+            ? <div style={{fontSize:12,color:"var(--txd)",padding:"8px 0"}}>No active listings.</div>
+            : byNameSku(active).map(b=>(
+              <div key={`${b.bsku}-${b.name}`} className="sr">
+                <span className="srl"><span className="bsku" style={{marginRight:5}}>{b.bsku}</span>{b.name}</span>
+                <span className="srv">{b.count}</span>
+              </div>
+            ))
+          }
+        </div>
+        <div className="sc">
           <div className="st" style={{marginBottom:8}}>To Be Listed by Bundle</div>
-          {bySku(toBeListed).length===0
+          {byNameSku(toBeListed).length===0
             ? <div style={{fontSize:12,color:"var(--txd)",padding:"8px 0"}}>All items are listed.</div>
-            : bySku(toBeListed).map(b=>(
-              <div key={b.bsku} className="sr">
+            : byNameSku(toBeListed).map(b=>(
+              <div key={`${b.bsku}-${b.name}`} className="sr">
                 <span className="srl"><span className="bsku" style={{marginRight:5}}>{b.bsku}</span>{b.name}</span>
                 <span className="srv">{b.count}</span>
               </div>
@@ -2870,25 +2993,29 @@ function MarkAsListed({ listings, setListings }) {
   const togglePlat = (set, setSel, p) =>
     setSel(prev => { const n = new Set(prev); n.has(p) ? n.delete(p) : n.add(p); return n; });
 
-  const PlatGrid = ({ sel, onToggle }) => (
+  const PlatGrid = ({ sel, onToggle, existingPlats=[] }) => (
     <div className="plat-grid-4">
-      {MARK_LISTED_PLATS.map(p => (
-        <button
-          key={p}
-          onClick={() => onToggle(p)}
-          style={{
-            padding:"7px 4px",fontSize:11,fontWeight:700,
-            border:`1.5px solid ${sel.has(p)?"var(--ac)":"var(--bd)"}`,
-            borderRadius:"var(--r)",cursor:"pointer",textAlign:"center",
-            background: sel.has(p) ? "var(--acl)" : "var(--sf2)",
-            color: sel.has(p) ? "var(--ac)" : "var(--txm)",
-            transition:"all .12s",
-          }}
-        >
-          {p}
-          {sel.has(p) && <span style={{marginLeft:4,fontSize:10}}>✓</span>}
-        </button>
-      ))}
+      {MARK_LISTED_PLATS.map(p => {
+        const isExisting = existingPlats.includes(p);
+        const isSelected = sel.has(p);
+        return (
+          <button key={p}
+            onClick={() => !isExisting && onToggle(p)}
+            disabled={isExisting}
+            title={isExisting ? `Already on ${p}` : ""}
+            style={{
+              padding:"7px 4px",fontSize:11,fontWeight:700,
+              border:`1.5px solid ${isExisting?"#bbb":isSelected?"var(--ac)":"var(--bd)"}`,
+              borderRadius:"var(--r)",cursor:isExisting?"default":"pointer",textAlign:"center",
+              background:isExisting?"var(--sf2)":isSelected?"var(--acl)":"var(--sf2)",
+              color:isExisting?"#aaa":isSelected?"var(--ac)":"var(--txm)",
+              transition:"all .12s",opacity:isExisting?.65:1,
+            }}
+          >
+            {p}{isExisting?" 🔒":isSelected?" ✓":""}
+          </button>
+        );
+      })}
     </div>
   );
 
@@ -2917,7 +3044,7 @@ function MarkAsListed({ listings, setListings }) {
     const platsArr = [...platSel];
     setListings(prev => prev.map(l =>
       l.sku === singlePrev.sku
-        ? { ...l, listed:true, dayListed:singleDate, platform:platsArr[0], platforms:platsArr }
+        ? { ...l, listed:true, dayListed:singleDate, platform:l.platform||platsArr[0], platforms:[...new Set([...(l.platforms||[]),...platsArr])], platformDates:{...(l.platformDates||{}), ...Object.fromEntries(platsArr.map(p=>[p,singleDate]))} }
         : l
     ));
     setHistory(prev => [{
@@ -2955,7 +3082,7 @@ function MarkAsListed({ listings, setListings }) {
     const platsArr = [...bulkPlats];
     setListings(prev => prev.map(l => {
       if (!valid.find(v => v.sku === l.sku)) return l;
-      return { ...l, listed:true, dayListed:bulkDate, platform:platsArr[0], platforms:platsArr };
+      return { ...l, listed:true, dayListed:bulkDate, platform:l.platform||platsArr[0], platforms:[...new Set([...(l.platforms||[]),...platsArr])], platformDates:{...(l.platformDates||{}), ...Object.fromEntries(platsArr.map(p=>[p,bulkDate]))} };
     }));
     setHistory(prev => [{
       time: new Date().toLocaleTimeString(),
@@ -3054,7 +3181,7 @@ function MarkAsListed({ listings, setListings }) {
             <div style={{fontSize:11,fontWeight:900,textTransform:"uppercase",letterSpacing:".4px",marginBottom:10}}>
               2 · Select Platforms
             </div>
-            <PlatGrid sel={platSel} onToggle={p=>togglePlat(platSel,setPlatSel,p)} />
+            <PlatGrid sel={platSel} onToggle={p=>togglePlat(platSel,setPlatSel,p)} existingPlats={singlePrev?.platforms||[]} />
             {platSel.size === 0 && singlePrev && (
               <div style={{fontSize:11,color:"var(--ac)",marginTop:7,fontWeight:700}}>
                 ● Tick at least one platform
@@ -3775,7 +3902,7 @@ function DrafterMarkListed({ item, setListings }) {
     const arr = [...platSel];
     setListings(prev => prev.map(l =>
       l.sku === item.sku
-        ? { ...l, listed:true, dayListed:dateL, platform:arr[0], platforms:arr }
+        ? { ...l, listed:true, dayListed:dateL, platform:l.platform||arr[0], platforms:[...new Set([...(l.platforms||[]),...arr])], platformDates:{...(l.platformDates||{}), ...Object.fromEntries(arr.map(p=>[p,dateL]))} }
         : l
     ));
     setDone(true);
