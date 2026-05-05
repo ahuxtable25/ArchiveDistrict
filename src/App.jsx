@@ -250,17 +250,17 @@ function useZoom(def=100) {
 function ZoomBar({ zoom, zoomIn, zoomOut, setPreset, fitView, presets }) {
   return (
     <div className="zoom-bar">
-      <button onClick={zoomOut} title="Zoom out">−</button>
+      <button className="zb" onClick={zoomOut} title="Zoom out">−</button>
       <span className="zv">{zoom}%</span>
-      <button onClick={zoomIn} title="Zoom in">+</button>
-      <div style={{display:"flex",gap:4,marginLeft:6}}>
+      <button className="zb" onClick={zoomIn} title="Zoom in">+</button>
+      <div style={{display:"flex",gap:4,marginLeft:4,flexWrap:"wrap"}}>
         {presets.map(p=>(
-          <button key={p} className={`zoom-preset${zoom===p?" active":""}`} onClick={()=>setPreset(p)}>{p}%</button>
+          <button key={p} className={`zp${zoom===p?" active":""}`} onClick={()=>setPreset(p)}>{p}%</button>
         ))}
+        <button className="zp" onClick={fitView}>⊡ Fit</button>
       </div>
-      <button className="zoom-preset" style={{marginLeft:4}} onClick={fitView} title="Fit all columns in view">⊡ Fit</button>
-      <span style={{marginLeft:"auto",fontSize:10,color:"var(--txd)"}}>
-        {zoom<100?"More columns visible — scroll to see all":"Drag column edge to resize"}
+      <span style={{marginLeft:"auto",fontSize:10,color:"var(--txd)",whiteSpace:"nowrap"}}>
+        {zoom<100?"← scroll to see all cols":"drag edge to resize"}
       </span>
     </div>
   );
@@ -446,26 +446,23 @@ nav::-webkit-scrollbar-thumb{background:var(--bd);border-radius:2px}
 .ts{overflow-x:auto;overflow-y:auto;max-height:72vh;overscroll-behavior:contain;border-radius:var(--r2);-webkit-overflow-scrolling:touch}.ts::-webkit-scrollbar{height:4px;width:4px}.ts::-webkit-scrollbar-thumb{background:var(--bd);border-radius:2px}
 .tbl{border-collapse:collapse;font-size:12px;table-layout:auto;min-width:100%}
 @media(max-width:768px){.ts{overflow-x:auto;-webkit-overflow-scrolling:touch}.tbl{table-layout:auto}}
+@media(max-width:640px){.ld-grid{grid-template-columns:1fr !important}}
 .tbl thead th{position:sticky;top:0;z-index:5;background:var(--sf2);box-shadow:0 1px 0 var(--bd),0 2px 0 var(--bd)}
 .tbl th{padding:8px 11px;font-size:9px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--txm);border-bottom:1px solid var(--bd);text-align:left;background:var(--sf2);white-space:nowrap;cursor:pointer;user-select:none;transition:color .1s;position:relative;overflow:visible}
 .col-resize{position:absolute;right:-2px;top:0;bottom:0;width:6px;cursor:col-resize;z-index:10;background:transparent}
 .col-resize:hover{background:var(--ac);opacity:.4}
-.zoom-bar{display:flex;align-items:center;gap:6px;padding:5px 12px;background:var(--sf2);border-bottom:1px solid var(--bd);font-size:11px;flex-wrap:wrap}
-.zoom-btn2{width:22px;height:22px;border:1px solid var(--bdd);border-radius:4px;background:var(--sf);cursor:pointer;font-size:13px;font-weight:700;color:var(--txm);display:inline-flex;align-items:center;justify-content:center}
-.zoom-btn2:hover{background:var(--sf2);color:var(--tx)}
-.zoom-preset{font-size:10px;padding:2px 7px;border:1px solid var(--bdd);border-radius:20px;background:transparent;cursor:pointer;color:var(--txm)}
-.zoom-preset:hover{background:var(--sf2);color:var(--tx)}
-.zoom-preset.zap{background:var(--acl);color:var(--ac);border-color:var(--ac2)}
+.zoom-bar-placeholder{display:none}
 .tbl th:hover{color:var(--tx)}.tbl th.no-sort{cursor:default}.tbl th.no-sort:hover{color:var(--txm)}
 .tbl{table-layout:auto}.tbl td{padding:9px 11px;border-bottom:1px solid var(--bd);color:var(--tx);vertical-align:middle;white-space:nowrap;max-width:180px;overflow:hidden;text-overflow:ellipsis}
 .tbl td.full{max-width:none;overflow:visible}
 .tbl td.name-cell{min-width:180px;max-width:260px}
-.zoom-bar{display:flex;align-items:center;gap:6px;padding:5px 12px;background:var(--sf2);border-bottom:1px solid var(--bd)}
-.zoom-bar button{width:24px;height:24px;border:1px solid var(--bdd);border-radius:var(--r);background:var(--sf);cursor:pointer;font-size:13px;font-weight:700;color:var(--txm);display:flex;align-items:center;justify-content:center}
-.zoom-bar button:hover{background:var(--sf2);color:var(--tx)}
-.zoom-bar .zv{font-size:11px;font-weight:700;color:var(--tx);min-width:38px;text-align:center}
-.zoom-preset{font-size:10px;padding:2px 7px;border:1px solid var(--bdd);border-radius:20px;background:transparent;cursor:pointer;color:var(--txm)}
-.zoom-preset:hover{background:var(--sf);color:var(--tx)}
+.zoom-bar{display:flex;align-items:center;gap:5px;padding:6px 12px;background:var(--sf2);border-bottom:1px solid var(--bd);flex-wrap:wrap}
+.zoom-bar .zb{width:26px;height:26px;border:1px solid var(--bdd);border-radius:var(--r);background:var(--sf);cursor:pointer;font-size:15px;font-weight:700;color:var(--txm);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.zoom-bar .zb:hover{background:var(--sf2);color:var(--tx)}
+.zoom-bar .zv{font-size:12px;font-weight:700;color:var(--tx);min-width:42px;text-align:center;flex-shrink:0}
+.zp{font-size:11px;padding:3px 8px;border:1px solid var(--bdd);border-radius:20px;background:transparent;cursor:pointer;color:var(--txm);white-space:nowrap;flex-shrink:0}
+.zp:hover{background:var(--sf);color:var(--tx)}
+.zp.active{background:var(--acl);color:var(--ac);border-color:var(--ac)}
 .zoom-preset.active{background:var(--acl);color:var(--ac);border-color:var(--ac)}
 .tbl-zoom-wrap{transform-origin:top left;will-change:transform}
 .tbl tr:last-child td{border-bottom:none}
@@ -3035,8 +3032,8 @@ function ListingDataTab({ listings }) {
         ))}
       </div>
 
-      {/* Breakdowns — 3 columns */}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:11,marginBottom:4}}>
+      {/* Breakdowns — 3 columns desktop, stacked mobile */}
+      <div className="ld-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:11,marginBottom:4}}>
         <div className="sc">
           <div className="st" style={{marginBottom:8}}>Active by Mover Tag</div>
           {[["FAST","mt-f"],["MEDIUM","mt-m"],["SLOW","mt-s"],["NEW","mt-n"],["UNKNOWN","mt-u"],["DEAD","mt-d"]].map(([tag,cls])=>(
