@@ -135,64 +135,93 @@ const deriveStock = (stockData, listings) =>
   });
 
 const DEFAULT_COLS = [
-  {id:"sel",          label:"",               visible:true,  locked:true },
-  {id:"photo",        label:"Photo",          visible:false, locked:false},
-  {id:"bundleSku",    label:"Bundle SKU",     visible:true,  locked:false},
-  {id:"name",         label:"Stock Name",     visible:true,  locked:false},
-  {id:"brand",        label:"Brand",          visible:true,  locked:false},
-  {id:"type",         label:"Type",           visible:true,  locked:false},
-  {id:"colour",       label:"Colour",         visible:true,  locked:false},
-  {id:"size",         label:"Size",           visible:true,  locked:false},
-  {id:"sku",          label:"SKU",            visible:true,  locked:false},
-  {id:"desc",         label:"Description",    visible:true,  locked:false},
-  {id:"length",       label:"Length",         visible:true,  locked:false},
-  {id:"pitToPit",     label:"Pit to Pit",     visible:true,  locked:false},
-  {id:"listed",       label:"Listed?",        visible:true,  locked:false},
-  {id:"price",        label:"Price £",        visible:true,  locked:false},
-  {id:"sold",         label:"Sold?",          visible:true,  locked:false},
-  {id:"soldPrice",    label:"Sold Price £",   visible:true,  locked:false},
-  {id:"profit",       label:"Net Profit £",   visible:true,  locked:false},
-  {id:"notes",        label:"Notes",          visible:true,  locked:false},
-  {id:"platform",     label:"Platform Sold",  visible:true,  locked:false},
-  {id:"platforms",    label:"Platforms Listed",visible:true, locked:false},
-  {id:"platformDates",label:"Listed Dates",   visible:true,  locked:false},
-  {id:"dayListed",    label:"Day Listed",     visible:true,  locked:false},
-  {id:"daySold",      label:"Day Sold",       visible:true,  locked:false},
-  {id:"days",         label:"Days to Sell",   visible:true,  locked:false},
-  {id:"shipped",      label:"Shipped?",       visible:true,  locked:false},
+  {id:"sel",          label:"",               visible:true,  locked:true,  minW:32 },
+  {id:"photo",        label:"Photo",          visible:false, locked:false, minW:60 },
+  {id:"bundleSku",    label:"Bundle SKU",     visible:true,  locked:false, minW:80 },
+  {id:"name",         label:"Stock Name",     visible:true,  locked:false, minW:200},
+  {id:"brand",        label:"Brand",          visible:true,  locked:false, minW:100},
+  {id:"type",         label:"Type",           visible:true,  locked:false, minW:100},
+  {id:"colour",       label:"Colour",         visible:true,  locked:false, minW:80 },
+  {id:"size",         label:"Size",           visible:true,  locked:false, minW:60 },
+  {id:"sku",          label:"SKU",            visible:true,  locked:false, minW:70 },
+  {id:"desc",         label:"Description",    visible:true,  locked:false, minW:120},
+  {id:"length",       label:"Length",         visible:true,  locked:false, minW:70 },
+  {id:"pitToPit",     label:"Pit to Pit",     visible:true,  locked:false, minW:80 },
+  {id:"listed",       label:"Listed?",        visible:true,  locked:false, minW:65 },
+  {id:"price",        label:"Price £",        visible:true,  locked:false, minW:70 },
+  {id:"sold",         label:"Sold?",          visible:true,  locked:false, minW:60 },
+  {id:"soldPrice",    label:"Sold Price £",   visible:true,  locked:false, minW:85 },
+  {id:"profit",       label:"Net Profit £",   visible:true,  locked:false, minW:85 },
+  {id:"notes",        label:"Notes",          visible:true,  locked:false, minW:120},
+  {id:"platform",     label:"Platform Sold",  visible:true,  locked:false, minW:100},
+  {id:"platforms",    label:"Platforms Listed",visible:true, locked:false, minW:120},
+  {id:"platformDates",label:"Listed Dates",   visible:true,  locked:false, minW:120},
+  {id:"dayListed",    label:"Day Listed",     visible:true,  locked:false, minW:90 },
+  {id:"daySold",      label:"Day Sold",       visible:true,  locked:false, minW:90 },
+  {id:"days",         label:"Days to Sell",   visible:true,  locked:false, minW:90 },
+  {id:"shipped",      label:"Shipped?",       visible:true,  locked:false, minW:75 },
 ];
 
 /* ─── Default column config for Stock tab ─── */
 const STOCK_COLS = [
-  {id:"bundleSku",     label:"Bundle SKU",    visible:true,  locked:false},
-  {id:"name",          label:"Stock Name",    visible:true,  locked:false},
-  {id:"website",       label:"Website",       visible:true,  locked:false},
-  {id:"seller",        label:"Seller",        visible:false, locked:false},
-  {id:"datePurchased", label:"Date Ordered",  visible:true,  locked:false},
-  {id:"dateArrived",   label:"Date Received", visible:true,  locked:false},
-  {id:"contentDetails",label:"Contents",      visible:false, locked:false},
-  {id:"received",      label:"Rcvd Qty",      visible:true,  locked:false},
-  {id:"sellable",      label:"Sellable",      visible:true,  locked:false},
-  {id:"costPer",       label:"Cost/pc",       visible:true,  locked:false},
-  {id:"totalCost",     label:"Total Cost",    visible:true,  locked:false},
-  {id:"qtySold",       label:"Qty Sold",      visible:true,  locked:false},
-  {id:"totalProfit",   label:"Bundle Profit", visible:true,  locked:false},
-  {id:"qtyRemaining",  label:"Remaining",     visible:true,  locked:false},
-  {id:"qtyListed",     label:"Listed",        visible:true,  locked:false},
-  {id:"qtyListedNS",   label:"Live",          visible:false, locked:false},
-  {id:"qtyToBeListed", label:"To List",       visible:true,  locked:false},
-  {id:"netProceeds",   label:"Net Proceeds",  visible:true,  locked:false},
-  {id:"stockValLeft",  label:"Stock Val Left",visible:false, locked:false},
-  {id:"sellThru",      label:"Sell-through",  visible:true,  locked:false},
-  {id:"avgSoldPrice",  label:"Avg Sold Price",visible:true,  locked:false},
-  {id:"avgProfit",     label:"Avg Profit",    visible:true,  locked:false},
-  {id:"restock",       label:"Restock?",      visible:true,  locked:false},
-  {id:"imported",      label:"Imported",      visible:true,  locked:false},
+  {id:"bundleSku",     label:"Bundle SKU",    visible:true,  locked:false, minW:85 },
+  {id:"name",          label:"Stock Name",    visible:true,  locked:false, minW:200},
+  {id:"website",       label:"Website",       visible:true,  locked:false, minW:90 },
+  {id:"seller",        label:"Seller",        visible:false, locked:false, minW:120},
+  {id:"datePurchased", label:"Date Ordered",  visible:true,  locked:false, minW:100},
+  {id:"dateArrived",   label:"Date Received", visible:true,  locked:false, minW:110},
+  {id:"contentDetails",label:"Contents",      visible:false, locked:false, minW:120},
+  {id:"received",      label:"Rcvd Qty",      visible:true,  locked:false, minW:75 },
+  {id:"sellable",      label:"Sellable",      visible:true,  locked:false, minW:70 },
+  {id:"costPer",       label:"Cost/pc",       visible:true,  locked:false, minW:70 },
+  {id:"totalCost",     label:"Total Cost",    visible:true,  locked:false, minW:85 },
+  {id:"qtySold",       label:"Qty Sold",      visible:true,  locked:false, minW:70 },
+  {id:"totalProfit",   label:"Bundle Profit", visible:true,  locked:false, minW:100},
+  {id:"qtyRemaining",  label:"Remaining",     visible:true,  locked:false, minW:80 },
+  {id:"qtyListed",     label:"Listed",        visible:true,  locked:false, minW:65 },
+  {id:"qtyListedNS",   label:"Live",          visible:false, locked:false, minW:60 },
+  {id:"qtyToBeListed", label:"To List",       visible:true,  locked:false, minW:70 },
+  {id:"netProceeds",   label:"Net Proceeds",  visible:true,  locked:false, minW:100},
+  {id:"stockValLeft",  label:"Stock Val Left",visible:false, locked:false, minW:100},
+  {id:"sellThru",      label:"Sell-through",  visible:true,  locked:false, minW:90 },
+  {id:"avgSoldPrice",  label:"Avg Sold Price",visible:true,  locked:false, minW:105},
+  {id:"avgProfit",     label:"Avg Profit",    visible:true,  locked:false, minW:85 },
+  {id:"restock",       label:"Restock?",      visible:true,  locked:false, minW:75 },
+  {id:"imported",      label:"Imported",      visible:true,  locked:false, minW:75 },
 ];
 
 /* ═══════════════════════════════════════════════════════════════
    SHARED UI PRIMITIVES
 ═══════════════════════════════════════════════════════════════ */
+/* ─── Table zoom ─── */
+function useZoom(initial=100) {
+  const [zoom, setZoomRaw] = useState(initial);
+  const setZoom = (z) => setZoomRaw(Math.min(150, Math.max(50, z)));
+  const PRESETS = [50,75,100,125,150];
+  const stepUp   = () => setZoom(PRESETS.find(p=>p>zoom)||Math.min(zoom+10,150));
+  const stepDown = () => setZoom([...PRESETS].reverse().find(p=>p<zoom)||Math.max(zoom-10,50));
+  return { zoom, setZoom, stepUp, stepDown, PRESETS };
+}
+
+function ZoomBar({ zoom, setZoom, stepUp, stepDown, PRESETS, rowCount, label="" }) {
+  return (
+    <div className="zoom-bar">
+      <span style={{color:"var(--txd)",marginRight:2}}>Zoom</span>
+      <button className="zoom-btn2" onClick={stepDown}>−</button>
+      <span style={{minWidth:34,textAlign:"center",fontWeight:700,color:"var(--txm)"}}>{zoom}%</span>
+      <button className="zoom-btn2" onClick={stepUp}>+</button>
+      <div style={{display:"flex",gap:4,marginLeft:4}}>
+        {PRESETS.map(p=>(
+          <button key={p} className={`zoom-preset${zoom===p?" zap":""}`} onClick={()=>setZoom(p)}>{p}%</button>
+        ))}
+      </div>
+      <div style={{width:"0.5px",height:16,background:"var(--bdd)",margin:"0 4px"}}/>
+      <button className="zoom-preset" onClick={()=>setZoom(65)} title="Fit all columns in view">⊡ Fit</button>
+      {rowCount!=null && <span style={{marginLeft:"auto",color:"var(--txd)"}}>{rowCount} rows{label}</span>}
+    </div>
+  );
+}
+
 /* ─── ComboSelect — dropdown with "Add new…" option ─── */
 function ComboSelect({ value, onChange, options, placeholder, style }) {
   const [adding, setAdding] = useState(false);
@@ -230,7 +259,43 @@ function ComboSelect({ value, onChange, options, placeholder, style }) {
   );
 }
 
-/* ─── Column resize hook ─── */
+/* ─── Table zoom ─── */
+function useZoom(def=100) {
+  const [zoom, setZoom] = useState(def);
+  const presets = [50,75,100,125,150];
+  const zoomIn  = () => setZoom(z => Math.min(200, presets.find(p=>p>z)||Math.min(z+10,200)));
+  const zoomOut = () => setZoom(z => Math.max(40,  [...presets].reverse().find(p=>p<z)||Math.max(z-10,40)));
+  const setPreset = (v) => setZoom(v);
+  const fitView = () => setZoom(65);
+  const style = (w) => ({
+    transform:`scale(${zoom/100})`,
+    transformOrigin:"top left",
+    width: zoom < 100 ? `${10000/zoom}%` : "100%",
+    minWidth: "100%",
+  });
+  return { zoom, zoomIn, zoomOut, setPreset, fitView, style, presets };
+}
+
+function ZoomBar({ zoom, zoomIn, zoomOut, setPreset, fitView, presets }) {
+  return (
+    <div className="zoom-bar">
+      <button onClick={zoomOut} title="Zoom out">−</button>
+      <span className="zv">{zoom}%</span>
+      <button onClick={zoomIn} title="Zoom in">+</button>
+      <div style={{display:"flex",gap:4,marginLeft:6}}>
+        {presets.map(p=>(
+          <button key={p} className={`zoom-preset${zoom===p?" active":""}`} onClick={()=>setPreset(p)}>{p}%</button>
+        ))}
+      </div>
+      <button className="zoom-preset" style={{marginLeft:4}} onClick={fitView} title="Fit all columns in view">⊡ Fit</button>
+      <span style={{marginLeft:"auto",fontSize:10,color:"var(--txd)"}}>
+        {zoom<100?"More columns visible — scroll to see all":"Drag column edge to resize"}
+      </span>
+    </div>
+  );
+}
+
+function MovTag({tag}) {
 function useColWidths(cols) {
   const [widths, setWidths] = useState({});
   const startX   = useRef(null);
@@ -409,14 +474,30 @@ nav::-webkit-scrollbar-thumb{background:var(--bd);border-radius:2px}
 /* Tables */
 .tw{background:var(--sf);border:1px solid var(--bd);border-radius:var(--r2);box-shadow:var(--sh)}
 .ts{overflow-x:auto;overflow-y:auto;max-height:72vh;overscroll-behavior:contain;border-radius:var(--r2);-webkit-overflow-scrolling:touch}.ts::-webkit-scrollbar{height:4px;width:4px}.ts::-webkit-scrollbar-thumb{background:var(--bd);border-radius:2px}
-.tbl{width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed}
+.tbl{border-collapse:collapse;font-size:12px;table-layout:auto;min-width:100%}
 @media(max-width:768px){.ts{overflow-x:auto;-webkit-overflow-scrolling:touch}.tbl{table-layout:auto}}
 .tbl thead th{position:sticky;top:0;z-index:5;background:var(--sf2);box-shadow:0 1px 0 var(--bd),0 2px 0 var(--bd)}
 .tbl th{padding:8px 11px;font-size:9px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--txm);border-bottom:1px solid var(--bd);text-align:left;background:var(--sf2);white-space:nowrap;cursor:pointer;user-select:none;transition:color .1s;position:relative;overflow:visible}
 .col-resize{position:absolute;right:-2px;top:0;bottom:0;width:6px;cursor:col-resize;z-index:10;background:transparent}
 .col-resize:hover{background:var(--ac);opacity:.4}
+.zoom-bar{display:flex;align-items:center;gap:6px;padding:5px 12px;background:var(--sf2);border-bottom:1px solid var(--bd);font-size:11px;flex-wrap:wrap}
+.zoom-btn2{width:22px;height:22px;border:1px solid var(--bdd);border-radius:4px;background:var(--sf);cursor:pointer;font-size:13px;font-weight:700;color:var(--txm);display:inline-flex;align-items:center;justify-content:center}
+.zoom-btn2:hover{background:var(--sf2);color:var(--tx)}
+.zoom-preset{font-size:10px;padding:2px 7px;border:1px solid var(--bdd);border-radius:20px;background:transparent;cursor:pointer;color:var(--txm)}
+.zoom-preset:hover{background:var(--sf2);color:var(--tx)}
+.zoom-preset.zap{background:var(--acl);color:var(--ac);border-color:var(--ac2)}
 .tbl th:hover{color:var(--tx)}.tbl th.no-sort{cursor:default}.tbl th.no-sort:hover{color:var(--txm)}
-.tbl td{padding:9px 11px;border-bottom:1px solid var(--bd);color:var(--tx);vertical-align:middle;white-space:nowrap}
+.tbl{table-layout:auto}.tbl td{padding:9px 11px;border-bottom:1px solid var(--bd);color:var(--tx);vertical-align:middle;white-space:nowrap;max-width:180px;overflow:hidden;text-overflow:ellipsis}
+.tbl td.full{max-width:none;overflow:visible}
+.tbl td.name-cell{min-width:180px;max-width:260px}
+.zoom-bar{display:flex;align-items:center;gap:6px;padding:5px 12px;background:var(--sf2);border-bottom:1px solid var(--bd)}
+.zoom-bar button{width:24px;height:24px;border:1px solid var(--bdd);border-radius:var(--r);background:var(--sf);cursor:pointer;font-size:13px;font-weight:700;color:var(--txm);display:flex;align-items:center;justify-content:center}
+.zoom-bar button:hover{background:var(--sf2);color:var(--tx)}
+.zoom-bar .zv{font-size:11px;font-weight:700;color:var(--tx);min-width:38px;text-align:center}
+.zoom-preset{font-size:10px;padding:2px 7px;border:1px solid var(--bdd);border-radius:20px;background:transparent;cursor:pointer;color:var(--txm)}
+.zoom-preset:hover{background:var(--sf);color:var(--tx)}
+.zoom-preset.active{background:var(--acl);color:var(--ac);border-color:var(--ac)}
+.tbl-zoom-wrap{transform-origin:top left;will-change:transform}
 .tbl tr:last-child td{border-bottom:none}
 .tbl tr.clickable:hover td{background:#faf9f6;cursor:pointer}
 .tbl tr.sold-r td{background:#f0faf4;color:var(--txm)}.tbl tr.listed-r td{background:#fff8f0}.tbl tr.dim td{opacity:.55}.tbl tr.sel td{background:#fdf4f5}
@@ -1156,7 +1237,7 @@ function ImportModal({ stockData, onClose }) {
 ═══════════════════════════════════════════════════════════════ */
 function StockCell({ colId, s }) {
   if (colId==="bundleSku")     return <span className="bsku">{s.bundleSku}</span>;
-  if (colId==="name")          return <span style={{fontWeight:700,minWidth:175,display:"block"}}>{s.name}</span>;
+  if (colId==="name")          return <span style={{fontWeight:700}}>{s.name}</span>;
   if (colId==="website")       return <span className="badge b-n">{s.website}</span>;
   if (colId==="seller")        return <span style={{color:"var(--txm)",fontSize:11}}>{s.seller}</span>;
   if (colId==="datePurchased") return <span style={{color:"var(--txm)",fontSize:11}}>{s.datePurchased}</span>;
@@ -1253,6 +1334,7 @@ function StockTab({ stockData, setStockData, listings }) {
 
   const visCols = cols.filter(c => c.visible);
   const { getStyle: getStockColStyle, onMouseDown: onStockColResize } = useColWidths(cols);
+  const stockZoom = useZoom(100);
   const handleDeleteStock = (bsku) => {
     setStockData(prev => prev.filter(s => s.bundleSku !== bsku));
     setEditStock(null);
@@ -1334,16 +1416,18 @@ function StockTab({ stockData, setStockData, listings }) {
 
       {/* Table */}
       <div className="tw">
+        <ZoomBar {...stockZoom} />
         <div className="ts">
+          <div style={stockZoom.style()}>
           <table className="tbl">
             <thead>
               <tr>
                 {visCols.map(c => {
                   const sortable = NUMERIC_STOCK_COLS.has(c.id) || c.id==="bundleSku" || c.id==="name";
-                  const style = getStockColStyle(c.id);
+                  const colStyle = { ...getStockColStyle(c.id), minWidth: c.minW||80 };
                   return sortable
-                    ? <STh key={c.id} col={c.id} sortCol={sortCol} sortDir={sortDir} onSort={onSort} style={style} onResize={onStockColResize}>{c.label}</STh>
-                    : <th key={c.id} className="no-sort" style={style}><span>{c.label}</span><span className="col-resize" onMouseDown={e=>onStockColResize(e,c.id,e.currentTarget.parentElement)} onClick={e=>e.stopPropagation()}/></th>;
+                    ? <STh key={c.id} col={c.id} sortCol={sortCol} sortDir={sortDir} onSort={onSort} style={colStyle} onResize={onStockColResize}>{c.label}</STh>
+                    : <th key={c.id} className="no-sort" style={colStyle}><span>{c.label}</span><span className="col-resize" onMouseDown={e=>onStockColResize(e,c.id,e.currentTarget.parentElement)} onClick={e=>e.stopPropagation()}/></th>;
                 })}
               </tr>
             </thead>
@@ -1372,8 +1456,9 @@ function StockTab({ stockData, setStockData, listings }) {
               })}
             </tbody>
           </table>
-        </div>
-      </div>
+          </div>{/* end zoom wrap */}
+        </div>{/* end .ts */}
+      </div>{/* end .tw */}
 
       {/* Footer */}
       <div style={{marginTop:8,fontSize:11,color:"var(--txd)",textAlign:"right"}}>
@@ -2149,6 +2234,7 @@ function ListingsTab({ listings, setListings, stockData }) {
 
   const visCols = cols.filter(c => c.visible);
   const { getStyle: getColStyle, onMouseDown: onColResize } = useColWidths(cols);
+  const tblZoom = useZoom(100);
 
   const onSort = (col) => {
     if (!SORTABLE_LISTING_COLS.has(col)) return;
@@ -2342,7 +2428,9 @@ function ListingsTab({ listings, setListings, stockData }) {
 
       {/* ── Table ── */}
       <div className="tw">
+        <ZoomBar {...tblZoom} />
         <div className="ts">
+          <div style={tblZoom.style()}>
           <table className="tbl">
             <thead>
               <tr>
@@ -2357,10 +2445,10 @@ function ListingsTab({ listings, setListings, stockData }) {
                 </th>
                 {visCols.filter(c=>c.id!=="sel").map(c => {
                   const sortable = SORTABLE_LISTING_COLS.has(c.id);
-                  const style = getColStyle(c.id);
+                  const colStyle = { ...getColStyle(c.id), minWidth: c.minW||80 };
                   return sortable
-                    ? <STh key={c.id} col={c.id} sortCol={sortCol} sortDir={sortDir} onSort={onSort} style={style} onResize={onColResize}>{c.label}</STh>
-                    : <th key={c.id} className="no-sort" style={style}><span>{c.label}</span><span className="col-resize" onMouseDown={e=>onColResize(e,c.id,e.currentTarget.parentElement)} onClick={e=>e.stopPropagation()}/></th>;
+                    ? <STh key={c.id} col={c.id} sortCol={sortCol} sortDir={sortDir} onSort={onSort} style={colStyle} onResize={onColResize}>{c.label}</STh>
+                    : <th key={c.id} className="no-sort" style={colStyle}><span>{c.label}</span><span className="col-resize" onMouseDown={e=>onColResize(e,c.id,e.currentTarget.parentElement)} onClick={e=>e.stopPropagation()}/></th>;
                 })}
               </tr>
             </thead>
