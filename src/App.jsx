@@ -93,8 +93,10 @@ const getNextSku = (listings) => {
 };
 
 const getNextBundleSku = (stockData) => {
-  const nums = stockData.map(s=>parseInt(s.bundleSku.replace("BDL-",""))).filter(n=>!isNaN(n));
-  return `BDL-${String((nums.length?Math.max(...nums):0)+1).padStart(3,"0")}`;
+  const nums = stockData
+    .map(s => parseInt((s.bundleSku||"").replace("BDL-","").replace(/^0+/,"")))
+    .filter(n => !isNaN(n) && n > 0);
+  return `BDL-${String((nums.length ? Math.max(...nums) : 0) + 1).padStart(3,"0")}`;
 };
 
 const getTag = (name, type, brand, listings) => {
@@ -113,24 +115,29 @@ const getTag = (name, type, brand, listings) => {
 
 const deriveStock = (stockData, listings) =>
   stockData.map(s => {
-    const items     = listings.filter(l=>l.bundleSku===s.bundleSku);
-    const soldItems = items.filter(l=>l.sold);
-    const listedItems = items.filter(l=>l.listed);
-    const netProceeds  = soldItems.reduce((a,l)=>a+(l.soldPrice||0),0);
-    const totalCost    = s.sellable*s.costPer;
-    const stockValLeft = items.filter(l=>!l.sold).length*s.costPer;
-    const sellThru     = s.sellable?Math.round(soldItems.length/s.sellable*100):0;
-    const totalProfit  = soldItems.reduce((a,l)=>a+(l.profit||0),0);
-    const avgProfit    = soldItems.length?totalProfit/soldItems.length:0;
-    const avgSoldPrice = soldItems.length?netProceeds/soldItems.length:0;
+    // Match by BOTH bundleSku AND name so BDL-008 Detroit and BDL-008 Active stay separate
+    const items       = listings.filter(l => l.bundleSku===s.bundleSku && l.name===s.name);
+    const soldItems   = items.filter(l => l.sold);
+    const listedItems = items.filter(l => l.listed);
+    const netProceeds  = soldItems.reduce((a,l) => a+(l.soldPrice||0), 0);
+    // Use actual money paid (totalCost field from import), fallback to sellable×costPer
+    const totalCost    = s.totalCost || s.sellable*s.costPer;
+    // True bundle profit = revenue from sold items minus proportional stock cost
+    const costPerItem  = s.sellable > 0 ? totalCost/s.sellable : s.costPer;
+    const totalProfit  = netProceeds - soldItems.length * costPerItem;
+    const stockValLeft = items.filter(l=>!l.sold).length * costPerItem;
+    const sellThru     = s.sellable ? Math.round(soldItems.length/s.sellable*100) : 0;
+    const avgProfit    = soldItems.length ? totalProfit/soldItems.length : 0;
+    const avgSoldPrice = soldItems.length ? netProceeds/soldItems.length : 0;
     return {
       ...s,
+      totalCost,
       qtySold:soldItems.length, qtyListed:listedItems.length,
       qtyListedNS:listedItems.filter(l=>!l.sold).length,
       qtyToBeListed:items.filter(l=>!l.listed&&!l.sold).length,
       qtyRemaining:items.filter(l=>!l.sold).length,
-      netProceeds,totalCost,stockValLeft,
-      sellThru,totalProfit,avgProfit,avgSoldPrice,
+      netProceeds, stockValLeft,
+      sellThru, totalProfit, avgProfit, avgSoldPrice,
     };
   });
 
@@ -1024,6 +1031,9 @@ function AddStockModal({ stockData, onAdd, onClose }) {
 
   const handleAdd = () => {
     if (!validate()) return;
+    const sellable  = parseInt(form.sellable);
+    const costPer   = parseFloat(form.costPer);
+    const totalCost = parseFloat(form.totalPaid) || sellable * costPer;
     onAdd({
       bundleSku:      nextBsku,
       name:           form.name.trim(),
@@ -1032,9 +1042,10 @@ function AddStockModal({ stockData, onAdd, onClose }) {
       datePurchased:  form.datePurchased,
       dateArrived:    form.dateArrived,
       contentDetails: form.contentDetails.trim(),
-      received:       parseInt(form.received) || parseInt(form.sellable),
-      sellable:       parseInt(form.sellable),
-      costPer:        parseFloat(form.costPer),
+      received:       parseInt(form.received) || sellable,
+      sellable,
+      costPer,
+      totalCost,
       imported:       false,
       restock:        form.restock,
     });
@@ -1269,6 +1280,7 @@ function StockTab({ stockData, setStockData, listings }) {
     filtered: colFiltered,
     filters, setFilter, clearFilter, clearAll, activeFilters,
     showPanel: showFilterPanel, setShowPanel: setShowFilterPanel,
+    btnRef: filterBtnRef,
   } = useTableFilters(derived, cols);
 
   const onSort = (col) => {
@@ -1362,13 +1374,13 @@ function StockTab({ stockData, setStockData, listings }) {
         </select>
         <div style={{marginLeft:"auto",display:"flex",gap:7,alignItems:"center"}}>
           <div style={{position:"relative"}}>
-            <button className="btn btn-o btn-sm" onClick={()=>setShowFilterPanel(v=>!v)}>
+            <button className="btn btn-o btn-sm" ref={filterBtnRef} onClick={()=>setShowFilterPanel(v=>!v)}>
               ⚡ Filters {activeFilters.length>0 && <span style={{background:"var(--ac)",color:"#fff",borderRadius:10,padding:"0 5px",fontSize:9,marginLeft:3}}>{activeFilters.length}</span>}
             </button>
             {showFilterPanel && (
               <FilterPanel colDefs={cols} rows={derived}
                 filters={filters} setFilter={setFilter} clearAll={clearAll}
-                onClose={()=>setShowFilterPanel(false)} />
+                onClose={()=>setShowFilterPanel(false)} anchorRef={filterBtnRef} />
             )}
           </div>
           <div style={{position:"relative"}}>
@@ -1412,7 +1424,7 @@ function StockTab({ stockData, setStockData, listings }) {
                 </tr>
               ) : filtered.map(s => {
                 // Find the raw stock item (not derived) so drawer gets original data
-                const rawStock = stockData.find(r => r.bundleSku===s.bundleSku) || s;
+                const rawStock = stockData.find(r => r.bundleSku===s.bundleSku && r.name===s.name) || s;
                 return (
                   <tr
                     key={s.bundleSku}
@@ -2152,6 +2164,7 @@ function ListingsTab({ listings, setListings, stockData }) {
     clearFilter: clearColFilter, clearAll: clearColAll,
     activeFilters: activeColFilters,
     showPanel: showFilterPanel, setShowPanel: setShowFilterPanel,
+    btnRef: filterBtnRef,
   } = useTableFilters(listings, cols);
 
   /* Tab counts — always from full listings */
@@ -2380,13 +2393,13 @@ function ListingsTab({ listings, setListings, stockData }) {
             {rows.length<listings.length?" (filtered)":""}
           </span>
           <div style={{position:"relative"}}>
-            <button className="btn btn-o btn-sm" onClick={()=>setShowFilterPanel(v=>!v)}>
+            <button className="btn btn-o btn-sm" ref={filterBtnRef} onClick={()=>setShowFilterPanel(v=>!v)}>
               ⚡ Filters {activeColFilters.length>0 && <span style={{background:"var(--ac)",color:"#fff",borderRadius:10,padding:"0 5px",fontSize:9,marginLeft:3}}>{activeColFilters.length}</span>}
             </button>
             {showFilterPanel && (
               <FilterPanel colDefs={cols} rows={listings}
                 filters={colFilters} setFilter={setColFilter}
-                clearAll={clearColAll} onClose={()=>setShowFilterPanel(false)} />
+                clearAll={clearColAll} onClose={()=>setShowFilterPanel(false)} anchorRef={filterBtnRef} />
             )}
           </div>
           <button className="btn btn-o btn-sm"
@@ -2543,11 +2556,13 @@ function useTableFilters(rows, colDefs) {
     });
   }, [rows, filters]);
 
-  return { filtered, filters, setFilter, clearFilter, clearAll, activeFilters, showPanel, setShowPanel };
+  const btnRef = useRef(null);
+
+  return { filtered, filters, setFilter, clearFilter, clearAll, activeFilters, showPanel, setShowPanel, btnRef };
 }
 
 /* ── Filter panel component ── */
-function FilterPanel({ colDefs, rows, filters, setFilter, clearAll, onClose }) {
+function FilterPanel({ colDefs, rows, filters, setFilter, clearAll, onClose, anchorRef }) {
   // Determine filter type from col id
   const getType = (id) => {
     if (["listed","sold","shipped","restock","imported"].includes(id)) return "bool";
@@ -2565,13 +2580,28 @@ function FilterPanel({ colDefs, rows, filters, setFilter, clearAll, onClose }) {
     c.visible !== false && c.id !== "sel" && c.id !== "photo" && c.id !== "actions"
   );
 
+  // Calculate position from anchor button
+  const [pos, setPos] = React.useState({ top: 60, right: 16 });
+  React.useEffect(() => {
+    if (anchorRef?.current) {
+      const r = anchorRef.current.getBoundingClientRect();
+      const panelW = 320;
+      const left = Math.min(r.right - panelW, window.innerWidth - panelW - 8);
+      setPos({ top: r.bottom + 4, left: Math.max(8, left) });
+    }
+  }, []);
+
   return (
-    <div style={{
-      position:"absolute", right:0, top:42,
-      background:"var(--sf)", border:"1px solid var(--bd)",
-      borderRadius:"var(--r2)", padding:14, boxShadow:"var(--shm)",
-      zIndex:60, width:320, maxHeight:440, overflowY:"auto",
-    }}>
+    <>
+      {/* Backdrop to catch outside clicks */}
+      <div style={{position:"fixed",inset:0,zIndex:199}} onClick={onClose} />
+      <div style={{
+        position:"fixed",
+        top: pos.top, left: pos.left,
+        background:"var(--sf)", border:"1px solid var(--bd)",
+        borderRadius:"var(--r2)", padding:14, boxShadow:"0 8px 32px rgba(0,0,0,.18)",
+        zIndex:200, width:320, maxHeight:"70vh", overflowY:"auto",
+      }}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
         <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".6px",color:"var(--txm)"}}>
           Column Filters
@@ -2650,10 +2680,9 @@ function FilterPanel({ colDefs, rows, filters, setFilter, clearAll, onClose }) {
         );
       })}
     </div>
+    </>
   );
 }
-
-/* ── Active filter chips ── */
 function FilterChips({ colDefs, activeFilters, clearFilter, clearAll }) {
   if (!activeFilters.length) return null;
   const getLabel = (id) => colDefs.find(c => c.id === id)?.label || id;
@@ -2728,6 +2757,7 @@ function MovementTracker({ listings }) {
   const [cols, setCols]               = useState(MOVEMENT_COLS);
   const [showColPanel, setShowColPanel] = useState(false);
   const [showFilterPanel, setShowFilterPanel] = useState(false);
+  const filterBtnRef = useRef(null);
   const [sortCol, setSortCol]         = useState("howManySold");
   const [sortDir, setSortDir]         = useState("desc");
   const movZoom = useZoom(100);
@@ -2802,13 +2832,13 @@ function MovementTracker({ listings }) {
       <div className="filter-bar">
         <div style={{flex:1}} />
         <div style={{position:"relative"}}>
-          <button className="btn btn-o btn-sm" onClick={()=>setShowFilterPanel(v=>!v)}>
+          <button className="btn btn-o btn-sm" ref={filterBtnRef} onClick={()=>setShowFilterPanel(v=>!v)}>
             ⚡ Filters {activeFilters.length>0 && <span style={{background:"var(--ac)",color:"#fff",borderRadius:10,padding:"0 5px",fontSize:9,marginLeft:3}}>{activeFilters.length}</span>}
           </button>
           {showFilterPanel && (
             <FilterPanel colDefs={cols} rows={groups}
               filters={filters} setFilter={setFilter} clearAll={clearAll}
-              onClose={()=>setShowFilterPanel(false)} />
+              onClose={()=>setShowFilterPanel(false)} anchorRef={filterBtnRef} />
           )}
         </div>
         <div style={{position:"relative"}}>
@@ -2978,13 +3008,13 @@ function ListingDataTab({ listings }) {
           <div className="st">{title}<span className="ss">{subtitle}</span></div>
           <div style={{flex:1}}/>
           <div style={{position:"relative"}}>
-            <button className="btn btn-o btn-sm" onClick={()=>fHook.setShowPanel(v=>!v)}>
+            <button className="btn btn-o btn-sm" ref={fHook.btnRef} onClick={()=>fHook.setShowPanel(v=>!v)}>
               ⚡ Filters {fHook.activeFilters.length>0 && <span style={{background:"var(--ac)",color:"#fff",borderRadius:10,padding:"0 5px",fontSize:9,marginLeft:3}}>{fHook.activeFilters.length}</span>}
             </button>
             {fHook.showPanel && (
               <FilterPanel colDefs={cols} rows={fHook.filtered}
                 filters={fHook.filters} setFilter={fHook.setFilter}
-                clearAll={fHook.clearAll} onClose={()=>fHook.setShowPanel(false)} />
+                clearAll={fHook.clearAll} onClose={()=>fHook.setShowPanel(false)} anchorRef={fHook.btnRef} />
             )}
           </div>
           <div style={{position:"relative"}}>
@@ -4185,6 +4215,7 @@ function QuickMarkSold({ listings, setListings }) {
     setHistory(prev => [{
       time: new Date().toLocaleTimeString(),
       sku: item.sku, name: item.name, price: fmt(price), plat: platSel,
+      delistFrom: (item.platforms||[]).filter(p=>p!==platSel),
     }, ...prev.slice(0,9)]);
     setDone(true);
   };
@@ -4275,8 +4306,46 @@ function QuickMarkSold({ listings, setListings }) {
           {!soldPrice && item && <div style={{fontSize:11,color:"var(--ac)",marginTop:4,fontWeight:700}}>● Enter the sold price</div>}
 
           {done && (
-            <div style={{marginTop:10,background:"var(--gnl)",border:"1px solid rgba(31,92,53,.2)",borderRadius:"var(--r)",padding:"9px 11px",fontSize:12,color:"var(--gn)",fontWeight:700}}>
-              ✓ {item?.sku || "Item"} marked as sold on {platSel} for {fmt(parseFloat(soldPrice)||0)}
+            <div style={{marginTop:10,borderRadius:"var(--r)",overflow:"hidden"}}>
+              <div style={{background:"var(--gnl)",border:"1px solid rgba(31,92,53,.2)",padding:"9px 11px",fontSize:12,color:"var(--gn)",fontWeight:700}}>
+                ✓ {item?.sku || "Item"} marked as sold on {platSel} for {fmt(parseFloat(soldPrice)||0)}
+              </div>
+              {/* Delist reminder */}
+              {item?.platforms?.length > 1 && (
+                <div style={{background:"#fff8f0",border:"1px solid #f0c040",borderTop:"none",padding:"10px 11px"}}>
+                  <div style={{fontSize:11,fontWeight:700,color:"#7a4e0e",marginBottom:6}}>
+                    📋 Remember to delist from:
+                  </div>
+                  <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+                    {item.platforms.filter(p=>p!==platSel).map(p=>{
+                      const PLAT_LINKS = {
+                        Depop:"https://depop.com/you/selling/",
+                        Vinted:"https://www.vinted.co.uk/my/items",
+                        eBay:"https://www.ebay.co.uk/mys/active",
+                        Whatnot:"https://www.whatnot.com/sell",
+                        Grailed:"https://www.grailed.com/sell",
+                        "Facebook Marketplace":"https://www.facebook.com/marketplace/you/selling",
+                        Tilt:"https://tilt.app",
+                      };
+                      return (
+                        <a key={p} href={PLAT_LINKS[p]||"#"} target="_blank" rel="noopener noreferrer"
+                          style={{display:"inline-flex",alignItems:"center",gap:5,
+                            background:"var(--sf)",border:"1px solid var(--bdd)",
+                            borderRadius:20,padding:"3px 10px",fontSize:11,fontWeight:700,
+                            color:"var(--tx)",textDecoration:"none"}}
+                        >
+                          {p} →
+                        </a>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              {item?.platforms?.length <= 1 && item?.platform && item.platform !== platSel && (
+                <div style={{background:"#fff8f0",border:"1px solid #f0c040",borderTop:"none",padding:"8px 11px",fontSize:11,color:"#7a4e0e",fontWeight:700}}>
+                  📋 Remember to delist from: {item.platform}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -4325,6 +4394,9 @@ function QuickMarkSold({ listings, setListings }) {
               borderRadius:"var(--r)",padding:"8px 12px",marginBottom:7,
               fontSize:12,color:"var(--gn)",display:"flex",justifyContent:"space-between"}}>
               <span>✓ <strong>{h.sku}</strong> — {h.name} sold for <strong>{h.price}</strong> on {h.plat}</span>
+              {h.delistFrom?.length > 0 && (
+                <span style={{fontSize:10,color:"#7a4e0e",marginLeft:8}}>delist from: {h.delistFrom.join(", ")}</span>
+              )}
               <span style={{fontSize:11,opacity:.6,flexShrink:0,marginLeft:10}}>{h.time}</span>
             </div>
           ))}
@@ -5276,7 +5348,7 @@ function History({ listings, stockData }) {
             {rangeOpts.map(([v,l])=><option key={v} value={v}>{l}</option>)}
           </select>
           <div style={{position:"relative"}}>
-            <button className="btn btn-o btn-sm" onClick={()=>fHook.setShowPanel(v=>!v)}>
+            <button className="btn btn-o btn-sm" ref={fHook.btnRef} onClick={()=>fHook.setShowPanel(v=>!v)}>
               ⚡ Filters {fHook.activeFilters.length>0 && <span style={{background:"var(--ac)",color:"#fff",borderRadius:10,padding:"0 5px",fontSize:9,marginLeft:3}}>{fHook.activeFilters.length}</span>}
             </button>
             {fHook.showPanel && (
