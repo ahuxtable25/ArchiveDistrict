@@ -2903,6 +2903,10 @@ function MovementTracker({ listings }) {
       <div className="sh">
         <div className="st">
           Movement Tracker
+          <span className="ss">{sorted.length} groups · Name / Type / Brand</span>
+        </div>
+        <div style={{fontSize:11,color:"var(--txd)"}}>Click headers to sort</div>
+      </div>
 
       <div className="tw">
         <ZoomBar {...movZoom} />
