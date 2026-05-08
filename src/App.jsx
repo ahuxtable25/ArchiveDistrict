@@ -2581,8 +2581,8 @@ function FilterPanel({ colDefs, rows, filters, setFilter, clearAll, onClose, anc
   );
 
   // Calculate position from anchor button
-  const [pos, setPos] = React.useState({ top: 60, right: 16 });
-  React.useEffect(() => {
+  const [pos, setPos] = useState({ top: 60, right: 16 });
+  useEffect(() => {
     if (anchorRef?.current) {
       const r = anchorRef.current.getBoundingClientRect();
       const panelW = 320;
