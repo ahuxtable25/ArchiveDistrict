@@ -1319,6 +1319,7 @@ function StockTab({ stockData, setStockData, listings }) {
   const visCols = cols.filter(c => c.visible);
   const { getStyle: getStockColStyle, onMouseDown: onStockColResize } = useColWidths(cols);
   const stockZoom = useZoom(100);
+  const handleAddStock  = (ns) => setStockData(p => [...p, ns]);
   const handleDeleteStock = (bsku) => {
     setStockData(prev => prev.filter(s => s.bundleSku !== bsku));
     setEditStock(null);
