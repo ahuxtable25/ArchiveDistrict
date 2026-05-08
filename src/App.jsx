@@ -119,19 +119,19 @@ const deriveStock = (stockData, listings) =>
     const items       = listings.filter(l => l.bundleSku===s.bundleSku && l.name===s.name);
     const soldItems   = items.filter(l => l.sold);
     const listedItems = items.filter(l => l.listed);
-    const netProceeds  = soldItems.reduce((a,l) => a+(l.soldPrice||0), 0);
-    // Use actual money paid (totalCost field from import), fallback to sellable×costPer
-    const totalCost    = s.totalCost || s.sellable*s.costPer;
-    // True bundle profit = revenue from sold items minus proportional stock cost
-    const costPerItem  = s.sellable > 0 ? totalCost/s.sellable : s.costPer;
-    const totalProfit  = netProceeds - soldItems.length * costPerItem;
+    const netProceeds = soldItems.reduce((a,l) => a+(l.soldPrice||0), 0);
+    // Use actual money paid for whole batch
+    const totalCost   = s.totalCost || (s.sellable * (s.costPer||0));
+    const costPerItem = s.sellable > 0 ? totalCost / s.sellable : (s.costPer||0);
+    // Profit = revenue so far minus total batch cost (cash flow view)
+    const totalProfit  = netProceeds - totalCost;
     const stockValLeft = items.filter(l=>!l.sold).length * costPerItem;
     const sellThru     = s.sellable ? Math.round(soldItems.length/s.sellable*100) : 0;
-    const avgProfit    = soldItems.length ? totalProfit/soldItems.length : 0;
+    // avgProfit per item sold = (soldPrice - costPerItem) per item
+    const avgProfit    = soldItems.length ? (netProceeds - soldItems.length*costPerItem)/soldItems.length : 0;
     const avgSoldPrice = soldItems.length ? netProceeds/soldItems.length : 0;
     return {
-      ...s,
-      totalCost,
+      ...s, totalCost,
       qtySold:soldItems.length, qtyListed:listedItems.length,
       qtyListedNS:listedItems.filter(l=>!l.sold).length,
       qtyToBeListed:items.filter(l=>!l.listed&&!l.sold).length,
