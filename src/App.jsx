@@ -869,7 +869,7 @@ function ColPanel({ cols, setCols, onClose }) {
 /* ═══════════════════════════════════════════════════════════════
    STOCK — Edit Stock Drawer (click any row)
 ═══════════════════════════════════════════════════════════════ */
-function EditStockDrawer({ stock, onSave, onDelete, onClose }) {
+function EditStockDrawer({ stock, derived, onSave, onDelete, onClose }) {
   const [form, setForm] = useState({ ...stock });
   const [totalPaid, setTotalPaid] = useState(
     stock.costPer && stock.sellable
@@ -978,6 +978,48 @@ function EditStockDrawer({ stock, onSave, onDelete, onClose }) {
             </label>
           </div>
         </div>
+
+        {/* Analytics panel */}
+        {derived && derived.qtySold >= 0 && (
+          <div style={{padding:"0 18px 14px"}}>
+            <div className="st" style={{marginBottom:10,paddingTop:6}}>Bundle Analytics</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:10}}>
+              {[
+                {l:"Sold",      v:derived.qtySold,                         s:"items"},
+                {l:"Remaining", v:derived.qtyRemaining,                    s:"items"},
+                {l:"Listed",    v:derived.qtyListedNS,                     s:"live"},
+                {l:"Revenue",   v:fmt(derived.netProceeds||0),             s:"total"},
+                {l:"Profit",    v:fmt(derived.totalProfit||0),             s:"vs cost", c:(derived.totalProfit||0)>=0?"gn":"ac"},
+                {l:"Sell-thru", v:`${derived.sellThru||0}%`,              s:"of batch"},
+              ].map(({l,v,s,c})=>(
+                <div key={l} style={{background:"var(--sf2)",border:"1px solid var(--bd)",borderRadius:"var(--r)",padding:"8px 10px",textAlign:"center"}}>
+                  <div style={{fontSize:10,color:"var(--txm)",marginBottom:2}}>{l}</div>
+                  <div style={{fontSize:15,fontWeight:900,color:c?`var(--${c})`:"var(--tx)"}}>{v}</div>
+                  <div style={{fontSize:9,color:"var(--txd)"}}>{s}</div>
+                </div>
+              ))}
+            </div>
+            {/* Sell-through bar */}
+            <div style={{marginBottom:6}}>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:"var(--txm)",marginBottom:3}}>
+                <span>Sell-through progress</span>
+                <span>{derived.qtySold||0} / {derived.sellable||0} sold</span>
+              </div>
+              <div style={{height:6,background:"var(--sf2)",border:"1px solid var(--bd)",borderRadius:3,overflow:"hidden"}}>
+                <div style={{height:"100%",width:`${Math.min(100,derived.sellThru||0)}%`,
+                  background:(derived.sellThru||0)>=80?"var(--gn)":(derived.sellThru||0)>=40?"#f0a050":"var(--ac)",
+                  borderRadius:3,transition:"width .4s"}}/>
+              </div>
+            </div>
+            {derived.avgSoldPrice>0 && (
+              <div style={{fontSize:11,color:"var(--txm)"}}>
+                Avg sold price <strong>{fmt(derived.avgSoldPrice)}</strong>
+                {derived.avgProfit!==0 && <span> · Avg profit per item <strong style={{color:"var(--gn)"}}>{fmt(derived.avgProfit)}</strong></span>}
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="drw-f">
           <button className="btn btn-o btn-sm" onClick={onClose}>Cancel</button>
           <button className="btn btn-del btn-sm" onClick={() => {
@@ -1338,7 +1380,10 @@ function StockTab({ stockData, setStockData, listings }) {
     <div>
       {showAdd    && <AddStockModal stockData={stockData} onAdd={handleAddStock}  onClose={()=>setShowAdd(false)} />}
       {showImport && <ImportModal   stockData={stockData} onClose={()=>setShowImport(false)} />}
-      {editStock  && <EditStockDrawer stock={editStock} onSave={handleSaveStock} onDelete={handleDeleteStock} onClose={()=>setEditStock(null)} />}
+      {editStock  && <EditStockDrawer
+        stock={editStock}
+        derived={filtered.find(s=>s.bundleSku===editStock.bundleSku&&s.name===editStock.name)||editStock}
+        onSave={handleSaveStock} onDelete={handleDeleteStock} onClose={()=>setEditStock(null)} />}
 
       {/* Summary KPIs */}
       <div className="kg kg4" style={{marginBottom:14}}>
@@ -2852,15 +2897,12 @@ function MovementTracker({ listings }) {
         </button>
       </div>
 
+
       <FilterChips colDefs={cols} activeFilters={activeFilters} clearFilter={clearFilter} clearAll={clearAll} />
 
       <div className="sh">
         <div className="st">
           Movement Tracker
-          <span className="ss">{sorted.length} groups · Name / Type / Brand</span>
-        </div>
-        <div style={{fontSize:11,color:"var(--txd)"}}>Click headers to sort</div>
-      </div>
 
       <div className="tw">
         <ZoomBar {...movZoom} />
@@ -4573,7 +4615,8 @@ function Dashboard({ listings, stockData, weeklyGoal, setWeeklyGoal, monthlyGoal
   const totalProfit   = totalRevenue - totalStockSpend; // true business P&L
   // Sell-through = active / sold (matches spreadsheet)
   const sellThruPct   = sold.length ? Math.round(active.length/sold.length*100) : 0;
-  const avgProfit     = sold.length ? totalProfit/sold.length : 0;
+  // avgProfit per sale = avg (soldPrice - costPerItem) using per-listing profit field
+  const avgProfit     = sold.length ? sold.reduce((a,l)=>a+(l.profit||0),0)/sold.length : 0;
 
   const wkProfit = soldWk.reduce((a,l) => a+(l.profit||0), 0);
   const moProfit = soldMo.reduce((a,l) => a+(l.profit||0), 0);
@@ -5199,19 +5242,98 @@ function Growth({ listings, stockData }) {
           </div>
         ))}
       </div>
-      <div className="two-col">
-        {[
-          {i:"📈",t:"Revenue Over Time",    s:"Week-by-week revenue chart — populates as you log more sales."},
-          {i:"🏆",t:"Best Performing Weeks",s:"Your highest revenue weeks ranked."},
-          {i:"💸",t:"Profit Margin Trend",  s:"See whether your margins improve over time."},
-          {i:"📦",t:"Stock Turnover Rate",  s:"How quickly each batch clears after purchase."},
-        ].map(e=>(
-          <div key={e.t} className="tw" style={{padding:"30px 22px",textAlign:"center"}}>
-            <div style={{fontSize:28,marginBottom:9,opacity:.2}}>{e.i}</div>
-            <div style={{fontSize:11,fontWeight:900,textTransform:"uppercase",letterSpacing:".4px",marginBottom:5}}>{e.t}</div>
-            <div style={{fontSize:11,color:"var(--txm)",maxWidth:200,margin:"0 auto"}}>{e.s}</div>
+      {/* Weekly revenue chart */}
+      {(() => {
+        const weeks = [];
+        for (let i=11;i>=0;i--) {
+          const ws=new Date(_wsd); ws.setDate(ws.getDate()-i*7);
+          const we=new Date(ws);  we.setDate(we.getDate()+6);
+          const wsStr=ws.toISOString().split("T")[0];
+          const weStr=we.toISOString().split("T")[0];
+          const wSold=sold.filter(l=>l.daySold&&l.daySold>=wsStr&&l.daySold<=weStr);
+          weeks.push({
+            label:ws.toLocaleDateString("en-GB",{day:"numeric",month:"short"}),
+            revenue:wSold.reduce((a,l)=>a+(l.soldPrice||0),0),
+            profit:wSold.reduce((a,l)=>a+(l.profit||0),0),
+            count:wSold.length,
+          });
+        }
+        const maxRev=Math.max(...weeks.map(w=>w.revenue),1);
+        const maxProf=Math.max(...weeks.map(w=>Math.abs(w.profit)),1);
+        return (
+          <div className="tw" style={{padding:"18px 20px",marginBottom:14}}>
+            <div className="st" style={{marginBottom:14}}>Revenue & Profit — Last 12 Weeks</div>
+            <div style={{display:"flex",alignItems:"flex-end",gap:4,height:120}}>
+              {weeks.map((w,i)=>(
+                <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2,height:"100%",justifyContent:"flex-end"}}>
+                  <div style={{width:"100%",position:"relative",height:"100%",display:"flex",flexDirection:"column",justifyContent:"flex-end",gap:2}}>
+                    <div title={`Profit: ${fmt(w.profit)}`} style={{width:"100%",height:`${Math.round(Math.abs(w.profit)/maxProf*80)}%`,background:w.profit>=0?"var(--gn)":"var(--ac)",borderRadius:"2px 2px 0 0",opacity:.7,minHeight:w.profit?2:0}}/>
+                    <div title={`Revenue: ${fmt(w.revenue)}`} style={{width:"100%",height:`${Math.round(w.revenue/maxRev*80)}%`,background:"var(--acl)",border:"1px solid var(--ac2)",borderRadius:"2px 2px 0 0",minHeight:w.revenue?2:0}}/>
+                  </div>
+                  <div style={{fontSize:9,color:"var(--txd)",whiteSpace:"nowrap",transform:"rotate(-45deg)",transformOrigin:"center",marginTop:4,width:30,textAlign:"center"}}>{w.label}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{display:"flex",gap:14,marginTop:18,fontSize:10,color:"var(--txm)"}}>
+              <span><span style={{display:"inline-block",width:10,height:10,background:"var(--acl)",border:"1px solid var(--ac2)",borderRadius:2,marginRight:4,verticalAlign:"middle"}}/>Revenue</span>
+              <span><span style={{display:"inline-block",width:10,height:10,background:"var(--gn)",borderRadius:2,marginRight:4,verticalAlign:"middle",opacity:.7}}/>Profit</span>
+            </div>
           </div>
-        ))}
+        );
+      })()}
+
+      <div className="two-col">
+        {/* Best performing weeks */}
+        {(() => {
+          const weeks=[];
+          for(let i=23;i>=0;i--){
+            const ws=new Date(_wsd); ws.setDate(ws.getDate()-i*7);
+            const we=new Date(ws);   we.setDate(we.getDate()+6);
+            const wsStr=ws.toISOString().split("T")[0];
+            const weStr=we.toISOString().split("T")[0];
+            const wSold=sold.filter(l=>l.daySold&&l.daySold>=wsStr&&l.daySold<=weStr);
+            const rev=wSold.reduce((a,l)=>a+(l.soldPrice||0),0);
+            if(rev>0) weeks.push({label:ws.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"2-digit"}),revenue:rev,count:wSold.length});
+          }
+          weeks.sort((a,b)=>b.revenue-a.revenue);
+          return (
+            <div className="tw" style={{padding:"16px 18px"}}>
+              <div className="st" style={{marginBottom:10}}>🏆 Best Weeks by Revenue</div>
+              {weeks.slice(0,5).map((w,i)=>(
+                <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid var(--bd)",fontSize:12}}>
+                  <span><span style={{fontWeight:700,color:"var(--ac)",marginRight:8}}>#{i+1}</span>{w.label}</span>
+                  <span style={{fontWeight:700,color:"var(--gn)"}}>{fmt(w.revenue)}<span style={{fontSize:10,color:"var(--txd)",marginLeft:6}}>{w.count} sold</span></span>
+                </div>
+              ))}
+              {weeks.length===0 && <div style={{fontSize:12,color:"var(--txd)"}}>No sales data yet.</div>}
+            </div>
+          );
+        })()}
+
+        {/* Avg profit trend by month */}
+        {(() => {
+          const mons=[];
+          let d=new Date(2024,10,1);
+          while(d<=NOW){
+            const mk=d.toISOString().slice(0,7);
+            const mSold=sold.filter(l=>l.daySold&&l.daySold.startsWith(mk));
+            const prof=mSold.reduce((a,l)=>a+(l.profit||0),0);
+            if(mSold.length) mons.push({label:d.toLocaleDateString("en-GB",{month:"short",year:"2-digit"}),avg:prof/mSold.length,count:mSold.length});
+            d=new Date(d.getFullYear(),d.getMonth()+1,1);
+          }
+          return (
+            <div className="tw" style={{padding:"16px 18px"}}>
+              <div className="st" style={{marginBottom:10}}>📈 Avg Profit / Sale by Month</div>
+              {mons.map((m,i)=>(
+                <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid var(--bd)",fontSize:12}}>
+                  <span style={{color:"var(--txm)"}}>{m.label}</span>
+                  <span style={{fontWeight:700,color:m.avg>=0?"var(--gn)":"var(--ac)"}}>{fmt(m.avg)}<span style={{fontSize:10,color:"var(--txd)",marginLeft:6}}>{m.count} sold</span></span>
+                </div>
+              ))}
+              {mons.length===0 && <div style={{fontSize:12,color:"var(--txd)"}}>No sales data yet.</div>}
+            </div>
+          );
+        })()}
       </div>
     </div>
   );
@@ -5224,8 +5346,8 @@ const MONTH_HIST_COLS = [
   {id:"label",      label:"Month",        visible:true },
   {id:"sold",       label:"Items Sold",   visible:true },
   {id:"proceeds",   label:"Proceeds",     visible:true },
-  {id:"profit",     label:"Profit",       visible:true },
-  {id:"stockQty",   label:"Stock Batches",visible:true },
+  {id:"profit",     label:"Profit Kept",  visible:true },
+  {id:"stockQty",   label:"Stock Items",  visible:true },
   {id:"stockSpend", label:"Stock Spend",  visible:true },
 ];
 const WEEK_HIST_COLS = [
@@ -5233,7 +5355,7 @@ const WEEK_HIST_COLS = [
   {id:"listed",     label:"Listed",        visible:true },
   {id:"sold",       label:"Sold",          visible:true },
   {id:"revenue",    label:"Revenue",       visible:true },
-  {id:"profit",     label:"Profit",        visible:true },
+  {id:"profit",     label:"Profit Kept",   visible:true },
   {id:"stockSpend", label:"Stock Spend",   visible:true },
   {id:"activeLive", label:"Active at EOW", visible:true },
 ];
@@ -5264,7 +5386,7 @@ function History({ listings, stockData }) {
         sold: mListings.length,
         proceeds: mListings.reduce((a,l)=>a+(l.soldPrice||0),0),
         profit:   mListings.reduce((a,l)=>a+(l.profit||0),0),
-        stockQty: mStock.length,
+        stockQty: mStock.reduce((a,s)=>a+(s.sellable||0),0),
         stockSpend: mStock.reduce((a,s)=>a+(s.totalCost||s.sellable*s.costPer||0),0),
       };
     }).reverse(); // newest first
