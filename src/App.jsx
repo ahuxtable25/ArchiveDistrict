@@ -10,19 +10,44 @@ const supabase = createClient(
 /* ── Save entire app state to Supabase (upsert single row id=1) ── */
 const saveState = async (listings, stockData, goals) => {
   try {
+    const ts = new Date().toISOString();
     const { error } = await supabase.from("app_state").upsert({
       id: 1,
       listings,
       stock_data: stockData,
       goals,
-      updated_at: new Date().toISOString(),
+      updated_at: ts,
     }, { onConflict: "id" });
-    if (error) { console.error("Supabase save error:", error.message, error); return false; }
+    if (error) { console.error("Supabase save error:", error.message); return false; }
     return true;
   } catch (err) {
     console.error("Supabase save exception:", err);
     return false;
   }
+};
+
+/* ── Local version history — stores last 10 snapshots in localStorage ── */
+const VERSION_KEY = "ad_versions";
+const MAX_VERSIONS = 10;
+
+const saveLocalVersion = (listings, stockData) => {
+  try {
+    const existing = JSON.parse(localStorage.getItem(VERSION_KEY) || "[]");
+    const entry = {
+      ts: new Date().toISOString(),
+      label: new Date().toLocaleString("en-GB", { day:"numeric", month:"short", hour:"2-digit", minute:"2-digit" }),
+      listingsCount: listings.length,
+      listings,
+      stockData,
+    };
+    const updated = [entry, ...existing].slice(0, MAX_VERSIONS);
+    localStorage.setItem(VERSION_KEY, JSON.stringify(updated));
+  } catch (e) { console.warn("Version save failed:", e); }
+};
+
+const loadLocalVersions = () => {
+  try { return JSON.parse(localStorage.getItem(VERSION_KEY) || "[]"); }
+  catch { return []; }
 };
 
 
@@ -344,7 +369,8 @@ const NAV = [
   {id:"calculator",  label:"Price Calc",     icon:"🧮",group:"Tools"    },
   {id:"analytics",   label:"Analytics",      icon:"↗", group:"Reports"  },
   {id:"growth",      label:"Growth",         icon:"📈",group:"Reports"  },
-  {id:"history",     label:"History",        icon:"🗂",group:"Reports"  },
+  {id:"history",     label:"History",        icon:"🗂", group:"Reports"  },
+  {id:"versions",    label:"Version History", icon:"🔄", group:"Reports"  },
 ];
 const TITLES = {
   dashboard:"Dashboard",stock:"Stock Inventory",listings:"Listings",
@@ -869,7 +895,7 @@ function ColPanel({ cols, setCols, onClose }) {
 /* ═══════════════════════════════════════════════════════════════
    STOCK — Edit Stock Drawer (click any row)
 ═══════════════════════════════════════════════════════════════ */
-function EditStockDrawer({ stock, derived, onSave, onDelete, onClose }) {
+function EditStockDrawer({ stock, derived, onSave, onDelete, onClose, onAddListings }) {
   const [form, setForm] = useState({ ...stock });
   const [totalPaid, setTotalPaid] = useState(
     stock.costPer && stock.sellable
@@ -1019,6 +1045,34 @@ function EditStockDrawer({ stock, derived, onSave, onDelete, onClose }) {
             )}
           </div>
         )}
+
+        {/* Auto-import to listings */}
+        {onAddListings && derived && (() => {
+          const sellable = stock.sellable || 0;
+          const alreadyCreated = (derived.qtyListedNS||0) + (derived.qtySold||0) + (derived.qtyToBeListed||0);
+          const toCreate = Math.max(0, sellable - alreadyCreated);
+          if (toCreate === 0) return (
+            <div style={{margin:"0 18px 14px",padding:"10px 12px",background:"var(--gnl)",border:"1px solid rgba(31,92,53,.2)",borderRadius:"var(--r)",fontSize:11,color:"var(--gn)",fontWeight:700}}>
+              ✓ All {sellable} items from this bundle have listing entries
+            </div>
+          );
+          return (
+            <div style={{margin:"0 18px 14px",padding:"12px 14px",background:"#fff8f0",border:"1px solid #f0c040",borderRadius:"var(--r)"}}>
+              <div style={{fontSize:11,fontWeight:700,color:"#7a4e0e",marginBottom:6}}>
+                📦 Auto-Import to Listings
+              </div>
+              <div style={{fontSize:11,color:"#7a4e0e",marginBottom:10,lineHeight:1.5}}>
+                <strong>{toCreate}</strong> items from this bundle have no listing entry yet.
+                Auto-import will create <strong>{toCreate}</strong> listing stubs
+                with cost price, bundle name and SKUs pre-filled. You add colour/size/description after.
+              </div>
+              <button className="btn btn-p btn-sm" style={{width:"100%",justifyContent:"center"}}
+                onClick={() => onAddListings(stock, toCreate)}>
+                ⚡ Create {toCreate} listing stub{toCreate!==1?"s":""} from {stock.bundleSku}
+              </button>
+            </div>
+          );
+        })()}
 
         <div className="drw-f">
           <button className="btn btn-o btn-sm" onClick={onClose}>Cancel</button>
@@ -1304,7 +1358,7 @@ const NUMERIC_STOCK_COLS = new Set([
   "netProceeds","stockValLeft","sellThru","avgSoldPrice","avgProfit",
 ]);
 
-function StockTab({ stockData, setStockData, listings }) {
+function StockTab({ stockData, setStockData, listings, setListings }) {
   const [cols,         setCols]        = useState(STOCK_COLS);
   const [showColPanel, setShowColPanel]= useState(false);
   const [showAdd,      setShowAdd]     = useState(false);
@@ -1361,13 +1415,45 @@ function StockTab({ stockData, setStockData, listings }) {
   const visCols = cols.filter(c => c.visible);
   const { getStyle: getStockColStyle, onMouseDown: onStockColResize } = useColWidths(cols);
   const stockZoom = useZoom(100);
-  const handleAddStock  = (ns) => setStockData(p => [...p, ns]);
+  const handleAddStock    = (ns) => setStockData(p => [...p, ns]);
   const handleDeleteStock = (bsku) => {
     setStockData(prev => prev.filter(s => s.bundleSku !== bsku));
     setEditStock(null);
   };
   const handleSaveStock = (updated) =>
     setStockData(p => p.map(s => s.bundleSku===updated.bundleSku ? updated : s));
+
+  const handleAutoImport = (stock, count) => {
+    const nextSkuNum = (() => {
+      const skus = listings.map(l=>parseInt(l.sku.replace(/[^0-9]/g,"")||0)).filter(n=>!isNaN(n)&&n>0);
+      return skus.length ? Math.max(...skus)+1 : 1;
+    })();
+    const letter = (listings[0]?.sku?.match(/^([A-Z]+)/)||["","A"])[1];
+    const stubs = Array.from({length:count},(_,i)=>({
+      bundleSku:  stock.bundleSku,
+      name:       stock.name,
+      brand:      stock.brand  || "",
+      type:       stock.type   || "",
+      colour:     "",
+      size:       "",
+      desc:       "",
+      length:     "",
+      pitToPit:   "",
+      sku:        `${letter}${nextSkuNum+i}`,
+      price:      stock.costPer || 0,
+      listed:     false,
+      sold:       false,
+      shipped:    false,
+      dayListed:  null,
+      platforms:  [],
+      platform:   null,
+      platformDates: {},
+      notes:      "⚠ Fill in colour, size and description",
+    }));
+    setListings(prev => [...prev, ...stubs]);
+    setEditStock(null);
+    alert(`✓ Created ${count} listing stub${count!==1?"s":""} for ${stock.bundleSku}. Go to Listings tab to fill in colour/size/description.`);
+  };
 
   /* Summary KPIs */
   const totalBundles  = filtered.length;
@@ -1383,7 +1469,8 @@ function StockTab({ stockData, setStockData, listings }) {
       {editStock  && <EditStockDrawer
         stock={editStock}
         derived={filtered.find(s=>s.bundleSku===editStock.bundleSku&&s.name===editStock.name)||editStock}
-        onSave={handleSaveStock} onDelete={handleDeleteStock} onClose={()=>setEditStock(null)} />}
+        onSave={handleSaveStock} onDelete={handleDeleteStock} onClose={()=>setEditStock(null)}
+        onAddListings={handleAutoImport} />}
 
       {/* Summary KPIs */}
       <div className="kg kg4" style={{marginBottom:14}}>
@@ -1986,9 +2073,25 @@ function AddListingModal({ listings, stockData, onAdd, onClose }) {
 
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
+  // When bundle changes, auto-fill stock details
+  const handleBundleChange = (bsku) => {
+    const stock = stockData.find(s => s.bundleSku === bsku);
+    if (stock) {
+      setForm(p => ({
+        ...p,
+        bundleSku: bsku,
+        price: stock.costPer ? String(stock.costPer) : p.price,
+        // Only fill name/brand if currently empty
+        brand: p.brand || stock.brand || "",
+        type:  p.type  || stock.type  || "",
+      }));
+    } else {
+      set("bundleSku", bsku);
+    }
+  };
+
   // When bundle changes, auto-suggest cost from stock
   const selectedStock = stockData.find(s => s.bundleSku === form.bundleSku);
-  const suggestedCost = selectedStock ? fmt(selectedStock.costPer) : null;
 
   const validate = () => {
     const e = {};
@@ -2049,17 +2152,19 @@ function AddListingModal({ listings, stockData, onAdd, onClose }) {
           <div className="fr">
             <label className="fl">Stock Bundle</label>
             <select className="fsel" value={form.bundleSku}
-              onChange={e => set("bundleSku", e.target.value)}>
+              onChange={e => handleBundleChange(e.target.value)}>
               {stockData.map(s => (
-                <option key={s.bundleSku} value={s.bundleSku}>
+                <option key={`${s.bundleSku}-${s.name}`} value={s.bundleSku}>
                   {s.bundleSku} — {s.name}
                 </option>
               ))}
             </select>
           </div>
-          {suggestedCost && (
-            <div style={{fontSize:11,color:"var(--txm)",marginTop:-6,marginBottom:10}}>
-              Suggested cost from bundle: <strong>{suggestedCost}</strong>
+          {selectedStock && (
+            <div style={{fontSize:11,color:"var(--txm)",marginTop:-6,marginBottom:10,display:"flex",gap:10,flexWrap:"wrap"}}>
+              <span>📦 <strong>{selectedStock.name}</strong></span>
+              <span>Cost/pc: <strong>{fmt(selectedStock.costPer)}</strong></span>
+              <span>Remaining to list: <strong>{selectedStock.sellable - (selectedStock.qtySold||0)} items</strong></span>
             </div>
           )}
 
@@ -2114,7 +2219,7 @@ function AddListingModal({ listings, stockData, onAdd, onClose }) {
             <div className="fr">
               <label className="fl">
                 Cost Price £ {errors.price && <span style={{color:"var(--ac)"}}>*</span>}
-                {suggestedCost && <span style={{color:"var(--txd)",fontWeight:400,textTransform:"none",marginLeft:4}}>suggest {suggestedCost}</span>}
+                {selectedStock && <span style={{color:"var(--gn)",fontWeight:600,textTransform:"none",marginLeft:4}}>← auto-filled from bundle</span>}
               </label>
               <input className="finp" type="number" step="0.01"
                 placeholder={selectedStock ? String(selectedStock.costPer) : "0.00"}
@@ -3651,14 +3756,22 @@ function ListingDrafter({ listings, setListings }) {
   const item = listings.find(l => l.sku === selSku);
 
   /* ── Description prompt — matches screenshot style exactly ── */
-  const buildDescPrompt = (it, cond, extra, different = false) => `You are writing a Depop/Vinted listing description for vintage clothing. Match this EXACT format — short, punchy lines, natural emoji placement (max 3 total):
+  const buildDescPrompt = (it, cond, extra, different = false) => {
+    // Detect if pitToPit is a waist measurement (starts with w/W followed by digits)
+    const isWaist = /^[wW]\s*\d/.test(it.pitToPit || "");
+    const measLabel = isWaist ? "Waist" : "Pit to pit";
+    const measValue = isWaist
+      ? (it.pitToPit || "not specified").replace(/^[wW]\s*/,"").trim()
+      : (it.pitToPit || "not specified");
+
+    return `You are writing a Depop/Vinted listing description for vintage clothing. Match this EXACT format — short, punchy lines, natural emoji placement (max 3 total):
 
 [Brand] [specific item name + key detail] 🔥
 [One line about colour, era or vibe] [relevant emoji]
 
 Size: [size]
 Length: [length]
-Pit to pit: [pit to pit]
+${measLabel}: [${measLabel.toLowerCase()}]
 
 [One sentence: material, fit or how to style it] [emoji]
 [Condition] condition.
@@ -3671,17 +3784,17 @@ Type: ${it.type}
 Colour: ${it.colour}
 Size: ${it.size}
 Length: ${it.length || "not specified"}
-Pit to pit: ${it.pitToPit || "not specified"}
+${measLabel}: ${measValue}
 SKU: ${it.sku}
 Condition: ${cond}
-Extra notes: ${extra || it.desc || "none"}
+Extra notes: ${[extra, it.notes, it.desc].filter(Boolean).join(" | ") || "none"}
 
 Rules:
 - Max 3 emojis total, placed naturally (not at the start of every line)
 - Under 80 words
 - No hashtags in the description
 - Return ONLY the description text — no JSON, no quotes, no extra commentary${different ? "\n- Write a DIFFERENT version with varied wording, vibe, and emoji choice" : ""}`;
-
+  };
   /* ── Generate ── */
   const generate = async () => {
     if (!item) return;
@@ -5364,6 +5477,128 @@ const WEEK_HIST_COLS = [
   {id:"activeLive", label:"Active at EOW", visible:true },
 ];
 
+/* ═══════════════════════════════════════════════════════════════
+   VERSION HISTORY — Local backup restore
+═══════════════════════════════════════════════════════════════ */
+function VersionHistory({ onRestore }) {
+  const [versions, setVersions]   = useState([]);
+  const [selected, setSelected]   = useState(null);
+  const [confirming, setConfirming] = useState(false);
+
+  useEffect(() => {
+    setVersions(loadLocalVersions());
+  }, []);
+
+  const doRestore = () => {
+    if (!selected) return;
+    onRestore(selected);
+  };
+
+  return (
+    <div>
+      <div className="info-banner">
+        <strong>Version History</strong> — The last {MAX_VERSIONS} auto-saved snapshots from this device.
+        Saved automatically every time you make a change, and always when you close the tab.
+      </div>
+
+      {versions.length === 0 ? (
+        <div className="tw" style={{padding:"32px 24px",textAlign:"center"}}>
+          <div style={{fontSize:28,opacity:.15,marginBottom:12}}>🕐</div>
+          <div style={{fontSize:13,color:"var(--txd)"}}>No local versions saved yet.</div>
+          <div style={{fontSize:11,color:"var(--txd)",marginTop:6}}>Versions are saved automatically as you use the app.</div>
+        </div>
+      ) : (
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+          {/* Version list */}
+          <div>
+            <div className="st" style={{marginBottom:10}}>Saved Versions</div>
+            {versions.map((v,i) => (
+              <div key={v.ts} onClick={() => { setSelected(v); setConfirming(false); }}
+                style={{
+                  padding:"11px 14px", marginBottom:8, cursor:"pointer",
+                  background: selected?.ts===v.ts ? "var(--acl)" : "var(--sf)",
+                  border:`1px solid ${selected?.ts===v.ts?"var(--ac)":"var(--bd)"}`,
+                  borderRadius:"var(--r)", transition:"all .12s",
+                }}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <div>
+                    <div style={{fontWeight:700,fontSize:13,color:selected?.ts===v.ts?"var(--ac)":"var(--tx)"}}>
+                      {i===0?"🟢 Most recent":v.label}
+                    </div>
+                    <div style={{fontSize:11,color:"var(--txm)",marginTop:2}}>
+                      {v.listingsCount} listings
+                    </div>
+                  </div>
+                  <div style={{fontSize:10,color:"var(--txd)",textAlign:"right"}}>
+                    {i===0 && <div style={{color:"var(--gn)",fontWeight:700,fontSize:10}}>Latest</div>}
+                    <div>{new Date(v.ts).toLocaleString("en-GB",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}</div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Preview + restore */}
+          <div>
+            <div className="st" style={{marginBottom:10}}>Restore Preview</div>
+            {!selected ? (
+              <div className="tw" style={{padding:"24px",textAlign:"center",color:"var(--txd)",fontSize:12}}>
+                ← Select a version to preview
+              </div>
+            ) : (
+              <div className="tw" style={{padding:"16px 18px"}}>
+                <div style={{fontSize:13,fontWeight:700,marginBottom:12}}>
+                  {selected.label}
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
+                  {[
+                    ["Listings",  selected.listingsCount],
+                    ["Sold",      selected.listings.filter(l=>l.sold).length],
+                    ["Active",    selected.listings.filter(l=>l.listed&&!l.sold).length],
+                    ["Stock bundles", selected.stockData?.length||0],
+                  ].map(([l,v])=>(
+                    <div key={l} style={{background:"var(--sf2)",border:"1px solid var(--bd)",borderRadius:"var(--r)",padding:"8px 10px",textAlign:"center"}}>
+                      <div style={{fontSize:10,color:"var(--txm)"}}>{l}</div>
+                      <div style={{fontSize:18,fontWeight:900}}>{v}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {!confirming ? (
+                  <button className="btn btn-p" style={{width:"100%",justifyContent:"center"}}
+                    onClick={()=>setConfirming(true)}>
+                    ↩ Restore this version
+                  </button>
+                ) : (
+                  <div style={{background:"#fff8f0",border:"1px solid #f0c040",borderRadius:"var(--r)",padding:"12px"}}>
+                    <div style={{fontSize:12,fontWeight:700,color:"#7a4e0e",marginBottom:8}}>
+                      ⚠ This will replace your current data. Are you sure?
+                    </div>
+                    <div style={{display:"flex",gap:8}}>
+                      <button className="btn btn-p btn-sm" style={{flex:1,justifyContent:"center",background:"#b52035",border:"none"}}
+                        onClick={doRestore}>
+                        Yes, restore
+                      </button>
+                      <button className="btn btn-o btn-sm" style={{flex:1,justifyContent:"center"}}
+                        onClick={()=>setConfirming(false)}>
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <div style={{fontSize:10,color:"var(--txd)",marginTop:10,lineHeight:1.5}}>
+                  After restoring, the app will return to Dashboard. Your restored data will auto-save to Supabase within 1 second.
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function History({ listings, stockData }) {
   const [monthCols, setMonthCols] = useState(MONTH_HIST_COLS);
   const [weekCols,  setWeekCols]  = useState(WEEK_HIST_COLS);
@@ -5713,16 +5948,19 @@ export default function App() {
         { event: "UPDATE", schema: "public", table: "app_state", filter: "id=eq.1" },
         (payload) => {
           if (!payload.new) return;
-          // Only apply remote change if we're not the one who just saved
+          // Skip if WE just saved (avoid echo)
           if (isRemoteUpdate.current) return;
+          // Only apply if remote data is NEWER than our last save
+          const remoteTs = payload.new.updated_at;
+          const localTs  = lastSaveTs.current;
+          if (localTs && remoteTs && remoteTs <= localTs) return;
           isRemoteUpdate.current = true;
-          setTimeout(() => { isRemoteUpdate.current = false; }, 500);
-          if (payload.new.listings)   setListingsRaw(payload.new.listings);
-          if (payload.new.stock_data) setStockDataRaw(payload.new.stock_data);
+          setTimeout(() => { isRemoteUpdate.current = false; }, 2000);
+          if (payload.new.listings?.length > 0) setListingsRaw(payload.new.listings);
+          if (payload.new.stock_data?.length > 0) setStockDataRaw(payload.new.stock_data);
           if (payload.new.goals) {
             setWeeklyGoal(payload.new.goals.weekly   || "");
             setMonthlyGoal(payload.new.goals.monthly || "");
-            // Only update liveData if the incoming payload has actual values
             if (payload.new.goals.liveData &&
                 Object.values(payload.new.goals.liveData).some(v => v !== "")) {
               setLiveData(payload.new.goals.liveData);
@@ -5736,19 +5974,28 @@ export default function App() {
   }, []);
 
   /* ── Debounced save — fires 800ms after last change ── */
-  const saveTimer = useRef(null);
+  const saveTimer      = useRef(null);
   const isRemoteUpdate = useRef(false);
+  const lastSaveTs     = useRef(null);
+  const versionTimer   = useRef(null);
 
   const debouncedSave = useCallback((listings, stockData, goals) => {
     if (!hasLoaded.current) return;
     setStorageStatus("loading");
     clearTimeout(saveTimer.current);
+    clearTimeout(versionTimer.current);
+    // Auto-save local version every 60s of changes
+    versionTimer.current = setTimeout(() => {
+      saveLocalVersion(listings, stockData);
+    }, 60000);
     saveTimer.current = setTimeout(async () => {
-      // Mark as our own save so realtime echo doesn't overwrite state
       isRemoteUpdate.current = true;
+      const ts = new Date().toISOString();
+      lastSaveTs.current = ts;
       setTimeout(() => { isRemoteUpdate.current = false; }, 2000);
       const ok = await saveState(listings, stockData, goals);
       setStorageStatus(ok ? "saved" : "error");
+      if (ok) saveLocalVersion(listings, stockData);
     }, 800);
   }, []);
 
@@ -5757,7 +6004,34 @@ export default function App() {
     debouncedSave(listings, stockData, { weekly: weeklyGoal, monthly: monthlyGoal, liveData });
   }, [listings, stockData, weeklyGoal, monthlyGoal, liveData, debouncedSave]);
 
-  /* ── Manual refresh — re-fetch from Supabase ── */
+  /* ── beforeunload — always save to localStorage on tab close ── */
+  useEffect(() => {
+    const handler = () => saveLocalVersion(listings, stockData);
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [listings, stockData]);
+
+  /* ── Hard Save — immediate force-save to Supabase + local version ── */
+  const [hardSaving, setHardSaving] = useState(false);
+  const [hardSaveMsg, setHardSaveMsg] = useState("");
+
+  const hardSave = useCallback(async () => {
+    setHardSaving(true);
+    setHardSaveMsg("");
+    clearTimeout(saveTimer.current);
+    isRemoteUpdate.current = true;
+    const ts = new Date().toISOString();
+    lastSaveTs.current = ts;
+    setTimeout(() => { isRemoteUpdate.current = false; }, 2000);
+    const ok = await saveState(listings, stockData, { weekly: weeklyGoal, monthly: monthlyGoal, liveData });
+    saveLocalVersion(listings, stockData);
+    const time = new Date().toLocaleTimeString("en-GB", { hour:"2-digit", minute:"2-digit" });
+    setHardSaveMsg(ok ? `✓ Saved at ${time} — ${listings.length} listings` : "✗ Save failed — check connection");
+    setStorageStatus(ok ? "saved" : "error");
+    setHardSaving(false);
+  }, [listings, stockData, weeklyGoal, monthlyGoal, liveData]);
+
+  /* ── Manual refresh — SAFE: only replaces if remote is newer ── */
   const [refreshing, setRefreshing] = useState(false);
   const manualRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -5765,14 +6039,23 @@ export default function App() {
       const { data, error } = await supabase
         .from("app_state").select("*").eq("id", 1).single();
       if (data && !error) {
-        if (data.listings?.length)    setListingsRaw(data.listings);
-        if (data.stock_data?.length)  setStockDataRaw(data.stock_data);
-        if (data.goals) {
-          setWeeklyGoal(data.goals.weekly   || "");
-          setMonthlyGoal(data.goals.monthly || "");
-          if (data.goals.liveData) setLiveData(data.goals.liveData);
+        const remoteTs = data.updated_at;
+        const localTs  = lastSaveTs.current;
+        // Only apply if remote is newer OR we have no local timestamp
+        if (!localTs || !remoteTs || remoteTs > localTs) {
+          if (data.listings?.length)    setListingsRaw(data.listings);
+          if (data.stock_data?.length)  setStockDataRaw(data.stock_data);
+          if (data.goals) {
+            setWeeklyGoal(data.goals.weekly   || "");
+            setMonthlyGoal(data.goals.monthly || "");
+            if (data.goals.liveData) setLiveData(data.goals.liveData);
+          }
+          setStorageStatus("saved");
+        } else {
+          // Remote is older — don't overwrite, but update status
+          setStorageStatus("saved");
+          console.log("Refresh skipped: local data is newer than Supabase");
         }
-        setStorageStatus("saved");
       }
     } catch (_) {}
     setRefreshing(false);
@@ -5945,12 +6228,28 @@ export default function App() {
                 {refreshing ? "…" : "↻"}
               </button>
               <button className="btn btn-o btn-sm" onClick={exportJSON}>↓ Backup</button>
+              <button
+                className={`btn btn-sm ${hardSaving ? "btn-o" : "btn-p"}`}
+                onClick={hardSave}
+                disabled={hardSaving}
+                title="Force-save everything to Supabase + local backup now"
+                style={{background:hardSaving?"var(--sf2)":"#1a6b3a",color:"#fff",border:"none"}}
+              >
+                {hardSaving ? "Saving…" : "💾 Save"}
+              </button>
+              {hardSaveMsg && (
+                <span style={{fontSize:10,fontWeight:700,
+                  color:hardSaveMsg.startsWith("✓")?"var(--gn)":"var(--ac)",
+                  whiteSpace:"nowrap"}}>
+                  {hardSaveMsg}
+                </span>
+              )}
             </div>
           </div>
 
           <div className="content">
             {view==="dashboard"   && <Dashboard listings={listings} stockData={stockData} weeklyGoal={weeklyGoal} setWeeklyGoal={setWeeklyGoal} monthlyGoal={monthlyGoal} setMonthlyGoal={setMonthlyGoal} />}
-            {view==="stock"       && <StockTab stockData={stockData} setStockData={setStockData} listings={listings} />}
+            {view==="stock"       && <StockTab stockData={stockData} setStockData={setStockData} listings={listings} setListings={setListings} />}
             {view==="listings"    && <ListingsTab listings={listings} setListings={setListings} stockData={stockData} />}
             {view==="movement"    && <MovementTracker listings={listings} />}
             {view==="listingdata" && <ListingDataTab listings={listings} />}
@@ -5963,6 +6262,7 @@ export default function App() {
             {view==="analytics"   && <Analytics listings={listings} stockData={stockData} />}
             {view==="growth"      && <Growth listings={listings} stockData={stockData} />}
             {view==="history"     && <History listings={listings} stockData={stockData} />}
+            {view==="versions"    && <VersionHistory onRestore={(v)=>{ setListingsRaw(v.listings); setStockDataRaw(v.stockData); setView("dashboard"); }} />}
           </div>
         </div>
       </div>
