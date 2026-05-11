@@ -33,9 +33,14 @@ const MAX_VERSIONS = 10;
 const saveLocalVersion = (listings, stockData) => {
   try {
     const existing = JSON.parse(localStorage.getItem(VERSION_KEY) || "[]");
+    // Skip if last version was saved less than 30 seconds ago with same listing count
+    const last = existing[0];
+    const now = Date.now();
+    if (last && listings.length === last.listingsCount &&
+        now - new Date(last.ts).getTime() < 30000) return;
     const entry = {
       ts: new Date().toISOString(),
-      label: new Date().toLocaleString("en-GB", { day:"numeric", month:"short", hour:"2-digit", minute:"2-digit" }),
+      label: new Date().toLocaleString("en-GB", { weekday:"short", day:"numeric", month:"short", hour:"2-digit", minute:"2-digit" }),
       listingsCount: listings.length,
       listings,
       stockData,
@@ -429,7 +434,9 @@ nav::-webkit-scrollbar-thumb{background:var(--bd);border-radius:2px}
 .sunday-banner{background:var(--nv);color:#fff;padding:9px 18px;display:flex;align-items:center;justify-content:space-between;font-size:12px;font-weight:700;flex-shrink:0;gap:10px;flex-wrap:wrap}
 .sunday-btn{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);color:#fff;padding:4px 12px;border-radius:var(--r);cursor:pointer;font-family:Arial,sans-serif;font-size:11px;font-weight:700;transition:background .12s}
 .sunday-btn:hover{background:rgba(255,255,255,.22)}
-.topbar{height:var(--tb-h);background:var(--sf);border-bottom:1px solid var(--bd);display:flex;align-items:center;padding:0 16px;gap:10px;flex-shrink:0}
+.topbar{height:var(--tb-h);background:var(--sf);border-bottom:1px solid var(--bd);display:flex;align-items:center;padding:0 10px;gap:6px;flex-shrink:0;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.topbar::-webkit-scrollbar{display:none}
+@media(max-width:640px){.tb-date{display:none!important}.topbar{gap:4px;padding:0 8px}}
 .menu-tog{background:none;border:1px solid var(--bdd);border-radius:var(--r);cursor:pointer;padding:5px 9px;font-size:15px;color:var(--txm);transition:all .12s;flex-shrink:0;line-height:1}
 .menu-tog:hover{background:var(--acl);border-color:var(--ac2);color:var(--ac)}
 .page-title{font-size:13.5px;font-weight:900;color:var(--tx);text-transform:uppercase;letter-spacing:.5px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -5481,56 +5488,69 @@ const WEEK_HIST_COLS = [
    VERSION HISTORY — Local backup restore
 ═══════════════════════════════════════════════════════════════ */
 function VersionHistory({ onRestore }) {
-  const [versions, setVersions]   = useState([]);
-  const [selected, setSelected]   = useState(null);
+  const [versions, setVersions]     = useState([]);
+  const [selected, setSelected]     = useState(null);
   const [confirming, setConfirming] = useState(false);
 
   useEffect(() => {
-    setVersions(loadLocalVersions());
+    const v = loadLocalVersions();
+    setVersions(v);
+    if (v.length) setSelected(v[0]);
   }, []);
 
-  const doRestore = () => {
-    if (!selected) return;
-    onRestore(selected);
+  const exportVersion = (v) => {
+    const blob = new Blob([JSON.stringify({listings:v.listings,stockData:v.stockData},null,2)],
+      {type:"application/json"});
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `archivedistrict_version_${v.label.replace(/[^a-zA-Z0-9]/g,"_")}.json`;
+    a.click();
   };
 
   return (
     <div>
       <div className="info-banner">
         <strong>Version History</strong> — The last {MAX_VERSIONS} auto-saved snapshots from this device.
-        Saved automatically every time you make a change, and always when you close the tab.
+        Each version can be previewed, exported as JSON, or restored.
       </div>
 
       {versions.length === 0 ? (
         <div className="tw" style={{padding:"32px 24px",textAlign:"center"}}>
           <div style={{fontSize:28,opacity:.15,marginBottom:12}}>🕐</div>
           <div style={{fontSize:13,color:"var(--txd)"}}>No local versions saved yet.</div>
-          <div style={{fontSize:11,color:"var(--txd)",marginTop:6}}>Versions are saved automatically as you use the app.</div>
+          <div style={{fontSize:11,color:"var(--txd)",marginTop:6}}>
+            Versions save automatically as you use the app, and whenever you click 💾 Save.
+          </div>
         </div>
       ) : (
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}} className="ld-grid">
+
           {/* Version list */}
           <div>
-            <div className="st" style={{marginBottom:10}}>Saved Versions</div>
+            <div className="st" style={{marginBottom:10}}>
+              Saved Versions <span className="ss">{versions.length} snapshots</span>
+            </div>
             {versions.map((v,i) => (
               <div key={v.ts} onClick={() => { setSelected(v); setConfirming(false); }}
                 style={{
-                  padding:"11px 14px", marginBottom:8, cursor:"pointer",
+                  padding:"10px 13px", marginBottom:7, cursor:"pointer",
                   background: selected?.ts===v.ts ? "var(--acl)" : "var(--sf)",
                   border:`1px solid ${selected?.ts===v.ts?"var(--ac)":"var(--bd)"}`,
                   borderRadius:"var(--r)", transition:"all .12s",
                 }}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <div>
-                    <div style={{fontWeight:700,fontSize:13,color:selected?.ts===v.ts?"var(--ac)":"var(--tx)"}}>
-                      {i===0?"🟢 Most recent":v.label}
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+                  <div style={{minWidth:0}}>
+                    <div style={{fontWeight:700,fontSize:12,color:selected?.ts===v.ts?"var(--ac)":"var(--tx)",
+                      display:"flex",alignItems:"center",gap:6}}>
+                      {i===0 && <span style={{width:7,height:7,borderRadius:"50%",background:"var(--gn)",display:"inline-block",flexShrink:0}}/>}
+                      {i===0 ? "Most recent" : v.label}
                     </div>
-                    <div style={{fontSize:11,color:"var(--txm)",marginTop:2}}>
+                    <div style={{fontSize:11,color:"var(--txm)",marginTop:1}}>
                       {v.listingsCount} listings
                     </div>
                   </div>
-                  <div style={{fontSize:10,color:"var(--txd)",textAlign:"right"}}>
-                    {i===0 && <div style={{color:"var(--gn)",fontWeight:700,fontSize:10}}>Latest</div>}
+                  <div style={{fontSize:10,color:"var(--txd)",textAlign:"right",flexShrink:0}}>
+                    {i===0 && <div style={{color:"var(--gn)",fontWeight:700}}>Latest</div>}
                     <div>{new Date(v.ts).toLocaleString("en-GB",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}</div>
                   </div>
                 </div>
@@ -5538,48 +5558,65 @@ function VersionHistory({ onRestore }) {
             ))}
           </div>
 
-          {/* Preview + restore */}
+          {/* Preview + actions */}
           <div>
-            <div className="st" style={{marginBottom:10}}>Restore Preview</div>
+            <div className="st" style={{marginBottom:10}}>Preview & Actions</div>
             {!selected ? (
               <div className="tw" style={{padding:"24px",textAlign:"center",color:"var(--txd)",fontSize:12}}>
-                ← Select a version to preview
+                ← Select a version
               </div>
             ) : (
               <div className="tw" style={{padding:"16px 18px"}}>
-                <div style={{fontSize:13,fontWeight:700,marginBottom:12}}>
-                  {selected.label}
+                <div style={{fontSize:13,fontWeight:700,marginBottom:4}}>{selected.label}</div>
+                <div style={{fontSize:11,color:"var(--txd)",marginBottom:12}}>
+                  {new Date(selected.ts).toLocaleString("en-GB",{weekday:"long",day:"numeric",month:"long",hour:"2-digit",minute:"2-digit"})}
                 </div>
+
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
                   {[
                     ["Listings",  selected.listingsCount],
                     ["Sold",      selected.listings.filter(l=>l.sold).length],
                     ["Active",    selected.listings.filter(l=>l.listed&&!l.sold).length],
-                    ["Stock bundles", selected.stockData?.length||0],
+                    ["Bundles",   selected.stockData?.length||0],
                   ].map(([l,v])=>(
-                    <div key={l} style={{background:"var(--sf2)",border:"1px solid var(--bd)",borderRadius:"var(--r)",padding:"8px 10px",textAlign:"center"}}>
+                    <div key={l} style={{background:"var(--sf2)",border:"1px solid var(--bd)",
+                      borderRadius:"var(--r)",padding:"8px 10px",textAlign:"center"}}>
                       <div style={{fontSize:10,color:"var(--txm)"}}>{l}</div>
                       <div style={{fontSize:18,fontWeight:900}}>{v}</div>
                     </div>
                   ))}
                 </div>
 
+                {/* Export button */}
+                <button className="btn btn-o btn-sm"
+                  style={{width:"100%",justifyContent:"center",marginBottom:8}}
+                  onClick={() => exportVersion(selected)}>
+                  ↓ Export this version as JSON
+                </button>
+
+                {/* Restore button */}
                 {!confirming ? (
-                  <button className="btn btn-p" style={{width:"100%",justifyContent:"center"}}
+                  <button className="btn btn-p"
+                    style={{width:"100%",justifyContent:"center",
+                      background:"#1a6b3a",border:"none"}}
                     onClick={()=>setConfirming(true)}>
                     ↩ Restore this version
                   </button>
                 ) : (
-                  <div style={{background:"#fff8f0",border:"1px solid #f0c040",borderRadius:"var(--r)",padding:"12px"}}>
+                  <div style={{background:"#fff8f0",border:"1px solid #f0c040",
+                    borderRadius:"var(--r)",padding:"12px"}}>
                     <div style={{fontSize:12,fontWeight:700,color:"#7a4e0e",marginBottom:8}}>
-                      ⚠ This will replace your current data. Are you sure?
+                      ⚠ This replaces your current data. Are you sure?
                     </div>
                     <div style={{display:"flex",gap:8}}>
-                      <button className="btn btn-p btn-sm" style={{flex:1,justifyContent:"center",background:"#b52035",border:"none"}}
-                        onClick={doRestore}>
+                      <button className="btn btn-sm"
+                        style={{flex:1,justifyContent:"center",
+                          background:"#b52035",color:"#fff",border:"none",borderRadius:"var(--r)"}}
+                        onClick={()=>onRestore(selected)}>
                         Yes, restore
                       </button>
-                      <button className="btn btn-o btn-sm" style={{flex:1,justifyContent:"center"}}
+                      <button className="btn btn-o btn-sm"
+                        style={{flex:1,justifyContent:"center"}}
                         onClick={()=>setConfirming(false)}>
                         Cancel
                       </button>
@@ -5588,7 +5625,7 @@ function VersionHistory({ onRestore }) {
                 )}
 
                 <div style={{fontSize:10,color:"var(--txd)",marginTop:10,lineHeight:1.5}}>
-                  After restoring, the app will return to Dashboard. Your restored data will auto-save to Supabase within 1 second.
+                  After restoring, data auto-saves to Supabase within 1 second.
                 </div>
               </div>
             )}
@@ -6201,46 +6238,41 @@ export default function App() {
           )}
 
           <div className="topbar">
-            <button className="menu-tog" onClick={()=>setSidebarOpen(o=>!o)}>
+            <button className="menu-tog" onClick={()=>setSidebarOpen(o=>!o)} style={{flexShrink:0}}>
               {sidebarOpen && !isMobile ? "✕" : "☰"}
             </button>
-            <div className="page-title">{TITLES[view]}</div>
-            <div className="tb-right">
-              <span className="tb-date">{DATE_DISPLAY}</span>
-              {/* Undo / Redo */}
-              <button
-                className="btn btn-o btn-sm"
-                onClick={undo}
-                disabled={histLen.past === 0}
-                title="Undo (Cmd+Z)"
-                style={{letterSpacing:0,textTransform:"none",fontSize:13,padding:"4px 9px"}}
-              >↩</button>
-              <button
-                className="btn btn-o btn-sm"
-                onClick={redo}
-                disabled={histLen.future === 0}
-                title="Redo (Cmd+Shift+Z)"
-                style={{letterSpacing:0,textTransform:"none",fontSize:13,padding:"4px 9px"}}
-              >↪</button>
+            <div className="page-title" style={{flexShrink:0}}>{TITLES[view]}</div>
+            <div className="tb-right" style={{display:"flex",alignItems:"center",gap:5,marginLeft:"auto",flexShrink:0}}>
+              <span className="tb-date" style={{fontSize:11,color:"var(--txd)",whiteSpace:"nowrap"}}>{DATE_DISPLAY}</span>
+              <button className="btn btn-o btn-sm" onClick={undo} disabled={histLen.past===0}
+                title="Undo" style={{padding:"4px 8px",fontSize:13}}>↩</button>
+              <button className="btn btn-o btn-sm" onClick={redo} disabled={histLen.future===0}
+                title="Redo" style={{padding:"4px 8px",fontSize:13}}>↪</button>
               <input ref={fileRef} type="file" accept=".json" style={{display:"none"}} onChange={importJSON} />
-              <button className="btn btn-o btn-sm tb-import" onClick={()=>fileRef.current?.click()}>↑ Import</button>
-              <button className="btn btn-o btn-sm" onClick={manualRefresh} title="Refresh from database" disabled={refreshing}>
+              <button className="btn btn-o btn-sm" onClick={()=>fileRef.current?.click()}
+                style={{whiteSpace:"nowrap"}}>↑ Import</button>
+              <button className="btn btn-o btn-sm" onClick={manualRefresh} title="Refresh from database"
+                disabled={refreshing} style={{padding:"4px 8px"}}>
                 {refreshing ? "…" : "↻"}
               </button>
-              <button className="btn btn-o btn-sm" onClick={exportJSON}>↓ Backup</button>
-              <button
-                className={`btn btn-sm ${hardSaving ? "btn-o" : "btn-p"}`}
-                onClick={hardSave}
-                disabled={hardSaving}
-                title="Force-save everything to Supabase + local backup now"
-                style={{background:hardSaving?"var(--sf2)":"#1a6b3a",color:"#fff",border:"none"}}
-              >
-                {hardSaving ? "Saving…" : "💾 Save"}
+              <button className="btn btn-o btn-sm" onClick={exportJSON}
+                style={{whiteSpace:"nowrap"}}>↓ Backup</button>
+              <button onClick={hardSave} disabled={hardSaving}
+                title="Force-save everything to Supabase + local backup"
+                style={{
+                  flexShrink:0, whiteSpace:"nowrap",
+                  padding:"5px 10px", fontSize:11, fontWeight:700,
+                  background:hardSaving?"var(--sf2)":"#1a6b3a",
+                  color:hardSaving?"var(--txm)":"#fff",
+                  border:`1px solid ${hardSaving?"var(--bdd)":"#1a6b3a"}`,
+                  borderRadius:"var(--r)", cursor:hardSaving?"default":"pointer",
+                  letterSpacing:".3px",
+                }}>
+                {hardSaving ? "…" : "💾 Save"}
               </button>
               {hardSaveMsg && (
-                <span style={{fontSize:10,fontWeight:700,
-                  color:hardSaveMsg.startsWith("✓")?"var(--gn)":"var(--ac)",
-                  whiteSpace:"nowrap"}}>
+                <span style={{fontSize:10,fontWeight:700,flexShrink:0,whiteSpace:"nowrap",
+                  color:hardSaveMsg.startsWith("✓")?"var(--gn)":"var(--ac)"}}>
                   {hardSaveMsg}
                 </span>
               )}
