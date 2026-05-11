@@ -523,6 +523,8 @@ nav::-webkit-scrollbar-thumb{background:var(--bd);border-radius:2px}
 
 /* Filter bar */
 .filter-bar{display:flex;align-items:center;gap:8px;padding-bottom:12px;flex-wrap:wrap}
+.action-bar{display:flex;align-items:center;gap:7px;flex-wrap:wrap;padding-bottom:10px}
+.action-bar .btn{flex-shrink:0}
 .sw{position:relative}.si{position:absolute;left:9px;top:50%;transform:translateY(-50%);font-size:13px;color:var(--txd);pointer-events:none}
 .fi{background:var(--sf);border:1px solid var(--bdd);color:var(--tx);font-family:Arial,sans-serif;font-size:12px;padding:7px 10px 7px 28px;border-radius:var(--r);outline:none;width:185px;transition:border-color .12s}
 .fi:focus{border-color:var(--ac);box-shadow:0 0 0 3px var(--acl)}
@@ -1512,28 +1514,27 @@ function StockTab({ stockData, setStockData, listings, setListings }) {
           <option value="Restock">Restock flagged</option>
           <option value="No restock">No restock</option>
         </select>
-        <div style={{marginLeft:"auto",display:"flex",gap:7,alignItems:"center"}}>
-          <div style={{position:"relative"}}>
-            <button className="btn btn-o btn-sm" ref={filterBtnRef} onClick={()=>setShowFilterPanel(v=>!v)}>
-              ⚡ Filters {activeFilters.length>0 && <span style={{background:"var(--ac)",color:"#fff",borderRadius:10,padding:"0 5px",fontSize:9,marginLeft:3}}>{activeFilters.length}</span>}
-            </button>
-            {showFilterPanel && (
-              <FilterPanel colDefs={cols} rows={derived}
-                filters={filters} setFilter={setFilter} clearAll={clearAll}
-                onClose={()=>setShowFilterPanel(false)} anchorRef={filterBtnRef} />
-            )}
-          </div>
-          <div style={{position:"relative"}}>
-            <button className="btn btn-o btn-sm" onClick={()=>setShowColPanel(v=>!v)}>⚙ Columns</button>
-            {showColPanel && <ColPanel cols={cols} setCols={setCols} onClose={()=>setShowColPanel(false)} />}
-          </div>
-          <button className="btn btn-o btn-sm"
-            onClick={()=>exportToCSV(filtered, cols, "stock")}>
-            ↓ CSV
+      </div>
+
+      {/* Action bar — second row */}
+      <div className="action-bar">
+        <div style={{position:"relative"}}>
+          <button className="btn btn-o btn-sm" ref={filterBtnRef} onClick={()=>setShowFilterPanel(v=>!v)}>
+            ⚡ Filters {activeFilters.length>0 && <span style={{background:"var(--ac)",color:"#fff",borderRadius:10,padding:"0 5px",fontSize:9,marginLeft:3}}>{activeFilters.length}</span>}
           </button>
-          <button className="btn btn-o btn-sm" onClick={()=>setShowImport(true)}>↓ Import</button>
-          <button className="btn btn-p btn-sm" onClick={()=>setShowAdd(true)}>+ Add Stock</button>
+          {showFilterPanel && (
+            <FilterPanel colDefs={cols} rows={derived}
+              filters={filters} setFilter={setFilter} clearAll={clearAll}
+              onClose={()=>setShowFilterPanel(false)} anchorRef={filterBtnRef} />
+          )}
         </div>
+        <div style={{position:"relative"}}>
+          <button className="btn btn-o btn-sm" onClick={()=>setShowColPanel(v=>!v)}>⚙ Columns</button>
+          {showColPanel && <ColPanel cols={cols} setCols={setCols} onClose={()=>setShowColPanel(false)} />}
+        </div>
+        <button className="btn btn-o btn-sm" onClick={()=>exportToCSV(filtered, cols, "stock")}>↓ CSV</button>
+        <button className="btn btn-o btn-sm" onClick={()=>setShowImport(true)}>↓ Import</button>
+        <button className="btn btn-p btn-sm" onClick={()=>setShowAdd(true)}>+ Add Stock</button>
       </div>
 
       <FilterChips colDefs={cols} activeFilters={activeFilters} clearFilter={clearFilter} clearAll={clearAll} />
@@ -2480,15 +2481,11 @@ function ListingsTab({ listings, setListings, stockData }) {
         ))}
 
         {/* Right-side controls */}
-        <div style={{marginLeft:"auto",display:"flex",gap:7,alignItems:"center",paddingBottom:8}}>
+        <div style={{marginLeft:"auto",display:"flex",gap:7,alignItems:"center",paddingBottom:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
           <div style={{position:"relative"}}>
             <button className="btn btn-o btn-sm" onClick={()=>setShowColPanel(v=>!v)}>⚙ Columns</button>
             {showColPanel && (
-              <ColPanel
-                cols={cols}
-                setCols={setCols}
-                onClose={()=>setShowColPanel(false)}
-              />
+              <ColPanel cols={cols} setCols={setCols} onClose={()=>setShowColPanel(false)} />
             )}
           </div>
           <button className="btn btn-p btn-sm" onClick={()=>setShowAdd(true)}>+ Add Listing</button>
@@ -2545,7 +2542,7 @@ function ListingsTab({ listings, setListings, stockData }) {
           </button>
         )}
 
-        <div style={{marginLeft:"auto",display:"flex",gap:7,alignItems:"center",flexShrink:0}}>
+        <div style={{display:"flex",gap:7,alignItems:"center",flexWrap:"wrap",flexShrink:0,marginLeft:"auto"}}>
           <span style={{fontSize:11,color:"var(--txd)"}}>
             {rows.length} row{rows.length!==1?"s":""}
             {rows.length<listings.length?" (filtered)":""}
