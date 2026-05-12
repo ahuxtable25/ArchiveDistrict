@@ -3323,6 +3323,107 @@ const MARK_LISTED_PLATS = [
   "Depop","Vinted","eBay","Whatnot","Tilt","Facebook Marketplace","Grailed",
 ];
 
+/* ── ListingRecap — today's listing session summary ── */
+const RECAP_PLAT_STYLE = {
+  Depop:   {bg:"#fde8e8",col:"#993c1d"},
+  Vinted:  {bg:"#e1f7f7",col:"#0f6e56"},
+  eBay:    {bg:"#e6f0fb",col:"#185fa5"},
+  Whatnot: {bg:"#f0ecfe",col:"#534ab7"},
+  Grailed: {bg:"#f0f0f0",col:"#444"},
+  "Facebook Marketplace":{bg:"#e6f0fb",col:"#185fa5"},
+  Tilt:    {bg:"#fff8e1",col:"#7a4e0e"},
+};
+
+function ListingRecap({ history, platFilt, setPlatFilt }) {
+  const allItems    = history.flatMap(h => h.items.map(it => ({...it, time: h.time})));
+  const platforms   = [...new Set(allItems.flatMap(it => it.plats))];
+  const crossListed = allItems.filter(it => it.plats.length > 1).length;
+  const filtered    = platFilt === "All" ? allItems : allItems.filter(it => it.plats.includes(platFilt));
+
+  return (
+    <div style={{marginTop:24}}>
+      <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1.5px",
+        color:"var(--txd)",marginBottom:12}}>Today's Listing Recap</div>
+
+      {/* KPIs */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:14}}>
+        {[
+          {n:allItems.length,  l:"Listed today"},
+          {n:platforms.length, l:"Platforms"},
+          {n:crossListed,      l:"Cross-listed"},
+          {n:history.length,   l:"Sessions"},
+        ].map(({n,l})=>(
+          <div key={l} style={{background:"var(--sf2)",border:"1px solid var(--bd)",
+            borderRadius:"var(--r)",padding:"10px 8px",textAlign:"center"}}>
+            <div style={{fontSize:20,fontWeight:900,color:"var(--tx)"}}>{n}</div>
+            <div style={{fontSize:10,color:"var(--txm)",marginTop:2}}>{l}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Filter pills */}
+      <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap",alignItems:"center"}}>
+        <span style={{fontSize:11,color:"var(--txm)"}}>Filter:</span>
+        {["All",...platforms].map(p=>(
+          <button key={p} onClick={()=>setPlatFilt(p)} style={{
+            fontSize:11,padding:"3px 10px",borderRadius:20,cursor:"pointer",
+            border:`1px solid ${platFilt===p?"var(--ac)":"var(--bdd)"}`,
+            background:platFilt===p?"var(--acl)":"transparent",
+            color:platFilt===p?"var(--ac)":"var(--txm)",
+            fontWeight:platFilt===p?700:400,
+          }}>{p}</button>
+        ))}
+        <span style={{marginLeft:"auto",fontSize:11,color:"var(--txd)"}}>
+          {filtered.length} item{filtered.length!==1?"s":""}
+        </span>
+      </div>
+
+      {/* Table */}
+      <div style={{background:"var(--sf)",border:"1px solid var(--bd)",borderRadius:"var(--r2)",overflow:"hidden"}}>
+        <div style={{padding:"10px 14px",borderBottom:"1px solid var(--bd)",
+          display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <span style={{fontSize:12,fontWeight:700}}>Today's listings</span>
+          <span style={{fontSize:11,color:"var(--txd)"}}>
+            {new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})}
+          </span>
+        </div>
+        {filtered.length === 0 ? (
+          <div style={{padding:"20px",textAlign:"center",fontSize:12,color:"var(--txd)"}}>
+            No listings for this platform today.
+          </div>
+        ) : filtered.map((it,i)=>(
+          <div key={`${it.sku}-${i}`} style={{
+            display:"flex",alignItems:"center",gap:10,padding:"9px 14px",
+            borderBottom:i<filtered.length-1?"1px solid var(--bd)":"none",
+          }}>
+            <span style={{fontSize:10,fontWeight:700,color:"#1a5276",
+              background:"#e8eeff",borderRadius:4,padding:"2px 6px",flexShrink:0}}>
+              {it.sku}
+            </span>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:12,fontWeight:600,whiteSpace:"nowrap",
+                overflow:"hidden",textOverflow:"ellipsis"}}>{it.name}</div>
+              <div style={{fontSize:11,color:"var(--txm)",marginTop:1}}>
+                {[it.colour,it.size].filter(Boolean).join(" · ")}
+              </div>
+            </div>
+            <div style={{display:"flex",gap:4,flexShrink:0,flexWrap:"wrap",justifyContent:"flex-end"}}>
+              {it.plats.map(p=>{
+                const s=RECAP_PLAT_STYLE[p]||{bg:"#f0f0f0",col:"#555"};
+                return <span key={p} style={{fontSize:10,fontWeight:600,padding:"2px 7px",
+                  borderRadius:20,background:s.bg,color:s.col}}>{p}</span>;
+              })}
+            </div>
+            <span style={{fontSize:10,color:"var(--txd)",flexShrink:0,minWidth:32,textAlign:"right"}}>
+              {it.time}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function MarkAsListed({ listings, setListings }) {
   // Search all non-sold items — allows adding platforms to already-listed items
   const unlisted   = useMemo(() => listings.filter(l => !l.sold), [listings]);
@@ -3747,111 +3848,7 @@ function MarkAsListed({ listings, setListings }) {
       )}
 
       {/* Today's Listing Recap */}
-      {history.length > 0 && (() => {
-        const PLAT_STYLE = {
-          Depop:   {bg:"#fde8e8",col:"#993c1d"},
-          Vinted:  {bg:"#e1f7f7",col:"#0f6e56"},
-          eBay:    {bg:"#e6f0fb",col:"#185fa5"},
-          Whatnot: {bg:"#f0ecfe",col:"#534ab7"},
-          Grailed: {bg:"#f0f0f0",col:"#444"},
-          "Facebook Marketplace":{bg:"#e6f0fb",col:"#185fa5"},
-          Tilt:    {bg:"#fff8e1",col:"#7a4e0e"},
-        };
-        const allItems   = history.flatMap(h => h.items.map(it => ({...it, time: h.time})));
-        const platforms  = [...new Set(allItems.flatMap(it => it.plats))];
-        const crossListed = allItems.filter(it => it.plats.length > 1).length;
-        const filtered   = platFilt === "All" ? allItems : allItems.filter(it => it.plats.includes(platFilt));
-
-        return (
-          <div style={{marginTop:24}}>
-            <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1.5px",
-              color:"var(--txd)",marginBottom:12}}>Today's Listing Recap</div>
-
-            {/* KPI row */}
-            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:14}}>
-              {[
-                {n:allItems.length,  l:"Listed today"},
-                {n:platforms.length, l:"Platforms"},
-                {n:crossListed,      l:"Cross-listed"},
-                {n:history.length,   l:"Sessions"},
-              ].map(({n,l})=>(
-                <div key={l} style={{background:"var(--sf2)",border:"1px solid var(--bd)",
-                  borderRadius:"var(--r)",padding:"10px 8px",textAlign:"center"}}>
-                  <div style={{fontSize:20,fontWeight:900,color:"var(--tx)"}}>{n}</div>
-                  <div style={{fontSize:10,color:"var(--txm)",marginTop:2}}>{l}</div>
-                </div>
-              ))}
-            </div>
-
-            {/* Filter pills */}
-            <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap",alignItems:"center"}}>
-              <span style={{fontSize:11,color:"var(--txm)"}}>Filter:</span>
-              {["All",...platforms].map(p=>(
-                <button key={p} onClick={()=>setPlatFilt(p)} style={{
-                  fontSize:11,padding:"3px 10px",borderRadius:20,cursor:"pointer",
-                  border:`1px solid ${platFilt===p?"var(--ac)":"var(--bdd)"}`,
-                  background:platFilt===p?"var(--acl)":"transparent",
-                  color:platFilt===p?"var(--ac)":"var(--txm)",
-                  fontWeight:platFilt===p?700:400,
-                }}>{p}</button>
-              ))}
-              <span style={{marginLeft:"auto",fontSize:11,color:"var(--txd)"}}>
-                {filtered.length} item{filtered.length!==1?"s":""}
-              </span>
-            </div>
-
-            {/* Recap table */}
-            <div style={{background:"var(--sf)",border:"1px solid var(--bd)",
-              borderRadius:"var(--r2)",overflow:"hidden"}}>
-              <div style={{padding:"10px 14px",borderBottom:"1px solid var(--bd)",
-                display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <span style={{fontSize:12,fontWeight:700,color:"var(--tx)"}}>Today's listings</span>
-                <span style={{fontSize:11,color:"var(--txd)"}}>
-                  {new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})}
-                </span>
-              </div>
-              {filtered.length === 0 ? (
-                <div style={{padding:"20px",textAlign:"center",fontSize:12,color:"var(--txd)"}}>
-                  No listings for this platform today.
-                </div>
-              ) : filtered.map((it,i) => (
-                <div key={`${it.sku}-${i}`} style={{
-                  display:"flex",alignItems:"center",gap:10,padding:"9px 14px",
-                  borderBottom:i<filtered.length-1?"1px solid var(--bd)":"none",
-                }}>
-                  <span style={{fontSize:10,fontWeight:700,color:"#1a5276",
-                    background:"#e8eeff",borderRadius:4,padding:"2px 6px",flexShrink:0}}>
-                    {it.sku}
-                  </span>
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontSize:12,fontWeight:600,color:"var(--tx)",
-                      whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
-                      {it.name}
-                    </div>
-                    <div style={{fontSize:11,color:"var(--txm)",marginTop:1}}>
-                      {[it.colour,it.size].filter(Boolean).join(" · ")}
-                    </div>
-                  </div>
-                  <div style={{display:"flex",gap:4,flexShrink:0,flexWrap:"wrap",justifyContent:"flex-end"}}>
-                    {it.plats.map(p=>{
-                      const s = PLAT_STYLE[p]||{bg:"#f0f0f0",col:"#555"};
-                      return (
-                        <span key={p} style={{fontSize:10,fontWeight:600,padding:"2px 7px",
-                          borderRadius:20,background:s.bg,color:s.col}}>
-                          {p}
-                        </span>
-                      );
-                    })}
-                  </div>
-                  <span style={{fontSize:10,color:"var(--txd)",flexShrink:0,minWidth:32,textAlign:"right"}}>
-                    {it.time}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        );
-      })()}
+      {history.length > 0 && <ListingRecap history={history} platFilt={platFilt} setPlatFilt={setPlatFilt} />}
     </div>
   );
 }
@@ -3893,8 +3890,13 @@ function ListingDrafter({ listings, setListings }) {
       ? colourKeywords.filter(c => allNotes.toLowerCase().includes(c))
       : [];
     const colourFromDesc = foundColours.length > 0
-      ? `Colours found in description: ${foundColours.join(", ")} — USE THESE, not the tagged colour`
-      : `Tagged colour: ${it.colour} (no description colours found — use this)`;
+      ? `EXACT colour to use: "${foundColours.join(" and ")}" — write ALL of these in the title and description`
+      : `EXACT colour to use: "${it.colour}" — write this IN FULL in the title, e.g. "Stussy ${it.colour} Denim Jorts"`;
+
+    // Also check if item.colour itself contains multiple colours
+    const colourNote = it.colour.toLowerCase().includes(" and ") || it.colour.toLowerCase().includes("/")
+      ? `⚠ This is a multi-colour item: "${it.colour}" — include ALL colours, not just the first one`
+      : "";
 
     return `You are writing a Depop/Vinted listing description for vintage clothing. Match this EXACT format — short, punchy lines, natural emoji placement (max 3 total):
 
@@ -3914,6 +3916,7 @@ Item details:
 Brand: ${it.brand}
 Type: ${it.type}
 ${colourFromDesc}
+${colourNote}
 Size: ${it.size}
 Length: ${it.length || "not specified"}
 ${measLabel}: ${measValue}
@@ -3922,8 +3925,8 @@ Condition: ${cond}
 Description/notes: ${allNotes || "none"}
 
 Rules:
-- Use the EXACT colour from the description (e.g. if notes say "black denim" write "black denim", not the tagged colour)
-- If description mentions colour details like "with yellow logo" or "cream panels", include those too
+- COLOUR IS MANDATORY: use the EXACT colour string provided above, in full — "Black and Blue" must appear as "Black and Blue" not just "Black"
+- If multiple colours: include all of them (e.g. "Black and Blue", "Navy with Red Logo")
 - Max 3 emojis total, placed naturally (not at the start of every line)
 - Under 80 words
 - No hashtags in the description
@@ -3955,9 +3958,10 @@ ${(() => {
     "orange","purple","pink","cream","beige","tan","olive","burgundy","dark blue","light blue",
     "washed","denim","faded","bleached","multicolour","stripe","check","plaid","camo"];
   const found = cols.filter(c => allNotes.includes(c));
-  return found.length > 0
-    ? `Actual colour (from description): ${found.join(", ")} — USE THESE in titles`
-    : `Tagged colour: ${item.colour}`;
+  const hasMulti = item.colour.toLowerCase().includes(' and ') || item.colour.toLowerCase().includes('/');
+    return found.length > 0
+    ? `EXACT colour: "${found.join(' and ')}" — include ALL in titles`
+    : `EXACT colour: "${item.colour}" — write IN FULL${hasMulti ? ", include ALL colours" : ""}`;
 })()}
 
 Return exactly this JSON shape:
