@@ -3960,24 +3960,17 @@ Rules:
             role: "user",
             content: `You are an expert vintage reseller. Generate listing metadata. Respond ONLY with valid JSON — no markdown, no backticks, no preamble.
 
-Item: ${item.brand} ${item.type}, Size ${item.size}
+Item: ${item.brand} ${item.type}, Colour: ${item.colour}, Size ${item.size}
 Condition: ${condition}
 Description/notes: ${[notes, item.notes, item.desc].filter(Boolean).join(" | ") || "none"}
 SKU: ${item.sku}
-${(() => {
-  const allNotes = [notes, item.notes, item.desc].filter(Boolean).join(" ").toLowerCase();
-  const cols = ["black","white","navy","blue","grey","gray","brown","green","red","yellow",
-    "orange","purple","pink","cream","beige","tan","olive","burgundy","dark blue","light blue",
-    "washed","denim","faded","bleached","multicolour","stripe","check","plaid","camo"];
-  const found = cols.filter(c => allNotes.includes(c));
-  const hasMulti = item.colour.toLowerCase().includes(' and ') || item.colour.toLowerCase().includes('/');
-    return found.length > 0
-    ? `EXACT colour: "${found.join(' and ')}" — include ALL in titles`
-    : `EXACT colour: "${item.colour}" — write IN FULL${hasMulti ? ", include ALL colours" : ""}`;
-})()}
+
+IMPORTANT: The titles MUST start with exactly "${item.brand} ${item.colour}" — do not change, abbreviate or reword this prefix.
+Example correct title: "${item.brand} ${item.colour} ${item.type} Size ${item.size} Vintage Streetwear"
+Example WRONG title: "${item.brand} Black ${item.type}" — never drop any colour word.
 
 Return exactly this JSON shape:
-{"title":"${item.brand} ${item.colour} [type] — max 80 chars, include ALL colours exactly as written","ebayTitle":"${item.brand} ${item.colour} [type details] — max 80 chars","hashtags":"10 relevant hashtags each starting with #","vendooCategory":"best matching Vendoo category string"}`
+{"title":"${item.brand} ${item.colour} [add: type + size + 2-3 style keywords] max 80 chars total","ebayTitle":"${item.brand} ${item.colour} [add: type + size + style keywords] max 80 chars total","hashtags":"10 relevant hashtags each starting with #","vendooCategory":"best matching Vendoo category string"}`
           }]
         })
       });
@@ -3989,10 +3982,19 @@ Return exactly this JSON shape:
       const raw1 = d1.content?.find(c => c.type === "text")?.text?.trim() || "{}";
       let meta = {};
       try { meta = JSON.parse(raw1); } catch (_) {
-        // Try to extract JSON from response if wrapped in text
         const m = raw1.match(/\{[\s\S]*\}/);
         if (m) meta = JSON.parse(m[0]);
       }
+
+      // Hard guarantee: force correct brand+colour prefix on both titles
+      const reqPrefix = `${item.brand} ${item.colour}`;
+      ["title","ebayTitle"].forEach(key => {
+        if (!meta[key]) return;
+        if (!meta[key].toLowerCase().startsWith(reqPrefix.toLowerCase())) {
+          const cleaned = meta[key].replace(/^\S+\s+\S+\s*/,"").trim();
+          meta[key] = `${reqPrefix} ${cleaned}`.slice(0,80).trim();
+        }
+      });
 
       /* Call 2 — description */
       const r2 = await fetch("/api/claude", {
