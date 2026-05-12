@@ -33,18 +33,23 @@ const MAX_VERSIONS = 10;
 const saveLocalVersion = (listings, stockData) => {
   try {
     const existing = JSON.parse(localStorage.getItem(VERSION_KEY) || "[]");
-    // Skip if last version was saved less than 30 seconds ago with same listing count
     const last = existing[0];
     const now = Date.now();
     if (last && listings.length === last.listingsCount &&
         now - new Date(last.ts).getTime() < 30000) return;
-    const entry = {
-      ts: new Date().toISOString(),
-      label: new Date().toLocaleString("en-GB", { weekday:"short", day:"numeric", month:"short", hour:"2-digit", minute:"2-digit" }),
-      listingsCount: listings.length,
-      listings,
-      stockData,
-    };
+
+    const d = new Date();
+    const today = new Date(); today.setHours(0,0,0,0);
+    const yesterday = new Date(today); yesterday.setDate(yesterday.getDate()-1);
+    const ts = d.toISOString();
+
+    const dayLabel = d >= today ? "Today"
+      : d >= yesterday ? "Yesterday"
+      : d.toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"});
+    const timeLabel = d.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});
+    const label = `${dayLabel} at ${timeLabel}`;
+
+    const entry = { ts, label, dayLabel, timeLabel, listingsCount: listings.length, listings, stockData };
     const updated = [entry, ...existing].slice(0, MAX_VERSIONS);
     localStorage.setItem(VERSION_KEY, JSON.stringify(updated));
   } catch (e) { console.warn("Version save failed:", e); }
@@ -62,17 +67,36 @@ const loadLocalVersions = () => {
 ═══════════════════════════════════════════════════════════════ */
 
 /* ─── DATE CONSTANTS ─── */
-const NOW         = new Date();
-const TODAY       = NOW.toISOString().split("T")[0];
-const IS_SUNDAY   = NOW.getDay() === 0;
-const DATE_DISPLAY = NOW.toLocaleDateString("en-GB", {
+// All date helpers are FUNCTIONS so they always return today's actual date
+// even if the tab has been open for days
+const getToday  = () => new Date().toISOString().split("T")[0];
+const getNow    = () => new Date();
+const TODAY     = getToday(); // used only for initial state defaults — components call getToday() directly
+
+// For display in header — refreshes on re-render
+const getDateDisplay = () => new Date().toLocaleDateString("en-GB", {
   weekday: "long", day: "numeric", month: "short", year: "numeric",
 });
-const _wsd = new Date(NOW);
-_wsd.setDate(_wsd.getDate() - (_wsd.getDay() === 0 ? 6 : _wsd.getDay() - 1));
-const WEEK_START  = _wsd.toISOString().split("T")[0];
-const MONTH_START = new Date(NOW.getFullYear(), NOW.getMonth(), 1)
-  .toISOString().split("T")[0];
+const DATE_DISPLAY = getDateDisplay();
+
+const getWeekStart = () => {
+  const d = new Date();
+  d.setDate(d.getDate() - (d.getDay() === 0 ? 6 : d.getDay() - 1));
+  return d.toISOString().split("T")[0];
+};
+const getMonthStart = () => {
+  const d = new Date();
+  return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split("T")[0];
+};
+const getIsSunday = () => new Date().getDay() === 0;
+
+// Keep these for places that reference them as constants
+// but now they call the live functions
+const NOW         = new Date(); // kept for chart ranges only — doesn't affect date inputs
+const _wsd        = (() => { const d=new Date(); d.setDate(d.getDate()-(d.getDay()===0?6:d.getDay()-1)); return d; })();
+const WEEK_START  = getWeekStart();
+const MONTH_START = getMonthStart();
+const IS_SUNDAY   = getIsSunday();
 
 /* ─── PLATFORM CONFIG ─── */
 const PLATFORMS = [
@@ -1763,7 +1787,7 @@ function EditListingDrawer({ listing, stockData, onSave, onDelete, onClose }) {
                         platform: next[0] || null,
                         platformDates: {
                           ...(prev.platformDates||{}),
-                          ...(current.includes(p) ? {} : {[p]: prev.dayListed || TODAY}),
+                          ...(current.includes(p) ? {} : {[p]: prev.dayListed || getToday()}),
                         },
                       }));
                     }}
@@ -2071,7 +2095,7 @@ function AddListingModal({ listings, stockData, onAdd, onClose }) {
     sku:        nextSku,
     price:      "",
     listed:     false,
-    dayListed:  TODAY,
+    dayListed:  getToday(),
     photoUrl:   "",
     notes:      "",
     platform:   null,
@@ -2132,7 +2156,7 @@ function AddListingModal({ listings, stockData, onAdd, onClose }) {
       profit:     null,
       notes:      form.notes.trim(),
       platform:   form.platform || null,
-      dayListed:  form.listed ? (form.dayListed || TODAY) : null,
+      dayListed:  form.listed ? (form.dayListed || getToday()) : null,
       daySold:    null,
       days:       null,
       shipped:    false,
@@ -2402,7 +2426,7 @@ function ListingsTab({ listings, setListings, stockData }) {
       const days = l.dayListed
         ? Math.max(0, Math.floor((new Date(TODAY) - new Date(l.dayListed)) / 86400000))
         : 0;
-      return { ...l, sold:true, daySold:TODAY, days };
+      return { ...l, sold:true, daySold:getToday(), days };
     }));
     setSelected(new Set());
   };
@@ -3307,19 +3331,20 @@ function MarkAsListed({ listings, setListings }) {
   const [skuInput,    setSkuInput]    = useState("");
   const [skuSearch,   setSkuSearch]   = useState("");
   const [platSel,     setPlatSel]     = useState(new Set());
-  const [singleDate,  setSingleDate]  = useState(TODAY);
+  const [singleDate,  setSingleDate]  = useState(getToday());
   const [singlePrev,  setSinglePrev]  = useState(null); // preview item
   const [singleDone,  setSingleDone]  = useState(false);
 
   // ── Bulk mode ──
   const [bulkInput,   setBulkInput]   = useState("");
   const [bulkPlats,   setBulkPlats]   = useState(new Set());
-  const [bulkDate,    setBulkDate]    = useState(TODAY);
+  const [bulkDate,    setBulkDate]    = useState(getToday());
   const [bulkParsed,  setBulkParsed]  = useState([]);
   const [bulkDone,    setBulkDone]    = useState(false);
 
   // ── Session history ──
   const [history,     setHistory]     = useState([]);
+  const [platFilt,    setPlatFilt]    = useState("All");
 
   // ── Tab ──
   const [mode,        setMode]        = useState("single"); // "single" | "bulk"
@@ -3723,11 +3748,6 @@ function MarkAsListed({ listings, setListings }) {
 
       {/* Today's Listing Recap */}
       {history.length > 0 && (() => {
-        // Flatten all history entries into individual items
-        const allItems = history.flatMap(h => h.items.map(it => ({...it, time: h.time})));
-        const platforms = [...new Set(allItems.flatMap(it => it.plats))];
-        const crossListed = allItems.filter(it => it.plats.length > 1).length;
-
         const PLAT_STYLE = {
           Depop:   {bg:"#fde8e8",col:"#993c1d"},
           Vinted:  {bg:"#e1f7f7",col:"#0f6e56"},
@@ -3737,21 +3757,23 @@ function MarkAsListed({ listings, setListings }) {
           "Facebook Marketplace":{bg:"#e6f0fb",col:"#185fa5"},
           Tilt:    {bg:"#fff8e1",col:"#7a4e0e"},
         };
-
-        const [platFilt, setPlatFilt] = useState("All");
-        const filtered = platFilt === "All"
-          ? allItems
-          : allItems.filter(it => it.plats.includes(platFilt));
+        const allItems   = history.flatMap(h => h.items.map(it => ({...it, time: h.time})));
+        const platforms  = [...new Set(allItems.flatMap(it => it.plats))];
+        const crossListed = allItems.filter(it => it.plats.length > 1).length;
+        const filtered   = platFilt === "All" ? allItems : allItems.filter(it => it.plats.includes(platFilt));
 
         return (
           <div style={{marginTop:24}}>
+            <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:"1.5px",
+              color:"var(--txd)",marginBottom:12}}>Today's Listing Recap</div>
+
             {/* KPI row */}
             <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:14}}>
               {[
-                {n:allItems.length,     l:"Listed today"},
-                {n:platforms.length,    l:"Platforms"},
-                {n:crossListed,         l:"Cross-listed"},
-                {n:history.length,      l:"Sessions"},
+                {n:allItems.length,  l:"Listed today"},
+                {n:platforms.length, l:"Platforms"},
+                {n:crossListed,      l:"Cross-listed"},
+                {n:history.length,   l:"Sessions"},
               ].map(({n,l})=>(
                 <div key={l} style={{background:"var(--sf2)",border:"1px solid var(--bd)",
                   borderRadius:"var(--r)",padding:"10px 8px",textAlign:"center"}}>
@@ -3769,7 +3791,8 @@ function MarkAsListed({ listings, setListings }) {
                   fontSize:11,padding:"3px 10px",borderRadius:20,cursor:"pointer",
                   border:`1px solid ${platFilt===p?"var(--ac)":"var(--bdd)"}`,
                   background:platFilt===p?"var(--acl)":"transparent",
-                  color:platFilt===p?"var(--ac)":"var(--txm)",fontWeight:platFilt===p?700:400,
+                  color:platFilt===p?"var(--ac)":"var(--txm)",
+                  fontWeight:platFilt===p?700:400,
                 }}>{p}</button>
               ))}
               <span style={{marginLeft:"auto",fontSize:11,color:"var(--txd)"}}>
@@ -3778,12 +3801,11 @@ function MarkAsListed({ listings, setListings }) {
             </div>
 
             {/* Recap table */}
-            <div style={{background:"var(--sf)",border:"1px solid var(--bd)",borderRadius:"var(--r2)",overflow:"hidden"}}>
+            <div style={{background:"var(--sf)",border:"1px solid var(--bd)",
+              borderRadius:"var(--r2)",overflow:"hidden"}}>
               <div style={{padding:"10px 14px",borderBottom:"1px solid var(--bd)",
                 display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <span style={{fontSize:12,fontWeight:700,color:"var(--tx)"}}>
-                  Today's listings
-                </span>
+                <span style={{fontSize:12,fontWeight:700,color:"var(--tx)"}}>Today's listings</span>
                 <span style={{fontSize:11,color:"var(--txd)"}}>
                   {new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})}
                 </span>
@@ -3792,43 +3814,40 @@ function MarkAsListed({ listings, setListings }) {
                 <div style={{padding:"20px",textAlign:"center",fontSize:12,color:"var(--txd)"}}>
                   No listings for this platform today.
                 </div>
-              ) : (
-                filtered.map((it,i) => (
-                  <div key={`${it.sku}-${i}`} style={{
-                    display:"flex",alignItems:"center",gap:10,
-                    padding:"9px 14px",
-                    borderBottom:i<filtered.length-1?"1px solid var(--bd)":"none",
-                  }}>
-                    <span style={{fontSize:10,fontWeight:700,color:"#1a5276",
-                      background:"#e8eeff",borderRadius:4,padding:"2px 6px",flexShrink:0}}>
-                      {it.sku}
-                    </span>
-                    <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontSize:12,fontWeight:600,color:"var(--tx)",
-                        whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
-                        {it.name}
-                      </div>
-                      <div style={{fontSize:11,color:"var(--txm)",marginTop:1}}>
-                        {[it.colour,it.size].filter(Boolean).join(" · ")}
-                      </div>
+              ) : filtered.map((it,i) => (
+                <div key={`${it.sku}-${i}`} style={{
+                  display:"flex",alignItems:"center",gap:10,padding:"9px 14px",
+                  borderBottom:i<filtered.length-1?"1px solid var(--bd)":"none",
+                }}>
+                  <span style={{fontSize:10,fontWeight:700,color:"#1a5276",
+                    background:"#e8eeff",borderRadius:4,padding:"2px 6px",flexShrink:0}}>
+                    {it.sku}
+                  </span>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:12,fontWeight:600,color:"var(--tx)",
+                      whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                      {it.name}
                     </div>
-                    <div style={{display:"flex",gap:4,flexShrink:0,flexWrap:"wrap",justifyContent:"flex-end"}}>
-                      {it.plats.map(p=>{
-                        const s=PLAT_STYLE[p]||{bg:"#f0f0f0",col:"#555"};
-                        return (
-                          <span key={p} style={{fontSize:10,fontWeight:600,padding:"2px 7px",
-                            borderRadius:20,background:s.bg,color:s.col}}>
-                            {p}
-                          </span>
-                        );
-                      })}
+                    <div style={{fontSize:11,color:"var(--txm)",marginTop:1}}>
+                      {[it.colour,it.size].filter(Boolean).join(" · ")}
                     </div>
-                    <span style={{fontSize:10,color:"var(--txd)",flexShrink:0,minWidth:32,textAlign:"right"}}>
-                      {it.time}
-                    </span>
                   </div>
-                ))
-              )}
+                  <div style={{display:"flex",gap:4,flexShrink:0,flexWrap:"wrap",justifyContent:"flex-end"}}>
+                    {it.plats.map(p=>{
+                      const s = PLAT_STYLE[p]||{bg:"#f0f0f0",col:"#555"};
+                      return (
+                        <span key={p} style={{fontSize:10,fontWeight:600,padding:"2px 7px",
+                          borderRadius:20,background:s.bg,color:s.col}}>
+                          {p}
+                        </span>
+                      );
+                    })}
+                  </div>
+                  <span style={{fontSize:10,color:"var(--txd)",flexShrink:0,minWidth:32,textAlign:"right"}}>
+                    {it.time}
+                  </span>
+                </div>
+              ))}
             </div>
           </div>
         );
@@ -4343,7 +4362,7 @@ Return exactly this JSON shape:
 function DrafterMarkListed({ item, setListings }) {
   const [open,      setOpen]     = useState(false);
   const [platSel,   setPlatSel]  = useState(new Set());
-  const [dateL,     setDateL]    = useState(TODAY);
+  const [dateL,     setDateL]    = useState(getToday());
   const [done,      setDone]     = useState(false);
 
   // Reset when item changes
@@ -4461,7 +4480,7 @@ function QuickMarkSold({ listings, setListings }) {
   const [skuSearch, setSkuSearch] = useState("");
   const [soldPrice, setSoldPrice] = useState("");
   const [platSel,   setPlatSel]   = useState(null);
-  const [soldDate,  setSoldDate]  = useState(TODAY);
+  const [soldDate,  setSoldDate]  = useState(getToday());
   const [done,      setDone]      = useState(false);
   const [history,   setHistory]   = useState([]);
 
@@ -4711,7 +4730,7 @@ function ShippingTab({ listings, setListings }) {
   const [showFilterP,  setShowFilterP] = useState(false);
 
   const toShip      = listings.filter(l => l.sold && !l.shipped);
-  const shippedToday = listings.filter(l => l.shipped && l.shippedDate === TODAY);
+  const shippedToday = listings.filter(l => l.shipped && l.shippedDate === getToday());
 
   const markShipped = (sku) => setListings(prev =>
     prev.map(l => l.sku === sku ? { ...l, shipped:true, shippedDate:TODAY } : l)
@@ -5661,15 +5680,17 @@ function VersionHistory({ onRestore }) {
                     <div style={{fontWeight:700,fontSize:12,color:selected?.ts===v.ts?"var(--ac)":"var(--tx)",
                       display:"flex",alignItems:"center",gap:6}}>
                       {i===0 && <span style={{width:7,height:7,borderRadius:"50%",background:"var(--gn)",display:"inline-block",flexShrink:0}}/>}
-                      {i===0 ? "Most recent" : v.label}
+                      <span style={{color:v.dayLabel==="Today"?"var(--gn)":v.dayLabel==="Yesterday"?"var(--am)":"var(--tx)"}}>
+                        {v.dayLabel||v.label}
+                      </span>
+                      <span style={{fontSize:10,fontWeight:400,color:"var(--txd)"}}>at {v.timeLabel||""}</span>
                     </div>
                     <div style={{fontSize:11,color:"var(--txm)",marginTop:1}}>
                       {v.listingsCount} listings
                     </div>
                   </div>
                   <div style={{fontSize:10,color:"var(--txd)",textAlign:"right",flexShrink:0}}>
-                    {i===0 && <div style={{color:"var(--gn)",fontWeight:700}}>Latest</div>}
-                    <div>{new Date(v.ts).toLocaleString("en-GB",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}</div>
+                    {i===0 && <div style={{color:"var(--gn)",fontWeight:700,fontSize:10}}>Latest</div>}
                   </div>
                 </div>
               </div>
