@@ -3334,11 +3334,29 @@ const RECAP_PLAT_STYLE = {
   Tilt:    {bg:"#fff8e1",col:"#7a4e0e"},
 };
 
-function ListingRecap({ history, platFilt, setPlatFilt }) {
-  const allItems    = history.flatMap(h => h.items.map(it => ({...it, time: h.time})));
-  const platforms   = [...new Set(allItems.flatMap(it => it.plats))];
-  const crossListed = allItems.filter(it => it.plats.length > 1).length;
-  const filtered    = platFilt === "All" ? allItems : allItems.filter(it => it.plats.includes(platFilt));
+function ListingRecap({ listings, platFilt, setPlatFilt }) {
+  const today = getToday();
+
+  // Read items listed TODAY from the actual listings data — works across sessions
+  const todayItems = listings
+    .filter(l => l.listed && l.dayListed === today)
+    .map(l => ({
+      sku: l.sku,
+      name: l.name,
+      colour: l.colour,
+      size: l.size,
+      plats: l.platforms?.length ? l.platforms : l.platform ? [l.platform] : [],
+      time: l.platformDates
+        ? Object.values(l.platformDates)[0]?.slice(11,16) || ""
+        : "",
+    }))
+    .sort((a,b) => a.sku.localeCompare(b.sku));
+
+  const platforms   = [...new Set(todayItems.flatMap(it => it.plats))];
+  const crossListed = todayItems.filter(it => it.plats.length > 1).length;
+  const filtered    = platFilt === "All" ? todayItems : todayItems.filter(it => it.plats.includes(platFilt));
+
+  if (todayItems.length === 0) return null;
 
   return (
     <div style={{marginTop:24}}>
@@ -3348,10 +3366,10 @@ function ListingRecap({ history, platFilt, setPlatFilt }) {
       {/* KPIs */}
       <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:14}}>
         {[
-          {n:allItems.length,  l:"Listed today"},
-          {n:platforms.length, l:"Platforms"},
-          {n:crossListed,      l:"Cross-listed"},
-          {n:history.length,   l:"Sessions"},
+          {n:todayItems.length,  l:"Listed today"},
+          {n:platforms.length,   l:"Platforms"},
+          {n:crossListed,        l:"Cross-listed"},
+          {n:todayItems.filter(l=>l.plats.length>1).length, l:"Multi-platform"},
         ].map(({n,l})=>(
           <div key={l} style={{background:"var(--sf2)",border:"1px solid var(--bd)",
             borderRadius:"var(--r)",padding:"10px 8px",textAlign:"center"}}>
@@ -3847,8 +3865,8 @@ function MarkAsListed({ listings, setListings }) {
         </div>
       )}
 
-      {/* Today's Listing Recap */}
-      {history.length > 0 && <ListingRecap history={history} platFilt={platFilt} setPlatFilt={setPlatFilt} />}
+      {/* Today's Listing Recap — always shown, reads from listing data */}
+      <ListingRecap listings={listings} platFilt={platFilt} setPlatFilt={setPlatFilt} />
     </div>
   );
 }
@@ -3898,39 +3916,33 @@ function ListingDrafter({ listings, setListings }) {
       ? `⚠ This is a multi-colour item: "${it.colour}" — include ALL colours, not just the first one`
       : "";
 
-    return `You are writing a Depop/Vinted listing description for vintage clothing. Match this EXACT format — short, punchy lines, natural emoji placement (max 3 total):
+    return `You are writing a Depop/Vinted listing description for vintage clothing. The FIRST LINE must start exactly with "${it.brand} ${it.colour}" — this is non-negotiable.
 
-[Brand] [specific item name + exact colour from description] 🔥
-[One line about colour/detail or era or vibe] [relevant emoji]
+Match this EXACT format:
 
-Size: [size]
-Length: [length]
-${measLabel}: [${measLabel.toLowerCase()}]
+${it.brand} ${it.colour} ${it.type} 🔥
+[One line about the vibe, era or detail] [emoji]
+
+Size: ${it.size}
+Length: ${it.length || "[length]"}
+${measLabel}: ${measValue || `[${measLabel.toLowerCase()}]`}
 
 [One sentence: material, fit or how to style it] [emoji]
-[Condition] condition.
+${cond} condition.
 
-🏷️ SKU: [sku]
+🏷️ SKU: ${it.sku}
 
-Item details:
-Brand: ${it.brand}
-Type: ${it.type}
+Additional context:
 ${colourFromDesc}
 ${colourNote}
-Size: ${it.size}
-Length: ${it.length || "not specified"}
-${measLabel}: ${measValue}
-SKU: ${it.sku}
-Condition: ${cond}
 Description/notes: ${allNotes || "none"}
 
 Rules:
-- COLOUR IS MANDATORY: use the EXACT colour string provided above, in full — "Black and Blue" must appear as "Black and Blue" not just "Black"
-- If multiple colours: include all of them (e.g. "Black and Blue", "Navy with Red Logo")
-- Max 3 emojis total, placed naturally (not at the start of every line)
-- Under 80 words
-- No hashtags in the description
-- Return ONLY the description text — no JSON, no quotes, no extra commentary${different ? "\n- Write a DIFFERENT version with varied wording, vibe, and emoji choice" : ""}`;
+- Start with "${it.brand} ${it.colour}" — ALL colours must be included, e.g. "Black and Red" not "Black"
+- Max 3 emojis total
+- Under 80 words total
+- No hashtags
+- Return ONLY the description text${different ? "\n- Write a DIFFERENT version with varied wording and emoji choice" : ""}`;
   };
   /* ── Generate ── */
   const generate = async () => {
@@ -3965,7 +3977,7 @@ ${(() => {
 })()}
 
 Return exactly this JSON shape:
-{"title":"catchy Depop/Vinted title with accurate colour from description, max 80 chars","ebayTitle":"eBay-optimised title with accurate colour, max 80 chars","hashtags":"10 relevant hashtags each starting with #","vendooCategory":"best matching Vendoo category string"}`
+{"title":"${item.brand} ${item.colour} [type] — max 80 chars, include ALL colours exactly as written","ebayTitle":"${item.brand} ${item.colour} [type details] — max 80 chars","hashtags":"10 relevant hashtags each starting with #","vendooCategory":"best matching Vendoo category string"}`
           }]
         })
       });
