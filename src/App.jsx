@@ -121,30 +121,15 @@ async function saveSubscription(sub) {
 
 /* ── Send push to ALL subscribed devices via server ── */
 async function sendPushNotification(payload) {
-  // 1. Show locally on THIS device immediately (banner at top of screen)
+  // Server push — reaches ALL registered devices including other phone/desktop
+  // This is the only reliable way to notify a device that's not in foreground
   try {
-    if ("serviceWorker" in navigator && Notification.permission === "granted") {
-      const reg = await navigator.serviceWorker.ready;
-      await reg.showNotification(payload.title || "ArchiveDistrict", {
-        body:    payload.body || "",
-        tag:     payload.tag  || "ad-notif",
-        icon:    "/icon.png",
-        badge:   "/icon.png",
-        data:    { url: "/" },
-        vibrate: [200, 100, 200],
-        silent:  false,
-      });
-    }
-  } catch (e) { console.warn("Local notification failed:", e); }
-
-  // 2. Send via server to ALL devices (including other phone/desktop)
-  try {
-    fetch("/api/push", {
+    await fetch("/api/push", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "send", payload }),
-    }).catch(() => {});
-  } catch (e) { console.warn("Push API failed:", e); }
+    });
+  } catch (e) { console.warn("Push send failed:", e); }
 }
 
 /* ─── PLATFORM CONFIG ─── */
@@ -3605,6 +3590,12 @@ function MarkAsListed({ listings, setListings }) {
     setSinglePrev(null);
     setSkuInput(""); setSkuSearch("");
     setPlatSel(new Set());
+    // Push notification
+    sendPushNotification({
+      title: "ArchiveDistrict",
+      body:  `✍🏽 ${singlePrev.sku} listed on ${platsArr.join(" and ")}`,
+      tag:   `listed-${singlePrev.sku}`,
+    });
   };
 
   /* ── Bulk mode ── */
@@ -3652,7 +3643,11 @@ function MarkAsListed({ listings, setListings }) {
     setBulkDone(true);
     setBulkInput(""); setBulkParsed([]);
     setBulkPlats(new Set());
-  };
+    sendPushNotification({
+      title: "ArchiveDistrict",
+      body:  `✍🏽 ${valid.length} item${valid.length!==1?"s":""} listed on ${platsArr.join(" and ")}`,
+      tag:   "bulk-listed",
+    });
 
   const bulkValid = bulkParsed.filter(p => p.found);
 
