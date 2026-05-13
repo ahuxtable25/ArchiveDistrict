@@ -108,36 +108,42 @@ function urlBase64ToUint8Array(base64String) {
   return Uint8Array.from([...rawData].map(c => c.charCodeAt(0)));
 }
 
+/* ── Save this device's subscription to Supabase ── */
+async function saveSubscription(sub) {
+  try {
+    await fetch("/api/push", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "subscribe", subscription: sub.toJSON() }),
+    });
+  } catch (e) { console.warn("Sub save failed:", e); }
+}
+
+/* ── Send push to ALL subscribed devices via server ── */
 async function sendPushNotification(payload) {
-  // 1. Show local notification immediately on this device via service worker
-  //    This gives the top-of-screen banner whether the app is open or in background
+  // 1. Show locally on THIS device immediately (banner at top of screen)
   try {
     if ("serviceWorker" in navigator && Notification.permission === "granted") {
       const reg = await navigator.serviceWorker.ready;
       await reg.showNotification(payload.title || "ArchiveDistrict", {
-        body:             payload.body || "",
-        tag:              payload.tag  || "ad-notif",
-        icon:             "/icon.png",
-        badge:            "/icon.png",
-        data:             { url: "/" },
-        requireInteraction: false,
-        vibrate:          [200, 100, 200],
-        silent:           false,
+        body:    payload.body || "",
+        tag:     payload.tag  || "ad-notif",
+        icon:    "/icon.png",
+        badge:   "/icon.png",
+        data:    { url: "/" },
+        vibrate: [200, 100, 200],
+        silent:  false,
       });
     }
   } catch (e) { console.warn("Local notification failed:", e); }
 
-  // 2. Also send via push API so OTHER devices (phone if on desktop, etc.) get it too
+  // 2. Send via server to ALL devices (including other phone/desktop)
   try {
-    const reg = await navigator.serviceWorker.ready;
-    const sub = await reg.pushManager.getSubscription();
-    if (sub) {
-      fetch("/api/push", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subscriptions: [sub.toJSON()], payload }),
-      }).catch(() => {}); // fire and forget, don't await
-    }
+    fetch("/api/push", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "send", payload }),
+    }).catch(() => {});
   } catch (e) { console.warn("Push API failed:", e); }
 }
 
@@ -6327,6 +6333,8 @@ export default function App() {
             applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
           });
         }
+        // Always re-save in case it changed or is new device
+        await saveSubscription(sub);
       }
 
       // Sunday 6pm backup reminder via setTimeout
@@ -6358,10 +6366,15 @@ export default function App() {
     setNotifPerm(perm);
     if (perm === "granted") {
       const reg = await navigator.serviceWorker.ready;
-      await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
-      });
+      let sub = await reg.pushManager.getSubscription();
+      if (!sub) {
+        sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+        });
+      }
+      await saveSubscription(sub);
+      alert("✓ Notifications enabled! This device is now registered.");
     }
   };
 
