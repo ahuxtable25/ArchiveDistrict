@@ -1827,14 +1827,17 @@ function EditListingDrawer({ listing, stockData, onSave, onDelete, onClose }) {
                       const next = current.includes(p)
                         ? current.filter(x=>x!==p)
                         : [...current, p];
+                      const newDates = {...(form.platformDates||{})};
+                      if (current.includes(p)) {
+                        delete newDates[p]; // Remove date when platform is deselected
+                      } else {
+                        newDates[p] = form.dayListed || getToday(); // Add date when selected
+                      }
                       setForm(prev => ({
                         ...prev,
                         platforms: next,
                         platform: next[0] || null,
-                        platformDates: {
-                          ...(prev.platformDates||{}),
-                          ...(current.includes(p) ? {} : {[p]: prev.dayListed || getToday()}),
-                        },
+                        platformDates: newDates,
                       }));
                     }}
                     style={{
