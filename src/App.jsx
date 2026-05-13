@@ -3593,7 +3593,7 @@ function MarkAsListed({ listings, setListings }) {
     // Push notification
     sendPushNotification({
       title: "ArchiveDistrict",
-      body:  `✍🏽 ${singlePrev.sku} listed on ${platsArr.join(" and ")}`,
+      body:  `🏷️ ${singlePrev.sku} listed on ${platsArr.join(" and ")}`,
       tag:   `listed-${singlePrev.sku}`,
     });
   };
@@ -3645,7 +3645,7 @@ function MarkAsListed({ listings, setListings }) {
     setBulkPlats(new Set());
     sendPushNotification({
       title: "ArchiveDistrict",
-      body:  `✍🏽 ${valid.length} item${valid.length!==1?"s":""} listed on ${platsArr.join(" and ")}`,
+      body:  `🏷️ ${valid.length} item${valid.length!==1?"s":""} listed on ${platsArr.join(" and ")}`,
       tag:   "bulk-listed",
     });
   };
@@ -4474,7 +4474,7 @@ function DrafterMarkListed({ item, setListings }) {
     // Push notification
     sendPushNotification({
       title: "ArchiveDistrict",
-      body:  `✍🏽 ${item.sku} listed on ${arr.join(" and ")}`,
+      body:  `🏷️ ${item.sku} listed on ${arr.join(" and ")}`,
       tag:   `listed-${item.sku}`,
     });
     setDone(true);
@@ -4611,8 +4611,8 @@ function QuickMarkSold({ listings, setListings }) {
     sendPushNotification({
       title: "ArchiveDistrict",
       body:  delistFrom.length
-        ? `🤑 Sold! Delist ${item.sku} from ${delistFrom.join(" and ")}`
-        : `🤑 ${item.sku} sold on ${platSel} for ${fmt(price)}`,
+        ? `💰 Sold! Delist ${item.sku} from ${delistFrom.join(" and ")}`
+        : `💰 ${item.sku} sold on ${platSel} for ${fmt(price)}`,
       tag:   `sold-${item.sku}`,
     });
     setDone(true);
@@ -6319,21 +6319,32 @@ export default function App() {
   /* ── Register service worker + subscribe to push ── */
   useEffect(() => {
     if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
+    const VAPID_VERSION = "v3"; // increment this whenever VAPID keys change
+
     navigator.serviceWorker.register("/sw.js").then(async reg => {
-      // If already granted, ensure subscription exists
-      if (Notification.permission === "granted") {
-        let sub = await reg.pushManager.getSubscription();
-        if (!sub) {
-          sub = await reg.pushManager.subscribe({
-            userVisibleOnly: true,
-            applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
-          });
-        }
-        // Always re-save in case it changed or is new device
-        await saveSubscription(sub);
+      if (Notification.permission !== "granted") {
+        scheduleSundayReminder();
+        return;
       }
 
-      // Sunday 6pm backup reminder via setTimeout
+      const storedVersion = localStorage.getItem("vapid_version");
+      let sub = await reg.pushManager.getSubscription();
+
+      // Force re-subscribe if VAPID key changed OR no subscription exists
+      if (sub && storedVersion !== VAPID_VERSION) {
+        await sub.unsubscribe();
+        sub = null;
+      }
+
+      if (!sub) {
+        sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+        });
+      }
+
+      localStorage.setItem("vapid_version", VAPID_VERSION);
+      await saveSubscription(sub);
       scheduleSundayReminder();
     }).catch(e => console.warn("SW register failed:", e));
   }, []);
@@ -6349,7 +6360,7 @@ export default function App() {
       setTimeout(() => {
         sendPushNotification({
           title: "ArchiveDistrict",
-          body:  "🔔 Weekly backup reminder — export your data",
+          body:  "💾 Weekly backup reminder — export your data",
           tag:   "sunday-backup",
         });
       }, ms);
@@ -6400,8 +6411,8 @@ export default function App() {
 
       // Send a test notification to confirm it works
       await sendPushNotification({
-        title: "ArchiveDistrict 🔔",
-        body: "Notifications are active on this device!",
+        title: "ArchiveDistrict",
+        body: "✅ Notifications enabled on this device!",
         tag: "test-notif",
       });
 
