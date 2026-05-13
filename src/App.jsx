@@ -3648,6 +3648,7 @@ function MarkAsListed({ listings, setListings }) {
       body:  `✍🏽 ${valid.length} item${valid.length!==1?"s":""} listed on ${platsArr.join(" and ")}`,
       tag:   "bulk-listed",
     });
+  };
 
   const bulkValid = bulkParsed.filter(p => p.found);
 
