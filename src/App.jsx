@@ -98,6 +98,29 @@ const WEEK_START  = getWeekStart();
 const MONTH_START = getMonthStart();
 const IS_SUNDAY   = getIsSunday();
 
+/* ─── PUSH NOTIFICATIONS ─── */
+const VAPID_PUBLIC_KEY = "Ftzca15Laz8qYt1ImPPFzxEIoIGpeKd7TAXJTjkXoBouEDez897zEyw-7xDjmluO3psIbunqaUHw1ki92oOb5w";
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - base64String.length % 4) % 4);
+  const base64  = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = window.atob(base64);
+  return Uint8Array.from([...rawData].map(c => c.charCodeAt(0)));
+}
+
+async function sendPushNotification(payload) {
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (!sub) return;
+    await fetch("/api/push", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ subscriptions: [sub.toJSON()], payload }),
+    });
+  } catch (e) { console.warn("Push send failed:", e); }
+}
+
 /* ─── PLATFORM CONFIG ─── */
 const PLATFORMS = [
   "Depop","Vinted","eBay","Whatnot","Tilt","Facebook Marketplace","Grailed","Other",
@@ -604,7 +627,7 @@ nav::-webkit-scrollbar-thumb{background:var(--bd);border-radius:2px}
 .lv{font-size:13px;font-weight:900;color:var(--tx)}.lv.gn{color:var(--gn)}.lv.rd{color:var(--ac)}
 
 /* Column config panel */
-.col-panel{position:absolute;right:0;top:40px;background:var(--sf);border:1px solid var(--bd);border-radius:var(--r2);padding:12px;box-shadow:var(--shm);z-index:50;min-width:190px;max-height:310px;overflow-y:auto}
+.col-panel{position:fixed;right:8px;top:120px;background:var(--sf);border:1px solid var(--bd);border-radius:var(--r2);padding:12px;box-shadow:var(--shm);z-index:200;min-width:190px;max-width:calc(100vw - 16px);max-height:60vh;overflow-y:auto}
 .col-panel-title{font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--txm);margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--bd)}
 .col-row{display:flex;align-items:center;justify-content:space-between;padding:3px 0;gap:8px}
 .col-row label{display:flex;align-items:center;gap:7px;font-size:12px;cursor:pointer;flex:1}
@@ -903,7 +926,9 @@ function ColPanel({ cols, setCols, onClose }) {
   });
   const tog = (id) => setCols(prev => prev.map(c => c.id === id ? {...c, visible:!c.visible} : c));
   return (
-    <div className="col-panel" style={{maxHeight:360}}>
+    <>
+      <div style={{position:"fixed",inset:0,zIndex:199}} onClick={onClose} />
+      <div className="col-panel">
       <div className="col-panel-title">Show / Hide · Reorder</div>
       {movable.map(c => {
         const idx = cols.findIndex(x => x.id === c.id);
@@ -921,7 +946,8 @@ function ColPanel({ cols, setCols, onClose }) {
           </div>
         );
       })}
-    </div>
+      </div>
+    </>
   );
 }
 
@@ -4410,6 +4436,12 @@ function DrafterMarkListed({ item, setListings }) {
         ? { ...l, listed:true, dayListed:dateL, platform:l.platform||arr[0], platforms:[...new Set([...(l.platforms||[]),...arr])], platformDates:{...(l.platformDates||{}), ...Object.fromEntries(arr.map(p=>[p,dateL]))} }
         : l
     ));
+    // Push notification
+    sendPushNotification({
+      title: "ArchiveDistrict",
+      body:  `✍🏽 ${item.sku} listed on ${arr.join(" and ")}`,
+      tag:   `listed-${item.sku}`,
+    });
     setDone(true);
   };
 
@@ -4539,6 +4571,15 @@ function QuickMarkSold({ listings, setListings }) {
       sku: item.sku, name: item.name, price: fmt(price), plat: platSel,
       delistFrom: (item.platforms||[]).filter(p=>p!==platSel),
     }, ...prev.slice(0,9)]);
+    // Push notification
+    const delistFrom = (item.platforms||[]).filter(p=>p!==platSel);
+    sendPushNotification({
+      title: "ArchiveDistrict",
+      body:  delistFrom.length
+        ? `🤑 Sold! Delist ${item.sku} from ${delistFrom.join(" and ")}`
+        : `🤑 ${item.sku} sold on ${platSel} for ${fmt(price)}`,
+      tag:   `sold-${item.sku}`,
+    });
     setDone(true);
   };
 
@@ -4999,7 +5040,7 @@ function Dashboard({ listings, stockData, weeklyGoal, setWeeklyGoal, monthlyGoal
 ═══════════════════════════════════════════════════════════════ */
 function LiveData({ listings, stockData, liveData, setLiveData }) {
   const set = (k, v) => setLiveData(prev => ({ ...prev, [k]: v }));
-  const { vinted="", withdrawn="", ebayBal="", ebayPend="", depopPend="", vintedPend="", whatnotPend="" } = liveData;
+  const { vinted="", withdrawn="", ebayBal="", ebayPend="", depopPend="", vintedPend="", whatnotPend="", profitPocketed="", globalNotes="" } = liveData;
 
   const v=+vinted||0, w=+withdrawn||0, eb=+ebayBal||0;
   const ep=+ebayPend||0, dp=+depopPend||0, vp=+vintedPend||0, wp=+whatnotPend||0;
@@ -5053,6 +5094,15 @@ function LiveData({ listings, stockData, liveData, setLiveData }) {
           <div className="lr">
             <span className="ll">Withdrawn / Monzo Pot</span>
             <input className="ei" placeholder="£0.00" inputMode="decimal" type="text" pattern="[0-9.]*" value={withdrawn} onChange={e=>set("withdrawn",e.target.value)} />
+          </div>
+          <div className="lr" style={{background:"var(--gnl)",borderRadius:"var(--r)",padding:"6px 8px",marginTop:4}}>
+            <span className="ll b" style={{color:"var(--gn)"}}>💰 Profit Pocketed</span>
+            <input className="ei" placeholder="£0.00" inputMode="decimal" type="text" pattern="[0-9.]*"
+              value={profitPocketed} onChange={e=>set("profitPocketed",e.target.value)}
+              style={{background:"var(--gnl)",border:"1px solid rgba(31,92,53,.2)"}} />
+          </div>
+          <div style={{fontSize:10,color:"var(--txm)",marginTop:-2,marginBottom:6,paddingLeft:4}}>
+            Money you've actually moved to your bank / kept — track this manually
           </div>
           <div className="lr tot"><span className="ll b">Total Cash</span><span className="lv gn">{fmt(total)}</span></div>
 
@@ -5118,12 +5168,28 @@ function LiveData({ listings, stockData, liveData, setLiveData }) {
           </div>
         </div>
       </div>
+
+      {/* Global Notes */}
+      <div style={{marginTop:14,gridColumn:"1/-1"}}>
+        <div className="ls">
+          <div className="lst">📝 Global Notes</div>
+          <textarea
+            placeholder="Add any notes, reminders, or context here — saved automatically…"
+            value={globalNotes}
+            onChange={e=>set("globalNotes",e.target.value)}
+            style={{
+              width:"100%",minHeight:100,padding:"10px 12px",
+              background:"var(--sf2)",border:"1px solid var(--bd)",
+              borderRadius:"var(--r)",fontSize:13,color:"var(--tx)",
+              resize:"vertical",fontFamily:"inherit",lineHeight:1.5,
+              boxSizing:"border-box",marginTop:6,
+            }}
+          />
+        </div>
+      </div>
     </div>
   );
 }
-
-/* ═══════════════════════════════════════════════════════════════
-   PRICE CALCULATOR — Command 9
 ═══════════════════════════════════════════════════════════════ */
 function PriceCalculator({ listings=[] }) {
   const [mode,          setMode]         = useState("manual"); // "manual" | "sku"
@@ -6208,6 +6274,61 @@ export default function App() {
   /* ── Hard Save — immediate force-save to Supabase + local version ── */
   const [hardSaving, setHardSaving] = useState(false);
   const [hardSaveMsg, setHardSaveMsg] = useState("");
+  const [notifPerm, setNotifPerm] = useState(
+    typeof Notification !== "undefined" ? Notification.permission : "default"
+  );
+
+  /* ── Register service worker + subscribe to push ── */
+  useEffect(() => {
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
+    navigator.serviceWorker.register("/sw.js").then(async reg => {
+      // If already granted, ensure subscription exists
+      if (Notification.permission === "granted") {
+        let sub = await reg.pushManager.getSubscription();
+        if (!sub) {
+          sub = await reg.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+          });
+        }
+      }
+
+      // Sunday 6pm backup reminder via setTimeout
+      scheduleSundayReminder();
+    }).catch(e => console.warn("SW register failed:", e));
+  }, []);
+
+  const scheduleSundayReminder = () => {
+    const now   = new Date();
+    const next  = new Date();
+    // Find next Sunday
+    const daysUntilSun = (7 - now.getDay()) % 7 || 7;
+    next.setDate(now.getDate() + daysUntilSun);
+    next.setHours(18, 0, 0, 0);
+    const ms = next - now;
+    if (ms > 0 && ms < 7 * 24 * 60 * 60 * 1000) {
+      setTimeout(() => {
+        sendPushNotification({
+          title: "ArchiveDistrict",
+          body:  "🔔 Weekly backup reminder — export your data",
+          tag:   "sunday-backup",
+        });
+      }, ms);
+    }
+  };
+
+  const requestNotifPermission = async () => {
+    if (!("Notification" in window)) return;
+    const perm = await Notification.requestPermission();
+    setNotifPerm(perm);
+    if (perm === "granted") {
+      const reg = await navigator.serviceWorker.ready;
+      await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+      });
+    }
+  };
 
   const hardSave = useCallback(async () => {
     setHardSaving(true);
@@ -6414,6 +6535,15 @@ export default function App() {
               </button>
               <button className="btn btn-o btn-sm" onClick={exportJSON}
                 style={{whiteSpace:"nowrap"}}>↓ Backup</button>
+              {notifPerm !== "granted" && "Notification" in window && (
+                <button onClick={requestNotifPermission}
+                  title="Enable push notifications"
+                  style={{flexShrink:0,padding:"5px 8px",fontSize:13,
+                    background:"transparent",border:"1px solid var(--bdd)",
+                    borderRadius:"var(--r)",cursor:"pointer",color:"var(--txm)"}}>
+                  🔔
+                </button>
+              )}
               <button onClick={hardSave} disabled={hardSaving}
                 title="Force-save everything to Supabase + local backup"
                 style={{
