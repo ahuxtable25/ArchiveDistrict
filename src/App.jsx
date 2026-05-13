@@ -108,14 +108,16 @@ function urlBase64ToUint8Array(base64String) {
   return Uint8Array.from([...rawData].map(c => c.charCodeAt(0)));
 }
 
-/* ── Save this device's subscription to Supabase ── */
-async function saveSubscription(sub) {
+/* ── Save this device's subscription to server + update local state ── */
+async function saveSubscription(sub, onSaved) {
   try {
-    await fetch("/api/push", {
+    const res = await fetch("/api/push", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "subscribe", subscription: sub.toJSON() }),
     });
+    const data = await res.json();
+    if (data.ok && onSaved) onSaved(sub.toJSON());
   } catch (e) { console.warn("Sub save failed:", e); }
 }
 
@@ -6094,6 +6096,7 @@ export default function App() {
   const [stockData,       setStockDataRaw]    = useState(STOCK_INIT);
   const [weeklyGoal,      setWeeklyGoal]      = useState("");
   const [monthlyGoal,     setMonthlyGoal]     = useState("");
+  const [pushSubs,        setPushSubs]        = useState([]);
   const [liveData, setLiveDataRaw] = useState(() => {
     // Load from localStorage as fallback (survives Supabase failures)
     try {
@@ -6223,6 +6226,7 @@ export default function App() {
             setWeeklyGoal(data.goals.weekly   || "");
             setMonthlyGoal(data.goals.monthly || "");
             if (data.goals.liveData) setLiveData(data.goals.liveData);
+            if (data.goals.pushSubs) setPushSubs(data.goals.pushSubs);
           }
           setStorageStatus("saved");
         } else {
@@ -6299,8 +6303,8 @@ export default function App() {
 
   /* Trigger save whenever data changes */
   useEffect(() => {
-    debouncedSave(listings, stockData, { weekly: weeklyGoal, monthly: monthlyGoal, liveData });
-  }, [listings, stockData, weeklyGoal, monthlyGoal, liveData, debouncedSave]);
+    debouncedSave(listings, stockData, { weekly: weeklyGoal, monthly: monthlyGoal, liveData, pushSubs });
+  }, [listings, stockData, weeklyGoal, monthlyGoal, liveData, pushSubs, debouncedSave]);
 
   /* ── beforeunload — always save to localStorage on tab close ── */
   useEffect(() => {
@@ -6344,7 +6348,12 @@ export default function App() {
       }
 
       localStorage.setItem("vapid_version", VAPID_VERSION);
-      await saveSubscription(sub);
+      await saveSubscription(sub, (saved) => {
+        setPushSubs(prev => {
+          const deduped = [...prev.filter(s => s.endpoint !== saved.endpoint), saved];
+          return deduped;
+        });
+      });
       scheduleSundayReminder();
     }).catch(e => console.warn("SW register failed:", e));
   }, []);
@@ -6395,28 +6404,25 @@ export default function App() {
     // Subscribe to push
     try {
       let sub = await reg.pushManager.getSubscription();
-      if (sub) await sub.unsubscribe(); // Force fresh subscription
+      if (sub) await sub.unsubscribe();
       sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
       });
 
-      // Save to Supabase
-      const saveRes = await fetch("/api/push", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "subscribe", subscription: sub.toJSON() }),
+      await saveSubscription(sub, (saved) => {
+        setPushSubs(prev => [...prev.filter(s => s.endpoint !== saved.endpoint), saved]);
       });
-      const saveData = await saveRes.json();
 
-      // Send a test notification to confirm it works
+      const saveData = await fetch("/api/push").then(r => r.json());
+
       await sendPushNotification({
         title: "ArchiveDistrict",
         body: "✅ Notifications enabled on this device!",
         tag: "test-notif",
       });
 
-      alert(`✓ Registered! ${saveData.total || 1} device(s) will receive notifications.\n\nA test notification was just sent — did you see it?`);
+      alert(`✓ Registered! ${saveData.subsCount || 1} device(s) will receive notifications.\n\nA test notification was just sent — did you see it?`);
     } catch (e) {
       alert("Subscription failed: " + e.message + "\n\nMake sure the app is Added to Home Screen on iOS.");
     }
@@ -6430,13 +6436,13 @@ export default function App() {
     const ts = new Date().toISOString();
     lastSaveTs.current = ts;
     setTimeout(() => { isRemoteUpdate.current = false; }, 2000);
-    const ok = await saveState(listings, stockData, { weekly: weeklyGoal, monthly: monthlyGoal, liveData });
+    const ok = await saveState(listings, stockData, { weekly: weeklyGoal, monthly: monthlyGoal, liveData, pushSubs });
     saveLocalVersion(listings, stockData);
     const time = new Date().toLocaleTimeString("en-GB", { hour:"2-digit", minute:"2-digit" });
     setHardSaveMsg(ok ? `✓ Saved at ${time} — ${listings.length} listings` : "✗ Save failed — check connection");
     setStorageStatus(ok ? "saved" : "error");
     setHardSaving(false);
-  }, [listings, stockData, weeklyGoal, monthlyGoal, liveData]);
+  }, [listings, stockData, weeklyGoal, monthlyGoal, liveData, pushSubs]);
 
   /* ── Manual refresh — SAFE: only replaces if remote is newer ── */
   const [refreshing, setRefreshing] = useState(false);
@@ -6456,6 +6462,7 @@ export default function App() {
             setWeeklyGoal(data.goals.weekly   || "");
             setMonthlyGoal(data.goals.monthly || "");
             if (data.goals.liveData) setLiveData(data.goals.liveData);
+            if (data.goals.pushSubs) setPushSubs(data.goals.pushSubs);
           }
           setStorageStatus("saved");
         } else {
