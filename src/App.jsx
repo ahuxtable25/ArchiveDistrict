@@ -109,16 +109,36 @@ function urlBase64ToUint8Array(base64String) {
 }
 
 async function sendPushNotification(payload) {
+  // 1. Show local notification immediately on this device via service worker
+  //    This gives the top-of-screen banner whether the app is open or in background
+  try {
+    if ("serviceWorker" in navigator && Notification.permission === "granted") {
+      const reg = await navigator.serviceWorker.ready;
+      await reg.showNotification(payload.title || "ArchiveDistrict", {
+        body:             payload.body || "",
+        tag:              payload.tag  || "ad-notif",
+        icon:             "/icon.png",
+        badge:            "/icon.png",
+        data:             { url: "/" },
+        requireInteraction: false,
+        vibrate:          [200, 100, 200],
+        silent:           false,
+      });
+    }
+  } catch (e) { console.warn("Local notification failed:", e); }
+
+  // 2. Also send via push API so OTHER devices (phone if on desktop, etc.) get it too
   try {
     const reg = await navigator.serviceWorker.ready;
     const sub = await reg.pushManager.getSubscription();
-    if (!sub) return;
-    await fetch("/api/push", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ subscriptions: [sub.toJSON()], payload }),
-    });
-  } catch (e) { console.warn("Push send failed:", e); }
+    if (sub) {
+      fetch("/api/push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subscriptions: [sub.toJSON()], payload }),
+      }).catch(() => {}); // fire and forget, don't await
+    }
+  } catch (e) { console.warn("Push API failed:", e); }
 }
 
 /* ─── PLATFORM CONFIG ─── */
@@ -6312,9 +6332,8 @@ export default function App() {
   }, []);
 
   const scheduleSundayReminder = () => {
-    const now   = new Date();
-    const next  = new Date();
-    // Find next Sunday
+    const now  = new Date();
+    const next = new Date();
     const daysUntilSun = (7 - now.getDay()) % 7 || 7;
     next.setDate(now.getDate() + daysUntilSun);
     next.setHours(18, 0, 0, 0);
