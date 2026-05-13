@@ -6361,20 +6361,57 @@ export default function App() {
   };
 
   const requestNotifPermission = async () => {
-    if (!("Notification" in window)) return;
+    if (!("Notification" in window) || !("serviceWorker" in navigator)) {
+      alert("Push notifications are not supported on this browser.");
+      return;
+    }
+
+    // Register SW first
+    let reg;
+    try {
+      reg = await navigator.serviceWorker.register("/sw.js");
+      await navigator.serviceWorker.ready;
+    } catch (e) {
+      alert("Service worker failed to register: " + e.message);
+      return;
+    }
+
+    // Request permission
     const perm = await Notification.requestPermission();
     setNotifPerm(perm);
-    if (perm === "granted") {
-      const reg = await navigator.serviceWorker.ready;
+
+    if (perm !== "granted") {
+      alert("Permission denied. Enable notifications in your browser/phone settings.");
+      return;
+    }
+
+    // Subscribe to push
+    try {
       let sub = await reg.pushManager.getSubscription();
-      if (!sub) {
-        sub = await reg.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
-        });
-      }
-      await saveSubscription(sub);
-      alert("✓ Notifications enabled! This device is now registered.");
+      if (sub) await sub.unsubscribe(); // Force fresh subscription
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+      });
+
+      // Save to Supabase
+      const saveRes = await fetch("/api/push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "subscribe", subscription: sub.toJSON() }),
+      });
+      const saveData = await saveRes.json();
+
+      // Send a test notification to confirm it works
+      await sendPushNotification({
+        title: "ArchiveDistrict 🔔",
+        body: "Notifications are active on this device!",
+        tag: "test-notif",
+      });
+
+      alert(`✓ Registered! ${saveData.total || 1} device(s) will receive notifications.\n\nA test notification was just sent — did you see it?`);
+    } catch (e) {
+      alert("Subscription failed: " + e.message + "\n\nMake sure the app is Added to Home Screen on iOS.");
     }
   };
 
@@ -6586,9 +6623,9 @@ export default function App() {
               {notifPerm !== "granted" && "Notification" in window && (
                 <button onClick={requestNotifPermission}
                   title="Enable push notifications"
-                  style={{flexShrink:0,padding:"5px 8px",fontSize:13,
-                    background:"transparent",border:"1px solid var(--bdd)",
-                    borderRadius:"var(--r)",cursor:"pointer",color:"var(--txm)"}}>
+                  style={{flexShrink:0, padding:"5px 8px", fontSize:13,
+                    background:"#fff8e1", border:"1px solid #f0c040",
+                    borderRadius:"var(--r)", cursor:"pointer", color:"#7a4e0e"}}>
                   🔔
                 </button>
               )}
