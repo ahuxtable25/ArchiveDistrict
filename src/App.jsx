@@ -3363,19 +3363,29 @@ const RECAP_PLAT_STYLE = {
 function ListingRecap({ listings, platFilt, setPlatFilt }) {
   const today = getToday();
 
-  // Read items listed TODAY from the actual listings data — works across sessions
+  // Show items where:
+  // (a) first listed today (dayListed === today), OR
+  // (b) cross-listed today (any platformDates value === today)
   const todayItems = listings
-    .filter(l => l.listed && l.dayListed === today)
-    .map(l => ({
-      sku: l.sku,
-      name: l.name,
-      colour: l.colour,
-      size: l.size,
-      plats: l.platforms?.length ? l.platforms : l.platform ? [l.platform] : [],
-      time: l.platformDates
-        ? Object.values(l.platformDates)[0]?.slice(11,16) || ""
-        : "",
-    }))
+    .filter(l => {
+      if (!l.listed) return false;
+      if (l.dayListed === today) return true;
+      if (l.platformDates && Object.values(l.platformDates).includes(today)) return true;
+      return false;
+    })
+    .map(l => {
+      // Which platforms were added today specifically
+      const todayPlats = l.platformDates
+        ? Object.entries(l.platformDates).filter(([,d])=>d===today).map(([p])=>p)
+        : (l.dayListed===today ? (l.platforms?.length ? l.platforms : l.platform ? [l.platform] : []) : []);
+      return {
+        sku: l.sku,
+        name: l.name,
+        colour: l.colour,
+        size: l.size,
+        plats: todayPlats.length ? todayPlats : (l.platforms?.length ? l.platforms : l.platform ? [l.platform] : []),
+      };
+    })
     .sort((a,b) => a.sku.localeCompare(b.sku));
 
   const platforms   = [...new Set(todayItems.flatMap(it => it.plats))];
@@ -5190,6 +5200,9 @@ function LiveData({ listings, stockData, liveData, setLiveData }) {
     </div>
   );
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   PRICE CALCULATOR — Command 9
 ═══════════════════════════════════════════════════════════════ */
 function PriceCalculator({ listings=[] }) {
   const [mode,          setMode]         = useState("manual"); // "manual" | "sku"
