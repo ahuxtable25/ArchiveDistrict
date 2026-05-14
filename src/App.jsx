@@ -6321,34 +6321,40 @@ export default function App() {
   /* ── Register service worker + subscribe to push ── */
   useEffect(() => {
     if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
-    const VAPID_VERSION = "v3"; // increment this whenever VAPID keys change
+    const VAPID_VERSION = "v3";
 
-    navigator.serviceWorker.register("/sw.js").then(async reg => {
-      if (Notification.permission !== "granted") {
-        scheduleSundayReminder();
-        return;
-      }
+    (async () => {
+      try {
+        const storedVersion = localStorage.getItem("vapid_version");
 
-      const storedVersion = localStorage.getItem("vapid_version");
-      let sub = await reg.pushManager.getSubscription();
+        // If key changed: unregister ALL service workers to clear Chrome's
+        // internal push registration state (unsubscribe alone is not enough)
+        if (storedVersion !== VAPID_VERSION) {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(regs.map(r => r.unregister()));
+        }
 
-      // Force re-subscribe if VAPID key changed OR no subscription exists
-      if (sub && storedVersion !== VAPID_VERSION) {
-        await sub.unsubscribe();
-        sub = null;
-      }
+        const reg = await navigator.serviceWorker.register("/sw.js");
+        await navigator.serviceWorker.ready;
 
-      if (!sub) {
-        sub = await reg.pushManager.subscribe({
+        if (Notification.permission !== "granted") {
+          scheduleSundayReminder();
+          return;
+        }
+
+        const sub = await reg.pushManager.subscribe({
           userVisibleOnly: true,
           applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
         });
-      }
 
-      localStorage.setItem("vapid_version", VAPID_VERSION);
-      await saveSubscription(sub);
-      scheduleSundayReminder();
-    }).catch(e => console.warn("SW register failed:", e));
+        localStorage.setItem("vapid_version", VAPID_VERSION);
+        await saveSubscription(sub);
+        scheduleSundayReminder();
+        console.log("[push] Subscribed and saved successfully");
+      } catch (e) {
+        console.warn("[push] Setup error:", e.message);
+      }
+    })();
   }, []);
 
   const scheduleSundayReminder = () => {
@@ -6371,51 +6377,32 @@ export default function App() {
 
   const requestNotifPermission = async () => {
     if (!("Notification" in window) || !("serviceWorker" in navigator)) {
-      alert("Push notifications are not supported on this browser.");
-      return;
+      alert("Push notifications not supported on this browser."); return;
     }
-
-    // Register SW first
-    let reg;
-    try {
-      reg = await navigator.serviceWorker.register("/sw.js");
-      await navigator.serviceWorker.ready;
-    } catch (e) {
-      alert("Service worker failed to register: " + e.message);
-      return;
-    }
-
-    // Request permission
     const perm = await Notification.requestPermission();
     setNotifPerm(perm);
-
     if (perm !== "granted") {
-      alert("Permission denied. Enable notifications in your browser/phone settings.");
-      return;
+      alert("Permission denied — enable notifications in browser/phone settings."); return;
     }
-
-    // Subscribe to push
     try {
-      let sub = await reg.pushManager.getSubscription();
-      if (sub) await sub.unsubscribe();
-      sub = await reg.pushManager.subscribe({
+      // Unregister ALL SWs to clear Chrome cached push key state
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r => r.unregister()));
+      const reg = await navigator.serviceWorker.register("/sw.js");
+      await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
       });
-
+      localStorage.setItem("vapid_version", "v3");
       await saveSubscription(sub);
-
-      const saveData = await fetch("/api/push").then(r => r.json());
-
-      await sendPushNotification({
-        title: "ArchiveDistrict",
-        body: "✅ Notifications enabled on this device!",
-        tag: "test-notif",
+      const info = await fetch("/api/push").then(r => r.json()).catch(() => ({}));
+      await reg.showNotification("ArchiveDistrict", {
+        body: "✅ Notifications enabled on this device!", icon: "/icon.png", tag: "test-notif",
       });
-
-      alert(`✓ Registered! ${saveData.subsCount || 1} device(s) will receive notifications.\n\nA test notification was just sent — did you see it?`);
+      alert(`✓ Done! ${info.subsCount || 1} device(s) registered. Did you see the test notification?`);
     } catch (e) {
-      alert("Subscription failed: " + e.message + "\n\nMake sure the app is Added to Home Screen on iOS.");
+      alert("Failed: " + e.message + "\n\nFix: In Chrome, go to Settings → Privacy → Clear browsing data → Cookies → clear this site, then tap the bell again.");
     }
   };
 
