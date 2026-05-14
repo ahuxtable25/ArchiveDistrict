@@ -111,12 +111,14 @@ function urlBase64ToUint8Array(base64String) {
 /* ── Save this device's subscription to server + update local state ── */
 async function saveSubscription(sub) {
   try {
-    await fetch("/api/push", {
-      method: "POST",
+    const res  = await fetch("/api/push", {
+      method:  "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "subscribe", subscription: sub.toJSON() }),
+      body:    JSON.stringify({ action: "subscribe", subscription: sub.toJSON() }),
     });
-  } catch (e) { console.warn("Sub save failed:", e); }
+    const data = await res.json();
+    console.log("[push] Sub saved:", data);
+  } catch (e) { console.warn("[push] Sub save failed:", e); }
 }
 
 /* ── Send push to ALL subscribed devices via server ── */
