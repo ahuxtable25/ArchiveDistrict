@@ -6305,6 +6305,10 @@ export default function App() {
         notifyButton: { enable: false },
         allowLocalhostAsSecureOrigin: true,
       });
+      // Auto-subscribe if permission already granted (returning devices)
+      if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+        await OneSignal.User.PushSubscription.optIn();
+      }
     });
   }, []);
 
