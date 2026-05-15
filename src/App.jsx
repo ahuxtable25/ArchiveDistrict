@@ -99,39 +99,18 @@ const MONTH_START = getMonthStart();
 const IS_SUNDAY   = getIsSunday();
 
 /* ─── PUSH NOTIFICATIONS ─── */
-const VAPID_PUBLIC_KEY = "Ftzca15Laz8qYt1ImPPFzxEIoIGpeKd7TAXJTjkXoBouEDez897zEyw-7xDjmluO3psIbunqaUHw1ki92oOb5w";
-
-function urlBase64ToUint8Array(base64String) {
-  const padding = "=".repeat((4 - base64String.length % 4) % 4);
-  const base64  = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
-  const rawData = window.atob(base64);
-  return Uint8Array.from([...rawData].map(c => c.charCodeAt(0)));
-}
-
-/* ── Save this device's subscription to server + update local state ── */
-async function saveSubscription(sub) {
-  try {
-    const res  = await fetch("/api/push", {
-      method:  "POST",
-      headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify({ action: "subscribe", subscription: sub.toJSON() }),
-    });
-    const data = await res.json();
-    console.log("[push] Sub saved:", data);
-  } catch (e) { console.warn("[push] Sub save failed:", e); }
-}
-
-/* ── Send push to ALL subscribed devices via server ── */
+/* ── OneSignal — send push to all subscribed devices ── */
 async function sendPushNotification(payload) {
-  // Server push — reaches ALL registered devices including other phone/desktop
-  // This is the only reliable way to notify a device that's not in foreground
   try {
     await fetch("/api/push", {
-      method: "POST",
+      method:  "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "send", payload }),
+      body:    JSON.stringify({
+        title:   payload.title || "ArchiveDistrict",
+        message: payload.body  || "",
+      }),
     });
-  } catch (e) { console.warn("Push send failed:", e); }
+  } catch (e) { console.warn("[OneSignal] push failed:", e); }
 }
 
 /* ─── PLATFORM CONFIG ─── */
@@ -6314,97 +6293,31 @@ export default function App() {
   /* ── Hard Save — immediate force-save to Supabase + local version ── */
   const [hardSaving, setHardSaving] = useState(false);
   const [hardSaveMsg, setHardSaveMsg] = useState("");
-  const [notifPerm, setNotifPerm] = useState(
-    typeof Notification !== "undefined" ? Notification.permission : "default"
-  );
 
   /* ── Register service worker + subscribe to push ── */
+  /* ── OneSignal initialisation ── */
   useEffect(() => {
-    if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
-    const VAPID_VERSION = "v3";
-
-    (async () => {
-      try {
-        const storedVersion = localStorage.getItem("vapid_version");
-
-        // If key changed: unregister ALL service workers to clear Chrome's
-        // internal push registration state (unsubscribe alone is not enough)
-        if (storedVersion !== VAPID_VERSION) {
-          const regs = await navigator.serviceWorker.getRegistrations();
-          await Promise.all(regs.map(r => r.unregister()));
-        }
-
-        const reg = await navigator.serviceWorker.register("/sw.js");
-        await navigator.serviceWorker.ready;
-
-        if (Notification.permission !== "granted") {
-          scheduleSundayReminder();
-          return;
-        }
-
-        const sub = await reg.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
-        });
-
-        localStorage.setItem("vapid_version", VAPID_VERSION);
-        await saveSubscription(sub);
-        scheduleSundayReminder();
-        console.log("[push] Subscribed and saved successfully");
-      } catch (e) {
-        console.warn("[push] Setup error:", e.message);
-      }
-    })();
+    if (typeof window === "undefined") return;
+    window.OneSignalDeferred = window.OneSignalDeferred || [];
+    window.OneSignalDeferred.push(async function(OneSignal) {
+      await OneSignal.init({
+        appId: "a7fd8f7a-3c30-4f13-8a76-8d31fcb64e5f",
+        notifyButton: { enable: false },
+        allowLocalhostAsSecureOrigin: true,
+      });
+    });
   }, []);
 
-  const scheduleSundayReminder = () => {
-    const now  = new Date();
-    const next = new Date();
-    const daysUntilSun = (7 - now.getDay()) % 7 || 7;
-    next.setDate(now.getDate() + daysUntilSun);
-    next.setHours(18, 0, 0, 0);
-    const ms = next - now;
-    if (ms > 0 && ms < 7 * 24 * 60 * 60 * 1000) {
-      setTimeout(() => {
-        sendPushNotification({
-          title: "ArchiveDistrict",
-          body:  "💾 Weekly backup reminder — export your data",
-          tag:   "sunday-backup",
-        });
-      }, ms);
-    }
+
+
+
+  const requestNotifPermission = () => {
+    window.OneSignalDeferred = window.OneSignalDeferred || [];
+    window.OneSignalDeferred.push(function(OneSignal) {
+      OneSignal.User.PushSubscription.optIn();
+    });
   };
 
-  const requestNotifPermission = async () => {
-    if (!("Notification" in window) || !("serviceWorker" in navigator)) {
-      alert("Push notifications not supported on this browser."); return;
-    }
-    const perm = await Notification.requestPermission();
-    setNotifPerm(perm);
-    if (perm !== "granted") {
-      alert("Permission denied — enable notifications in browser/phone settings."); return;
-    }
-    try {
-      // Unregister ALL SWs to clear Chrome cached push key state
-      const regs = await navigator.serviceWorker.getRegistrations();
-      await Promise.all(regs.map(r => r.unregister()));
-      const reg = await navigator.serviceWorker.register("/sw.js");
-      await navigator.serviceWorker.ready;
-      const sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
-      });
-      localStorage.setItem("vapid_version", "v3");
-      await saveSubscription(sub);
-      const info = await fetch("/api/push").then(r => r.json()).catch(() => ({}));
-      await reg.showNotification("ArchiveDistrict", {
-        body: "✅ Notifications enabled on this device!", icon: "/icon.png", tag: "test-notif",
-      });
-      alert(`✓ Done! ${info.subsCount || 1} device(s) registered. Did you see the test notification?`);
-    } catch (e) {
-      alert("Failed: " + e.message + "\n\nFix: In Chrome, go to Settings → Privacy → Clear browsing data → Cookies → clear this site, then tap the bell again.");
-    }
-  };
 
   const hardSave = useCallback(async () => {
     setHardSaving(true);
@@ -6611,7 +6524,7 @@ export default function App() {
               </button>
               <button className="btn btn-o btn-sm" onClick={exportJSON}
                 style={{whiteSpace:"nowrap"}}>↓ Backup</button>
-              {notifPerm !== "granted" && "Notification" in window && (
+              {"Notification" in window && Notification.permission !== "granted" && (
                 <button onClick={requestNotifPermission}
                   title="Enable push notifications"
                   style={{flexShrink:0, padding:"5px 8px", fontSize:13,
