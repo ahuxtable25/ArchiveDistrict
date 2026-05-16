@@ -1921,6 +1921,7 @@ function EditListingDrawer({ listing, stockData, onSave, onDelete, onClose }) {
                   style={{flex:1,justifyContent:"center",fontSize:11}}
                   onClick={() => {
                     const returnDate = new Date().toISOString().split("T")[0];
+                    const prevSku = form.sku;
                     setForm(prev => ({
                       ...prev,
                       sold:false, soldPrice:null, profit:null,
@@ -1929,6 +1930,11 @@ function EditListingDrawer({ listing, stockData, onSave, onDelete, onClose }) {
                       notes:(prev.notes ? prev.notes + "\n" : "") + `Returned ${returnDate} — relisted`,
                     }));
                     setDirty(true);
+                    sendPushNotification({
+                      title: "ArchiveDistrict",
+                      body:  `📦 ${prevSku} returned — relisted`,
+                      tag:   `return-${prevSku}`,
+                    });
                   }}
                 >
                   ↩ Relist (keep live)
@@ -1938,6 +1944,7 @@ function EditListingDrawer({ listing, stockData, onSave, onDelete, onClose }) {
                   style={{flex:1,justifyContent:"center",fontSize:11}}
                   onClick={() => {
                     const returnDate = new Date().toISOString().split("T")[0];
+                    const prevSku = form.sku;
                     setForm(prev => ({
                       ...prev,
                       sold:false, soldPrice:null, profit:null,
@@ -1947,6 +1954,11 @@ function EditListingDrawer({ listing, stockData, onSave, onDelete, onClose }) {
                       notes:(prev.notes ? prev.notes + "\n" : "") + `Returned ${returnDate} — pulled from platforms`,
                     }));
                     setDirty(true);
+                    sendPushNotification({
+                      title: "ArchiveDistrict",
+                      body:  `📦 ${prevSku} returned — pulled down`,
+                      tag:   `return-${prevSku}`,
+                    });
                   }}
                 >
                   ↩ Pull down (relist later)
@@ -5058,6 +5070,23 @@ function LiveData({ listings, stockData, liveData, setLiveData }) {
   const set = (k, v) => setLiveData(prev => ({ ...prev, [k]: v }));
   const { vinted="", withdrawn="", ebayBal="", ebayPend="", depopPend="", vintedPend="", whatnotPend="", profitPocketed="", globalNotes="" } = liveData;
 
+  // Notify 45s after notes stop changing
+  const prevNotesRef = React.useRef(globalNotes);
+  React.useEffect(() => {
+    if (globalNotes === prevNotesRef.current) return;
+    const timer = setTimeout(() => {
+      if (globalNotes.trim()) {
+        sendPushNotification({
+          title: "ArchiveDistrict",
+          body:  `📝 Note: ${globalNotes.slice(0, 80)}${globalNotes.length > 80 ? "…" : ""}`,
+          tag:   "live-notes",
+        });
+      }
+      prevNotesRef.current = globalNotes;
+    }, 45000);
+    return () => clearTimeout(timer);
+  }, [globalNotes]);
+
   const v=+vinted||0, w=+withdrawn||0, eb=+ebayBal||0;
   const ep=+ebayPend||0, dp=+depopPend||0, vp=+vintedPend||0, wp=+whatnotPend||0;
   const total  = v+w+eb;
@@ -5111,15 +5140,49 @@ function LiveData({ listings, stockData, liveData, setLiveData }) {
             <span className="ll">Withdrawn / Monzo Pot</span>
             <input className="ei" placeholder="£0.00" inputMode="decimal" type="text" pattern="[0-9.]*" value={withdrawn} onChange={e=>set("withdrawn",e.target.value)} />
           </div>
-          <div className="lr" style={{background:"var(--gnl)",borderRadius:"var(--r)",padding:"6px 8px",marginTop:4}}>
-            <span className="ll b" style={{color:"var(--gn)"}}>💰 Profit Pocketed</span>
-            <input className="ei" placeholder="£0.00" inputMode="decimal" type="text" pattern="[0-9.]*"
-              value={profitPocketed} onChange={e=>set("profitPocketed",e.target.value)}
-              style={{background:"var(--gnl)",border:"1px solid rgba(31,92,53,.2)"}} />
+
+          {/* Profit Pocketed — weekly log */}
+          <div style={{background:"var(--gnl)",borderRadius:"var(--r)",padding:"8px 10px",marginTop:6,marginBottom:6}}>
+            <div className="ll b" style={{color:"var(--gn)",marginBottom:6}}>💰 Profit Pocketed This Week</div>
+            <div style={{display:"flex",gap:6,alignItems:"center"}}>
+              <input
+                id="pocketInput"
+                className="ei"
+                placeholder="£0.00"
+                inputMode="decimal"
+                type="text"
+                pattern="[0-9.]*"
+                style={{flex:1,background:"var(--gnl)",border:"1px solid rgba(31,92,53,.2)"}}
+              />
+              <button
+                className="btn btn-sm"
+                style={{background:"var(--gn)",color:"#fff",border:"none",whiteSpace:"nowrap"}}
+                onClick={() => {
+                  const input = document.getElementById("pocketInput");
+                  const val = parseFloat(input.value.replace(/[^0-9.]/g,""));
+                  if (!val || isNaN(val)) return;
+                  const entry = { date: getToday(), amount: val, week: WEEK_START };
+                  const existing = liveData.profitLog || [];
+                  set("profitLog", [...existing, entry]);
+                  input.value = "";
+                }}
+              >Log</button>
+            </div>
+            {/* Show this week's total */}
+            {(() => {
+              const log = liveData.profitLog || [];
+              const wkTotal = log.filter(e => e.week === WEEK_START).reduce((a,e)=>a+e.amount,0);
+              return wkTotal > 0 ? (
+                <div style={{fontSize:11,color:"var(--gn)",marginTop:6,fontWeight:700}}>
+                  This week: {fmt(wkTotal)}
+                </div>
+              ) : null;
+            })()}
           </div>
-          <div style={{fontSize:10,color:"var(--txm)",marginTop:-2,marginBottom:6,paddingLeft:4}}>
-            Money you've actually moved to your bank / kept — track this manually
+          <div style={{fontSize:10,color:"var(--txm)",marginBottom:6,paddingLeft:4}}>
+            Log each time you move profit to your bank — History will show weekly totals
           </div>
+
           <div className="lr tot"><span className="ll b">Total Cash</span><span className="lv gn">{fmt(total)}</span></div>
 
           <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".5px",color:"var(--txm)",margin:"11px 0 5px"}}>Pending Payouts</div>
@@ -5878,7 +5941,7 @@ function VersionHistory({ onRestore }) {
   );
 }
 
-function History({ listings, stockData }) {
+function History({ listings, stockData, liveData }) {
   const [monthCols, setMonthCols] = useState(MONTH_HIST_COLS);
   const [weekCols,  setWeekCols]  = useState(WEEK_HIST_COLS);
   const [showMonthCP, setShowMonthCP] = useState(false);
@@ -5917,10 +5980,12 @@ function History({ listings, stockData }) {
       const wsStr = ws.toISOString().split("T")[0];
       const weStr = we.toISOString().split("T")[0];
       const wListed = listings.filter(l => l.dayListed && l.dayListed>=wsStr && l.dayListed<=weStr);
-      const wSold   = listings.filter(l => l.daySold   && l.daySold  >=wsStr && l.daySold  <=weStr);
+      const wSold   = listings.filter(l => l.sold && l.daySold && l.daySold>=wsStr && l.daySold<=weStr);
       const wStock  = stockData.filter(s => s.datePurchased && s.datePurchased>=wsStr && s.datePurchased<=weStr);
       // Active at end of week = listed & not sold by end of that week
       const activeLive = listings.filter(l => l.listed && l.dayListed && l.dayListed<=weStr && (!l.sold || l.daySold>weStr)).length;
+      const profitLog  = liveData?.profitLog || [];
+      const profitKept = profitLog.filter(e => e.week === wsStr).reduce((a,e)=>a+e.amount, 0);
       weeks.push({
         label:      ws.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"2-digit"}),
         listed:     wListed.length,
@@ -5929,6 +5994,7 @@ function History({ listings, stockData }) {
         profit:     wSold.reduce((a,l)=>a+(l.profit||0),0),
         stockSpend: wStock.reduce((a,s)=>a+(s.totalCost||s.sellable*s.costPer||0),0),
         activeLive,
+        profitKept,
       });
     }
     weeks.reverse(); // newest first
@@ -5960,7 +6026,7 @@ function History({ listings, stockData }) {
     if (col==="listed")     return r.listed > 0 ? r.listed : <span style={{color:"var(--txd)"}}>—</span>;
     if (col==="sold")       return r.sold > 0 ? <span style={{fontWeight:700}}>{r.sold}</span> : <span style={{color:"var(--txd)"}}>—</span>;
     if (col==="revenue")    return renderNum(r.revenue, "var(--gn)");
-    if (col==="profit")     return renderNum(r.profit,  "var(--gn)");
+    if (col==="profit")     return r.profitKept > 0 ? renderNum(r.profitKept, "var(--gn)") : <span style={{color:"var(--txd)"}}>—</span>;
     if (col==="stockSpend") return renderNum(r.stockSpend, "var(--ac)");
     if (col==="activeLive") return r.activeLive > 0 ? <span style={{fontWeight:700}}>{r.activeLive}</span> : <span style={{color:"var(--txd)"}}>—</span>;
     return "—";
@@ -6573,7 +6639,7 @@ export default function App() {
             {view==="calculator"  && <PriceCalculator listings={listings} />}
             {view==="analytics"   && <Analytics listings={listings} stockData={stockData} />}
             {view==="growth"      && <Growth listings={listings} stockData={stockData} />}
-            {view==="history"     && <History listings={listings} stockData={stockData} />}
+            {view==="history"     && <History listings={listings} stockData={stockData} liveData={liveData} />}
             {view==="versions"    && <VersionHistory onRestore={(v)=>{ setListingsRaw(v.listings); setStockDataRaw(v.stockData); setView("dashboard"); }} />}
           </div>
         </div>
