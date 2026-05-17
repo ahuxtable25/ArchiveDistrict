@@ -191,8 +191,13 @@ const getTag = (name, type, brand, listings) => {
 
 const deriveStock = (stockData, listings) =>
   stockData.map(s => {
-    // Match by BOTH bundleSku AND name so BDL-008 Detroit and BDL-008 Active stay separate
-    const items       = listings.filter(l => l.bundleSku===s.bundleSku && l.name===s.name);
+    // If multiple bundles share the same bundleSku (e.g. BDL-008 edge case),
+    // use compound key bundleSku+name to keep them separate.
+    // For all other bundles use bundleSku only — name mismatches won't break the count.
+    const dupeSku = stockData.filter(s2 => s2.bundleSku === s.bundleSku).length > 1;
+    const items = dupeSku
+      ? listings.filter(l => l.bundleSku===s.bundleSku && l.name===s.name)
+      : listings.filter(l => l.bundleSku===s.bundleSku);
     const soldItems   = items.filter(l => l.sold);
     const listedItems = items.filter(l => l.listed);
     const netProceeds = soldItems.reduce((a,l) => a+(l.soldPrice||0), 0);
@@ -5077,9 +5082,11 @@ function LiveData({ listings, stockData, liveData, setLiveData }) {
   const set = (k, v) => setLiveData(prev => ({ ...prev, [k]: v }));
   const { vinted="", withdrawn="", ebayBal="", ebayPend="", depopPend="", vintedPend="", whatnotPend="", profitPocketed="", globalNotes="" } = liveData;
 
+  const [pocketInput, setPocketInput] = useState("");
+
   // Notify 45s after notes stop changing
-  const prevNotesRef = React.useRef(globalNotes);
-  React.useEffect(() => {
+  const prevNotesRef = useRef(globalNotes);
+  useEffect(() => {
     if (globalNotes === prevNotesRef.current) return;
     const timer = setTimeout(() => {
       if (globalNotes.trim()) {
@@ -5153,25 +5160,24 @@ function LiveData({ listings, stockData, liveData, setLiveData }) {
             <div className="ll b" style={{color:"var(--gn)",marginBottom:6}}>💰 Profit Pocketed This Week</div>
             <div style={{display:"flex",gap:6,alignItems:"center"}}>
               <input
-                id="pocketInput"
                 className="ei"
                 placeholder="£0.00"
                 inputMode="decimal"
                 type="text"
                 pattern="[0-9.]*"
+                value={pocketInput}
+                onChange={e=>setPocketInput(e.target.value)}
                 style={{flex:1,background:"var(--gnl)",border:"1px solid rgba(31,92,53,.2)"}}
               />
               <button
                 className="btn btn-sm"
                 style={{background:"var(--gn)",color:"#fff",border:"none",whiteSpace:"nowrap"}}
                 onClick={() => {
-                  const input = document.getElementById("pocketInput");
-                  const val = parseFloat(input.value.replace(/[^0-9.]/g,""));
+                  const val = parseFloat(pocketInput.replace(/[^0-9.]/g,""));
                   if (!val || isNaN(val)) return;
                   const entry = { date: getToday(), amount: val, week: WEEK_START };
-                  const existing = liveData.profitLog || [];
-                  set("profitLog", [...existing, entry]);
-                  input.value = "";
+                  set("profitLog", [...(liveData.profitLog||[]), entry]);
+                  setPocketInput("");
                 }}
               >Log</button>
             </div>
@@ -5969,11 +5975,14 @@ function History({ listings, stockData, liveData }) {
       const [y,mo] = mk.split("-");
       const mListings = listings.filter(l => l.sold && l.daySold?.startsWith(mk));
       const mStock    = stockData.filter(s => s.datePurchased?.startsWith(mk));
+      const profitLog = liveData?.profitLog || [];
+      const profitKept = profitLog.filter(e => e.date?.startsWith(mk)).reduce((a,e)=>a+e.amount, 0);
       return {
         label: new Date(+y,+mo-1,1).toLocaleDateString("en-GB",{month:"short",year:"numeric"}),
         sold: mListings.length,
         proceeds: mListings.reduce((a,l)=>a+(l.soldPrice||0),0),
         profit:   mListings.reduce((a,l)=>a+(l.profit||0),0),
+        profitKept,
         stockQty: mStock.reduce((a,s)=>a+(s.sellable||0),0),
         stockSpend: mStock.reduce((a,s)=>a+(s.totalCost||s.sellable*s.costPer||0),0),
       };
@@ -6043,7 +6052,7 @@ function History({ listings, stockData, liveData }) {
     if (col==="label")      return <span style={{fontWeight:700}}>{r.label}</span>;
     if (col==="sold")       return r.sold > 0 ? <span style={{fontWeight:700}}>{r.sold}</span> : <span style={{color:"var(--txd)"}}>—</span>;
     if (col==="proceeds")   return renderNum(r.proceeds, "var(--gn)");
-    if (col==="profit")     return renderNum(r.profit,   "var(--gn)");
+    if (col==="profit")     return r.profitKept > 0 ? renderNum(r.profitKept, "var(--gn)") : <span style={{color:"var(--txd)"}}>—</span>;
     if (col==="stockQty")   return r.stockQty > 0 ? r.stockQty : <span style={{color:"var(--txd)"}}>—</span>;
     if (col==="stockSpend") return renderNum(r.stockSpend, "var(--ac)");
     return "—";
