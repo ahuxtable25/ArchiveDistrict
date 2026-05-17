@@ -79,14 +79,21 @@ const getDateDisplay = () => new Date().toLocaleDateString("en-GB", {
 });
 const DATE_DISPLAY = getDateDisplay();
 
+const localDateStr = (d) => {
+  const y  = d.getFullYear();
+  const m  = String(d.getMonth() + 1).padStart(2, "0");
+  const dy = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${dy}`;
+};
+
 const getWeekStart = () => {
   const d = new Date();
   d.setDate(d.getDate() - (d.getDay() === 0 ? 6 : d.getDay() - 1));
-  return d.toISOString().split("T")[0];
+  return localDateStr(d);
 };
 const getMonthStart = () => {
   const d = new Date();
-  return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split("T")[0];
+  return localDateStr(new Date(d.getFullYear(), d.getMonth(), 1));
 };
 const getIsSunday = () => new Date().getDay() === 0;
 
@@ -442,7 +449,7 @@ const CSS = `
   --shl:0 8px 40px rgba(0,0,0,.14);
   --sb-w:212px;--tb-h:50px;--r:6px;--r2:8px;
 }
-body{font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--tx);font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased}
+body{font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--tx);font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased}input,select,textarea{font-size:16px !important;}input[type=checkbox],input[type=radio]{font-size:inherit !important;}
 
 /* Layout */
 .app{display:flex;height:100vh;overflow:hidden}
@@ -5675,8 +5682,8 @@ function Growth({ listings, stockData }) {
         for (let i=11;i>=0;i--) {
           const ws=new Date(_wsd); ws.setDate(ws.getDate()-i*7);
           const we=new Date(ws);  we.setDate(we.getDate()+6);
-          const wsStr=ws.toISOString().split("T")[0];
-          const weStr=we.toISOString().split("T")[0];
+          const wsStr=localDateStr(ws);
+          const weStr=localDateStr(we);
           const wSold=sold.filter(l=>l.daySold&&l.daySold>=wsStr&&l.daySold<=weStr);
           weeks.push({
             label:ws.toLocaleDateString("en-GB",{day:"numeric",month:"short"}),
@@ -5716,8 +5723,8 @@ function Growth({ listings, stockData }) {
           for(let i=23;i>=0;i--){
             const ws=new Date(_wsd); ws.setDate(ws.getDate()-i*7);
             const we=new Date(ws);   we.setDate(we.getDate()+6);
-            const wsStr=ws.toISOString().split("T")[0];
-            const weStr=we.toISOString().split("T")[0];
+            const wsStr=localDateStr(ws);
+            const weStr=localDateStr(we);
             const wSold=sold.filter(l=>l.daySold&&l.daySold>=wsStr&&l.daySold<=weStr);
             const rev=wSold.reduce((a,l)=>a+(l.soldPrice||0),0);
             if(rev>0) weeks.push({label:ws.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"2-digit"}),revenue:rev,count:wSold.length});
@@ -5977,8 +5984,8 @@ function History({ listings, stockData, liveData }) {
     for (let i=15; i>=0; i--) {
       const ws = new Date(_wsd); ws.setDate(ws.getDate()-i*7);
       const we = new Date(ws);   we.setDate(we.getDate()+6);
-      const wsStr = ws.toISOString().split("T")[0];
-      const weStr = we.toISOString().split("T")[0];
+      const wsStr = localDateStr(ws);
+      const weStr = localDateStr(we);
       const wListed = listings.filter(l => l.dayListed && l.dayListed>=wsStr && l.dayListed<=weStr);
       const wSold   = listings.filter(l => l.sold && l.daySold && l.daySold>=wsStr && l.daySold<=weStr);
       const wStock  = stockData.filter(s => s.datePurchased && s.datePurchased>=wsStr && s.datePurchased<=weStr);
@@ -6361,7 +6368,7 @@ export default function App() {
   const [hardSaveMsg, setHardSaveMsg] = useState("");
 
   /* ── Register service worker + subscribe to push ── */
-  /* ── OneSignal initialisation ── */
+  /* ── OneSignal initialisation + Sunday backup reminder ── */
   useEffect(() => {
     if (typeof window === "undefined") return;
     window.OneSignalDeferred = window.OneSignalDeferred || [];
@@ -6376,6 +6383,26 @@ export default function App() {
         await OneSignal.User.PushSubscription.optIn();
       }
     });
+
+    // Sunday 6pm backup reminder — fires if app is open at that time
+    const scheduleSundayReminder = () => {
+      const now  = new Date();
+      const next = new Date();
+      const daysUntilSun = (7 - now.getDay()) % 7 || 7;
+      next.setDate(now.getDate() + daysUntilSun);
+      next.setHours(18, 0, 0, 0);
+      const ms = next - now;
+      if (ms > 0 && ms < 7 * 24 * 60 * 60 * 1000) {
+        setTimeout(() => {
+          sendPushNotification({
+            title: "ArchiveDistrict",
+            body:  "💾 Weekly backup reminder — export your data",
+            tag:   "sunday-backup",
+          });
+        }, ms);
+      }
+    };
+    scheduleSundayReminder();
   }, []);
 
 
