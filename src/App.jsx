@@ -1141,9 +1141,9 @@ function EditStockDrawer({ stock, derived, onSave, onDelete, onClose, onAddListi
           <button className="btn btn-o btn-sm" onClick={onClose}>Cancel</button>
           <button className="btn btn-del btn-sm" onClick={() => {
             if (window.confirm(`Delete bundle ${stock.bundleSku} — ${stock.name}? This cannot be undone.`))
-              onDelete(stock.bundleSku);
+              onDelete(stock.bundleSku, stock.name);
           }}>🗑 Delete</button>
-          <button className="btn btn-p btn-sm" onClick={() => { onSave({ ...form, sellable: parseInt(form.sellable)||0, received: parseInt(form.received)||0 }); onClose(); }}>
+          <button className="btn btn-p btn-sm" onClick={() => { onSave({ ...form, sellable: parseInt(form.sellable)||0, received: parseInt(form.received)||0, _originalName: stock.name }); onClose(); }}>
             Save Changes
           </button>
         </div>
@@ -1479,12 +1479,16 @@ function StockTab({ stockData, setStockData, listings, setListings }) {
   const { getStyle: getStockColStyle, onMouseDown: onStockColResize } = useColWidths(cols);
   const stockZoom = useZoom(100);
   const handleAddStock    = (ns) => setStockData(p => [...p, ns]);
-  const handleDeleteStock = (bsku) => {
-    setStockData(prev => prev.filter(s => s.bundleSku !== bsku));
+  const handleDeleteStock = (bsku, originalName) => {
+    setStockData(prev => prev.filter(s => !(s.bundleSku === bsku && s.name === originalName)));
     setEditStock(null);
   };
   const handleSaveStock = (updated) =>
-    setStockData(p => p.map(s => s.bundleSku===updated.bundleSku ? updated : s));
+    setStockData(p => p.map(s =>
+      s.bundleSku === updated.bundleSku && s.name === updated._originalName
+        ? { ...updated, _originalName: undefined }
+        : s
+    ));
 
   const handleAutoImport = (stock, count) => {
     const nextSkuNum = (() => {
@@ -2495,7 +2499,7 @@ function ListingsTab({ listings, setListings, stockData }) {
 
   /* Unique values for filter dropdowns */
   const bundleSkus = useMemo(() =>
-    [...new Set(stockData.map(s => s.bundleSku))].sort(),
+    stockData.slice().sort((a,b) => a.bundleSku.localeCompare(b.bundleSku)),
     [stockData]
   );
   const sizes = ["XS","S","M","L","XL","XXL","One Size"];
@@ -2575,9 +2579,9 @@ function ListingsTab({ listings, setListings, stockData }) {
 
         <select className="fs" value={bundleFilter} onChange={e=>setBundleFilter(e.target.value)}>
           <option value="All">All Bundles</option>
-          {bundleSkus.map(b => (
-            <option key={b} value={b}>
-              {b} — {stockData.find(s=>s.bundleSku===b)?.name || ""}
+          {bundleSkus.map((s,i) => (
+            <option key={`${s.bundleSku}-${i}`} value={s.bundleSku}>
+              {s.bundleSku} — {s.name}
             </option>
           ))}
         </select>
@@ -4964,28 +4968,8 @@ function ShippingTab({ listings, setListings }) {
 /* ═══════════════════════════════════════════════════════════════
    DASHBOARD — Command 9
 ═══════════════════════════════════════════════════════════════ */
-function Dashboard({ listings, stockData, weeklyGoal, setWeeklyGoal, monthlyGoal, setMonthlyGoal }) {
-  const sold    = listings.filter(l => l.sold);
-  const active  = listings.filter(l => l.listed && !l.sold);
-  const soldWk  = listings.filter(l => l.sold && l.daySold && l.daySold >= WEEK_START);
-  const soldMo  = listings.filter(l => l.sold && l.daySold && l.daySold >= MONTH_START);
-
-  const totalRevenue  = sold.reduce((a,l) => a+(l.soldPrice||0), 0);
-  const totalStockSpend = stockData.reduce((a,s) => a+(s.totalCost||s.sellable*s.costPer||0), 0);
-  const totalProfit   = totalRevenue - totalStockSpend; // true business P&L
-  // Sell-through = active / sold (matches spreadsheet)
-  const sellThruPct   = sold.length ? Math.round(active.length/sold.length*100) : 0;
-  // avgProfit per sale = avg (soldPrice - costPerItem) using per-listing profit field
-  const avgProfit     = sold.length ? sold.reduce((a,l)=>a+(l.profit||0),0)/sold.length : 0;
-
-  const wkProfit = soldWk.reduce((a,l) => a+(l.profit||0), 0);
-  const moProfit = soldMo.reduce((a,l) => a+(l.profit||0), 0);
-  const wg = parseFloat(weeklyGoal)||0;
-  const mg = parseFloat(monthlyGoal)||0;
-  const wPct = wg ? Math.min(100, Math.round(wkProfit/wg*100)) : 0;
-  const mPct = mg ? Math.min(100, Math.round(moProfit/mg*100)) : 0;
-
-  const GoalCard = ({ title, period, profit, goal, setGoal, val, pct }) => (
+function GoalCard({ title, period, profit, goal, setGoal, val, pct, avgProfit }) {
+  return (
     <div style={{background:"var(--sf)",border:"1px solid var(--bd)",borderRadius:"var(--r2)",padding:"14px 15px",boxShadow:"var(--sh)"}}>
       <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".5px",color:"var(--txm)",marginBottom:3}}>{title}</div>
       <div style={{fontSize:11,color:"var(--txd)",marginBottom:9}}>{period}</div>
@@ -5022,6 +5006,30 @@ function Dashboard({ listings, stockData, weeklyGoal, setWeeklyGoal, monthlyGoal
       )}
     </div>
   );
+}
+
+function Dashboard({ listings, stockData, weeklyGoal, setWeeklyGoal, monthlyGoal, setMonthlyGoal }) {
+  const sold    = listings.filter(l => l.sold);
+  const active  = listings.filter(l => l.listed && !l.sold);
+  const soldWk  = listings.filter(l => l.sold && l.daySold && l.daySold >= WEEK_START);
+  const soldMo  = listings.filter(l => l.sold && l.daySold && l.daySold >= MONTH_START);
+
+  const totalRevenue  = sold.reduce((a,l) => a+(l.soldPrice||0), 0);
+  const totalStockSpend = stockData.reduce((a,s) => a+(s.totalCost||s.sellable*s.costPer||0), 0);
+  const totalProfit   = totalRevenue - totalStockSpend; // true business P&L
+  // Sell-through = active / sold (matches spreadsheet)
+  const sellThruPct   = sold.length ? Math.round(active.length/sold.length*100) : 0;
+  // avgProfit per sale = avg (soldPrice - costPerItem) using per-listing profit field
+  const avgProfit     = sold.length ? sold.reduce((a,l)=>a+(l.profit||0),0)/sold.length : 0;
+
+  const wkProfit = soldWk.reduce((a,l) => a+(l.profit||0), 0);
+  const moProfit = soldMo.reduce((a,l) => a+(l.profit||0), 0);
+  const wg = parseFloat(weeklyGoal)||0;
+  const mg = parseFloat(monthlyGoal)||0;
+  const wPct = wg ? Math.min(100, Math.round(wkProfit/wg*100)) : 0;
+  const mPct = mg ? Math.min(100, Math.round(moProfit/mg*100)) : 0;
+
+
 
   return (
     <div>
@@ -5046,12 +5054,12 @@ function Dashboard({ listings, stockData, weeklyGoal, setWeeklyGoal, monthlyGoal
       <div className="two-col" style={{marginBottom:16}}>
         <GoalCard
           title="Weekly Profit Goal" period={`w/c ${WEEK_START}`}
-          profit={wkProfit} goal={wg} setGoal={setWeeklyGoal} val={weeklyGoal} pct={wPct}
+          profit={wkProfit} goal={wg} setGoal={setWeeklyGoal} val={weeklyGoal} pct={wPct} avgProfit={avgProfit}
         />
         <GoalCard
           title="Monthly Profit Goal"
           period={NOW.toLocaleDateString("en-GB",{month:"long",year:"numeric"})}
-          profit={moProfit} goal={mg} setGoal={setMonthlyGoal} val={monthlyGoal} pct={mPct}
+          profit={moProfit} goal={mg} setGoal={setMonthlyGoal} val={monthlyGoal} pct={mPct} avgProfit={avgProfit}
         />
       </div>
 
@@ -5967,7 +5975,7 @@ function History({ listings, stockData, liveData }) {
     const monthKeys = [];
     let d = new Date(2024, 10, 1);
     while (d <= NOW) {
-      monthKeys.push(d.toISOString().slice(0,7));
+      monthKeys.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
       d = new Date(d.getFullYear(), d.getMonth()+1, 1);
     }
 
@@ -6322,9 +6330,8 @@ export default function App() {
           if (payload.new.goals) {
             setWeeklyGoal(payload.new.goals.weekly   || "");
             setMonthlyGoal(payload.new.goals.monthly || "");
-            if (payload.new.goals.liveData &&
-                Object.values(payload.new.goals.liveData).some(v => v !== "")) {
-              setLiveData(payload.new.goals.liveData);
+            if (payload.new.goals.liveData?.profitLog) {
+              setLiveData(prev => ({ ...prev, profitLog: payload.new.goals.liveData.profitLog }));
             }
           }
           setStorageStatus("saved");
