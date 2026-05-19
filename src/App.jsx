@@ -558,7 +558,7 @@ nav::-webkit-scrollbar-thumb{background:var(--bd);border-radius:2px}
 .tbl-zoom-wrap{transform-origin:top left;will-change:transform}
 .tbl tr:last-child td{border-bottom:none}
 .tbl tr.clickable:hover td{background:#faf9f6;cursor:pointer}
-.tbl tr.sold-r td{background:#f0faf4;color:var(--txm)}.tbl tr.listed-r td{background:#fff8f0}.tbl tr.dim td{opacity:.55}.tbl tr.sel td{background:#fdf4f5}
+.tbl tr.sold-r td{background:#f0faf4;color:var(--txm)}.tbl tr.listed-r td{background:#fff8f0}.tbl tr.return-r td{background:#fdf0f0}.tbl tr.dim td{opacity:.55}.tbl tr.sel td{background:#fdf4f5}
 
 /* Forms */
 .fr{margin-bottom:11px}.fr2{display:grid;grid-template-columns:1fr 1fr;gap:10px}.fr3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
@@ -588,7 +588,7 @@ nav::-webkit-scrollbar-thumb{background:var(--bd);border-radius:2px}
 .tab-bar{display:flex;align-items:flex-end;border-bottom:2px solid var(--bd);margin-bottom:14px;flex-wrap:wrap}
 .tab{padding:8px 12px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--txm);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;transition:color .12s,border-color .12s;display:flex;align-items:center;gap:5px;user-select:none;white-space:nowrap}
 .tab:hover{color:var(--tx)}.tab.active{color:var(--ac);border-bottom-color:var(--ac)}
-.tc{background:var(--sf2);color:var(--txm);font-size:9.5px;font-weight:700;padding:1px 6px;border-radius:10px;min-width:18px;text-align:center}
+.tc{background:var(--sf2);color:var(--txm);font-size:9.5px;font-weight:700;padding:1px 6px;border-radius:10px;min-width:18px;text-align:center}.tc-ret{background:var(--acl);color:var(--ac)}
 .tab.active .tc{background:var(--acl);color:var(--ac)}
 
 /* Modal */
@@ -1918,18 +1918,52 @@ function EditListingDrawer({ listing, stockData, onSave, onDelete, onClose }) {
             </label>
           </div>
 
-          {/* Process Return — only shows when item is sold */}
-          {form.sold && (
-            <div style={{
-              marginTop:14,padding:"12px 13px",
-              background:"#fff8f0",border:"1px solid #f0c040",
-              borderRadius:"var(--r)",
-            }}>
-              <div style={{fontSize:11,fontWeight:700,color:"#7a4e0e",marginBottom:8}}>
-                📦 Process a Return
+          {/* Process Return — shows when item is sold */}
+          {form.sold && !form.pendingReturn && (
+            <div style={{marginTop:14,padding:"12px 13px",background:"#fff8f0",border:"1px solid #f0c040",borderRadius:"var(--r)"}}>
+              <div style={{fontSize:11,fontWeight:700,color:"#7a4e0e",marginBottom:6}}>📦 Process a Return</div>
+              <div style={{fontSize:11,color:"#7a4e0e",marginBottom:8,lineHeight:1.5}}>
+                Buyer sending it back? Raise a return to track it in Shipping while it's in transit.
               </div>
-              <div style={{fontSize:11,color:"#7a4e0e",marginBottom:10,lineHeight:1.5}}>
-                Choose what happens after the return is received:
+              <div className="fr">
+                <label className="fl">Return Reason</label>
+                <input
+                  className="finp"
+                  placeholder="e.g. Not as described, doesn't fit…"
+                  value={form._returnReasonDraft||""}
+                  onChange={e => setForm(prev => ({...prev, _returnReasonDraft: e.target.value}))}
+                />
+              </div>
+              <button
+                className="btn btn-o btn-sm"
+                style={{width:"100%",justifyContent:"center",marginTop:4}}
+                onClick={() => {
+                  const returnDate = new Date().toISOString().split("T")[0];
+                  setForm(prev => ({
+                    ...prev,
+                    pendingReturn: true,
+                    returnReason: prev._returnReasonDraft || "",
+                    returnDate,
+                    _returnReasonDraft: undefined,
+                    notes: (prev.notes ? prev.notes + "\n" : "") + `Return raised ${returnDate}${prev._returnReasonDraft ? " — " + prev._returnReasonDraft : ""}`,
+                  }));
+                  setDirty(true);
+                }}
+              >
+                ↩ Raise Return
+              </button>
+            </div>
+          )}
+
+          {/* Return In Transit — shows when pendingReturn is true */}
+          {form.pendingReturn && (
+            <div style={{marginTop:14,padding:"12px 13px",background:"var(--acl)",border:"1px solid var(--ac2)",borderRadius:"var(--r)"}}>
+              <div style={{fontSize:11,fontWeight:700,color:"var(--ac)",marginBottom:4}}>↩ Return In Transit</div>
+              {form.returnReason && (
+                <div style={{fontSize:11,color:"var(--txm)",marginBottom:8}}>Reason: {form.returnReason}</div>
+              )}
+              <div style={{fontSize:11,color:"var(--txm)",marginBottom:10,lineHeight:1.5}}>
+                Item is on its way back. Once received, choose what to do with it:
               </div>
               <div style={{display:"flex",gap:7}}>
                 <button
@@ -1943,6 +1977,7 @@ function EditListingDrawer({ listing, stockData, onSave, onDelete, onClose }) {
                       sold:false, soldPrice:null, profit:null,
                       daySold:null, days:null, shipped:false, shippedDate:null,
                       listed:true,
+                      pendingReturn:false, returnReason:"", returnDate:"",
                       notes:(prev.notes ? prev.notes + "\n" : "") + `Returned ${returnDate} — relisted`,
                     }));
                     setDirty(true);
@@ -1953,7 +1988,7 @@ function EditListingDrawer({ listing, stockData, onSave, onDelete, onClose }) {
                     });
                   }}
                 >
-                  ↩ Relist (keep live)
+                  ↩ Relist
                 </button>
                 <button
                   className="btn btn-o btn-sm"
@@ -1967,21 +2002,22 @@ function EditListingDrawer({ listing, stockData, onSave, onDelete, onClose }) {
                       daySold:null, days:null, shipped:false, shippedDate:null,
                       listed:false, dayListed:null,
                       platforms:[], platformDates:{},
-                      notes:(prev.notes ? prev.notes + "\n" : "") + `Returned ${returnDate} — pulled from platforms`,
+                      pendingReturn:false, returnReason:"", returnDate:"",
+                      notes:(prev.notes ? prev.notes + "\n" : "") + `Returned ${returnDate} — re-inventoried`,
                     }));
                     setDirty(true);
                     sendPushNotification({
                       title: "ArchiveDistrict",
-                      body:  `📦 ${prevSku} returned — pulled down`,
+                      body:  `📦 ${prevSku} returned — re-inventoried`,
                       tag:   `return-${prevSku}`,
                     });
                   }}
                 >
-                  ↩ Pull down (relist later)
+                  📦 Re-inventory
                 </button>
               </div>
-              <div style={{fontSize:10,color:"#7a4e0e",marginTop:7,opacity:.7}}>
-                Both options clear sold data and add a return note. Save Changes to confirm.
+              <div style={{fontSize:10,color:"var(--ac)",marginTop:7,opacity:.8}}>
+                Relist = back to active at same price · Re-inventory = back to unlisted, reassess price
               </div>
             </div>
           )}
@@ -2401,10 +2437,11 @@ function ListingsTab({ listings, setListings, stockData }) {
 
   /* Tab counts — always from full listings */
   const counts = useMemo(() => ({
-    all:      listings.length,
-    active:   listings.filter(l => l.listed && !l.sold).length,
-    sold:     listings.filter(l => l.sold).length,
-    unlisted: listings.filter(l => !l.listed && !l.sold).length,
+    all:           listings.length,
+    active:        listings.filter(l => l.listed && !l.sold).length,
+    sold:          listings.filter(l => l.sold).length,
+    unlisted:      listings.filter(l => !l.listed && !l.sold).length,
+    pendingReturn: listings.filter(l => l.pendingReturn).length,
   }), [listings]);
 
   /* Filtered + sorted rows — chains after column filters */
@@ -2415,6 +2452,7 @@ function ListingsTab({ listings, setListings, stockData }) {
     if (activeTab === "active")   d = d.filter(l => l.listed && !l.sold);
     if (activeTab === "sold")     d = d.filter(l => l.sold);
     if (activeTab === "unlisted") d = d.filter(l => !l.listed && !l.sold);
+    if (activeTab === "pendingReturn") d = d.filter(l => l.pendingReturn);
     if (activeTab === "all" && !showSold) d = d.filter(l => !l.sold);
 
     // Search
@@ -2538,10 +2576,11 @@ function ListingsTab({ listings, setListings, stockData }) {
       {/* ── Tab bar ── */}
       <div className="tab-bar">
         {[
-          { id:"all",      label:"All Items" },
-          { id:"active",   label:"Active"    },
-          { id:"sold",     label:"Sold"      },
-          { id:"unlisted", label:"To List"   },
+          { id:"all",           label:"All Items"      },
+          { id:"active",        label:"Active"         },
+          { id:"sold",          label:"Sold"           },
+          { id:"unlisted",      label:"To List"        },
+          { id:"pendingReturn", label:"Pending Return" },
         ].map(t => (
           <div
             key={t.id}
@@ -2549,7 +2588,7 @@ function ListingsTab({ listings, setListings, stockData }) {
             onClick={() => setActiveTab(t.id)}
           >
             {t.label}
-            <span className="tc">{counts[t.id]}</span>
+            <span className={`tc${t.id==="pendingReturn"&&counts.pendingReturn>0?" tc-ret":""}`}>{counts[t.id]}</span>
           </div>
         ))}
 
@@ -2679,8 +2718,9 @@ function ListingsTab({ listings, setListings, stockData }) {
                 const isSel  = selected.has(l.sku);
                 const rowCls = [
                   "clickable",
-                  l.sold              ? "sold-r"   : "",
-                  l.listed && !l.sold ? "listed-r"  : "",
+                  l.pendingReturn     ? "return-r"  : "",
+                  !l.pendingReturn && l.sold              ? "sold-r"   : "",
+                  !l.pendingReturn && l.listed && !l.sold ? "listed-r"  : "",
                   isSel               ? "sel"       : "",
                 ].filter(Boolean).join(" ");
 
@@ -4831,8 +4871,10 @@ function ShippingTab({ listings, setListings }) {
   const [cols,         setCols]        = useState(SHIPPING_COLS);
   const [showColPanel, setShowColPanel]= useState(false);
   const [showFilterP,  setShowFilterP] = useState(false);
+  const [resolving,    setResolving]   = useState(null);
 
-  const toShip      = listings.filter(l => l.sold && !l.shipped);
+  const toShip        = listings.filter(l => l.sold && !l.shipped && !l.pendingReturn);
+  const awaitingReturn = listings.filter(l => l.pendingReturn);
   const shippedToday = listings.filter(l => l.shipped && l.shippedDate === getToday());
 
   const markShipped = (sku) => setListings(prev =>
@@ -4961,6 +5003,94 @@ function ShippingTab({ listings, setListings }) {
           ))}
         </div>
       ))}
+
+      {/* ── Awaiting Returns ── only shown when active returns exist */}
+      {awaitingReturn.length > 0 && (
+        <div style={{marginTop:18}}>
+          <div className="sh">
+            <div className="st">
+              ↩ Awaiting Returns
+              <span className="ss">{awaitingReturn.length} item{awaitingReturn.length!==1?"s":""} in transit</span>
+            </div>
+          </div>
+          {awaitingReturn.map(l => (
+            <div key={l.sku} className="ship-plat">
+              <div key={l.sku} className="ship-row" style={{flexWrap:"wrap",gap:8}}>
+                <span className="sku" style={{minWidth:52}}>{l.sku}</span>
+                <div style={{flex:1,minWidth:120}}>
+                  <div style={{fontWeight:700,fontSize:12}}>{l.name}</div>
+                  <div style={{fontSize:11,color:"var(--txm)"}}>
+                    {l.colour} · {l.size}
+                    {l.returnReason && <span style={{marginLeft:6,color:"var(--ac)"}}>— {l.returnReason}</span>}
+                  </div>
+                  {l.returnDate && (
+                    <div style={{fontSize:10,color:"var(--txd)",marginTop:1}}>Raised {l.returnDate}</div>
+                  )}
+                </div>
+                {resolving === l.sku ? (
+                  <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+                    <span style={{fontSize:11,color:"var(--txm)",fontWeight:700}}>Received — choose:</span>
+                    <button
+                      className="btn btn-g btn-sm"
+                      onClick={() => {
+                        const returnDate = getToday();
+                        setListings(prev => prev.map(item => item.sku !== l.sku ? item : {
+                          ...item,
+                          sold:false, soldPrice:null, profit:null,
+                          daySold:null, days:null, shipped:false, shippedDate:null,
+                          listed:true,
+                          pendingReturn:false, returnReason:"", returnDate:"",
+                          notes:(item.notes ? item.notes + "\n" : "") + `Returned ${returnDate} — relisted`,
+                        }));
+                        setResolving(null);
+                        sendPushNotification({
+                          title: "ArchiveDistrict",
+                          body: `↩ ${l.sku} returned — relisted`,
+                          tag: `return-${l.sku}`,
+                        });
+                      }}
+                    >↩ Relist</button>
+                    <button
+                      className="btn btn-o btn-sm"
+                      onClick={() => {
+                        const returnDate = getToday();
+                        setListings(prev => prev.map(item => item.sku !== l.sku ? item : {
+                          ...item,
+                          sold:false, soldPrice:null, profit:null,
+                          daySold:null, days:null, shipped:false, shippedDate:null,
+                          listed:false, dayListed:null,
+                          platforms:[], platformDates:{},
+                          pendingReturn:false, returnReason:"", returnDate:"",
+                          notes:(item.notes ? item.notes + "\n" : "") + `Returned ${returnDate} — re-inventoried`,
+                        }));
+                        setResolving(null);
+                        sendPushNotification({
+                          title: "ArchiveDistrict",
+                          body: `↩ ${l.sku} returned — re-inventoried`,
+                          tag: `return-${l.sku}`,
+                        });
+                      }}
+                    >📦 Re-inventory</button>
+                    <button
+                      className="btn btn-o btn-sm"
+                      style={{color:"var(--txd)"}}
+                      onClick={() => setResolving(null)}
+                    >Cancel</button>
+                  </div>
+                ) : (
+                  <button
+                    className="btn btn-o btn-sm"
+                    style={{color:"var(--nv)",borderColor:"var(--nv)",fontWeight:700}}
+                    onClick={() => setResolving(l.sku)}
+                  >
+                    Mark Received ✓
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
