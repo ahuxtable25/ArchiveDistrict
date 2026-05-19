@@ -1111,7 +1111,7 @@ function EditStockDrawer({ stock, derived, onSave, onDelete, onClose, onAddListi
 
         {/* Auto-import to listings */}
         {onAddListings && derived && (() => {
-          const sellable = stock.sellable || 0;
+          const sellable = parseInt(form.sellable)||parseInt(stock.sellable)||0;
           const alreadyCreated = (derived.qtyListedNS||0) + (derived.qtySold||0) + (derived.qtyToBeListed||0);
           const toCreate = Math.max(0, sellable - alreadyCreated);
           if (toCreate === 0) return (
@@ -6630,7 +6630,7 @@ export default function App() {
 
   /* JSON backup/restore */
   const exportJSON = () => {
-    const payload = JSON.stringify({ exportDate:TODAY, listings, stock:stockData }, null, 2);
+    const payload = JSON.stringify({ exportDate:TODAY, listings, stock:stockData, goals:{ weekly:weeklyGoal, monthly:monthlyGoal }, liveData }, null, 2);
     const a = document.createElement("a");
     a.href = "data:application/json;charset=utf-8," + encodeURIComponent(payload);
     a.download = `archivedistrict_${TODAY}.json`;
