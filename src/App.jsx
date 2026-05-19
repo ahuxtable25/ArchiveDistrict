@@ -585,8 +585,8 @@ nav::-webkit-scrollbar-thumb{background:var(--bd);border-radius:2px}
 .tog-dot{width:7px;height:7px;border-radius:50%;background:currentColor;opacity:.8}
 
 /* Tab bar */
-.tab-bar{display:flex;align-items:flex-end;border-bottom:2px solid var(--bd);margin-bottom:14px;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}.tab-bar::-webkit-scrollbar{display:none}
-.tab{padding:8px 12px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--txm);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;transition:color .12s,border-color .12s;display:flex;align-items:center;gap:5px;user-select:none;white-space:nowrap}
+.tab-bar{display:flex;align-items:flex-end;border-bottom:2px solid var(--bd);margin-bottom:14px;flex-wrap:wrap}
+.tab{padding:7px 9px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:var(--txm);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;transition:color .12s,border-color .12s;display:flex;align-items:center;gap:4px;user-select:none;white-space:nowrap}
 .tab:hover{color:var(--tx)}.tab.active{color:var(--ac);border-bottom-color:var(--ac)}
 .tc{background:var(--sf2);color:var(--txm);font-size:9.5px;font-weight:700;padding:1px 6px;border-radius:10px;min-width:18px;text-align:center}.tc-ret{background:var(--acl);color:var(--ac)}
 .tab.active .tc{background:var(--acl);color:var(--ac)}
@@ -2580,14 +2580,25 @@ function ListingsTab({ listings, setListings, stockData }) {
         />
       )}
 
+      {/* ── Controls row above tabs ── */}
+      <div style={{display:"flex",justifyContent:"flex-end",alignItems:"center",gap:7,marginBottom:8}}>
+        <div style={{position:"relative"}}>
+          <button className="btn btn-o btn-sm" onClick={()=>setShowColPanel(v=>!v)}>⚙ Columns</button>
+          {showColPanel && (
+            <ColPanel cols={cols} setCols={setCols} onClose={()=>setShowColPanel(false)} />
+          )}
+        </div>
+        <button className="btn btn-p btn-sm" onClick={()=>setShowAdd(true)}>+ Add Listing</button>
+      </div>
+
       {/* ── Tab bar ── */}
       <div className="tab-bar">
         {[
-          { id:"all",           label:"All Items"      },
-          { id:"active",        label:"Active"         },
-          { id:"sold",          label:"Sold"           },
-          { id:"unlisted",      label:"To List"        },
-          { id:"pendingReturn", label:"Pending Return" },
+          { id:"all",      label:"All Items" },
+          { id:"active",   label:"Active"    },
+          { id:"sold",     label:"Sold"      },
+          { id:"unlisted", label:"To List"   },
+          ...(counts.pendingReturn > 0 ? [{ id:"pendingReturn", label:"Returns" }] : []),
         ].map(t => (
           <div
             key={t.id}
@@ -2595,20 +2606,9 @@ function ListingsTab({ listings, setListings, stockData }) {
             onClick={() => setActiveTab(t.id)}
           >
             {t.label}
-            <span className={`tc${t.id==="pendingReturn"&&counts.pendingReturn>0?" tc-ret":""}`}>{counts[t.id]}</span>
+            <span className={`tc${t.id==="pendingReturn"?" tc-ret":""}`}>{counts[t.id]}</span>
           </div>
         ))}
-
-        {/* Right-side controls */}
-        <div style={{marginLeft:"auto",display:"flex",gap:7,alignItems:"center",paddingBottom:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
-          <div style={{position:"relative"}}>
-            <button className="btn btn-o btn-sm" onClick={()=>setShowColPanel(v=>!v)}>⚙ Columns</button>
-            {showColPanel && (
-              <ColPanel cols={cols} setCols={setCols} onClose={()=>setShowColPanel(false)} />
-            )}
-          </div>
-          <button className="btn btn-p btn-sm" onClick={()=>setShowAdd(true)}>+ Add Listing</button>
-        </div>
       </div>
 
       {/* ── Filter bar ── */}
@@ -5014,15 +5014,15 @@ function ShippingTab({ listings, setListings }) {
       {/* ── Awaiting Returns ── only shown when active returns exist */}
       {awaitingReturn.length > 0 && (
         <div style={{marginTop:18}}>
-          <div className="sh">
-            <div className="st">
+          <div className="sh" style={{borderLeft:"3px solid var(--ac)",paddingLeft:10,marginLeft:-3}}>
+            <div className="st" style={{color:"var(--ac)"}}>
               ↩ Awaiting Returns
-              <span className="ss">{awaitingReturn.length} item{awaitingReturn.length!==1?"s":""} in transit</span>
+              <span className="ss" style={{color:"var(--txm)"}}>{awaitingReturn.length} item{awaitingReturn.length!==1?"s":""} in transit</span>
             </div>
           </div>
           {awaitingReturn.map(l => (
             <div key={l.sku} className="ship-plat">
-              <div key={l.sku} className="ship-row" style={{flexWrap:"wrap",gap:8}}>
+              <div key={l.sku} className="ship-row" style={{flexWrap:"wrap",gap:8,background:"#fdf0f0",borderLeft:"3px solid var(--ac)",borderRadius:"0 var(--r) var(--r) 0"}}>
                 <span className="sku" style={{minWidth:52}}>{l.sku}</span>
                 <div style={{flex:1,minWidth:120}}>
                   <div style={{fontWeight:700,fontSize:12}}>{l.name}</div>
