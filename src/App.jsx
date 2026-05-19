@@ -585,7 +585,7 @@ nav::-webkit-scrollbar-thumb{background:var(--bd);border-radius:2px}
 .tog-dot{width:7px;height:7px;border-radius:50%;background:currentColor;opacity:.8}
 
 /* Tab bar */
-.tab-bar{display:flex;align-items:flex-end;border-bottom:2px solid var(--bd);margin-bottom:14px;flex-wrap:wrap}
+.tab-bar{display:flex;align-items:flex-end;border-bottom:2px solid var(--bd);margin-bottom:14px;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}.tab-bar::-webkit-scrollbar{display:none}
 .tab{padding:8px 12px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--txm);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;transition:color .12s,border-color .12s;display:flex;align-items:center;gap:5px;user-select:none;white-space:nowrap}
 .tab:hover{color:var(--tx)}.tab.active{color:var(--ac);border-bottom-color:var(--ac)}
 .tc{background:var(--sf2);color:var(--txm);font-size:9.5px;font-weight:700;padding:1px 6px;border-radius:10px;min-width:18px;text-align:center}.tc-ret{background:var(--acl);color:var(--ac)}
@@ -1939,15 +1939,22 @@ function EditListingDrawer({ listing, stockData, onSave, onDelete, onClose }) {
                 style={{width:"100%",justifyContent:"center",marginTop:4}}
                 onClick={() => {
                   const returnDate = new Date().toISOString().split("T")[0];
+                  const reason = form._returnReasonDraft || "";
+                  const prevSku = form.sku;
                   setForm(prev => ({
                     ...prev,
                     pendingReturn: true,
-                    returnReason: prev._returnReasonDraft || "",
+                    returnReason: reason,
                     returnDate,
                     _returnReasonDraft: undefined,
-                    notes: (prev.notes ? prev.notes + "\n" : "") + `Return raised ${returnDate}${prev._returnReasonDraft ? " — " + prev._returnReasonDraft : ""}`,
+                    notes: (prev.notes ? prev.notes + "\n" : "") + `Return raised ${returnDate}${reason ? " — " + reason : ""}`,
                   }));
                   setDirty(true);
+                  sendPushNotification({
+                    title: "ArchiveDistrict",
+                    body:  `↩ ${prevSku} — return raised${reason ? ": " + reason : ""}`,
+                    tag:   `return-raised-${prevSku}`,
+                  });
                 }}
               >
                 ↩ Raise Return
