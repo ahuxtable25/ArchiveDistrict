@@ -1515,9 +1515,14 @@ function StockTab({ stockData, setStockData, listings, setListings }) {
       platforms:  [],
       platform:   null,
       platformDates: {},
-      notes:      "⚠ Fill in colour, size and description",
+      notes:      "",
     }));
     setListings(prev => [...prev, ...stubs]);
+    setStockData(prev => prev.map(s =>
+      s.bundleSku === stock.bundleSku && s.name === stock.name
+        ? { ...s, imported: true }
+        : s
+    ));
     setEditStock(null);
     alert(`✓ Created ${count} listing stub${count!==1?"s":""} for ${stock.bundleSku}. Go to Listings tab to fill in colour/size/description.`);
   };
@@ -3992,7 +3997,7 @@ function MarkAsListed({ listings, setListings }) {
    LISTING DRAFTER — Command 7 (AI-powered)
 ═══════════════════════════════════════════════════════════════ */
 function ListingDrafter({ listings, setListings }) {
-  const unlisted = useMemo(() => listings.filter(l => !l.listed && !l.sold), [listings]);
+  const unlisted = useMemo(() => listings.filter(l => !l.sold), [listings]);
 
   const [selSku,      setSelSku]      = useState("");
   const [drafterSearch,setDrafterSearch]= useState("");
@@ -4217,7 +4222,7 @@ Return exactly this JSON shape:
         {/* ── Left panel — inputs ── */}
         <div className="draft-box">
 
-          <span className="dlabel">Search &amp; select unlisted item</span>
+          <span className="dlabel">Search &amp; select item (unlisted or listed)</span>
 
           {/* Searchable SKU field */}
           {(() => {
@@ -4279,7 +4284,7 @@ Return exactly this JSON shape:
                   }}>
                     {results.length === 0 ? (
                       <div style={{ padding:"12px 14px", fontSize:12, color:"var(--txd)" }}>
-                        No unlisted items match "{drafterSearch}"
+                        No items match "{drafterSearch}"
                       </div>
                     ) : results.map(l => (
                       <div
@@ -4350,6 +4355,12 @@ Return exactly this JSON shape:
                 <div style={{ color:"var(--txd)", fontSize:11, marginTop:2 }}>
                   Cost: {fmt(item.price)} · SKU: {item.sku}
                 </div>
+                {item.desc && (
+                  <div style={{ marginTop:7, paddingTop:7, borderTop:"1px solid var(--bd)", fontSize:11, color:"var(--txm)", lineHeight:1.5 }}>
+                    <span style={{ fontWeight:700, color:"var(--txd)", textTransform:"uppercase", letterSpacing:".4px", fontSize:9 }}>Description </span>
+                    {item.desc}
+                  </div>
+                )}
               </div>
 
               <span className="dlabel">Condition</span>
@@ -6462,8 +6473,13 @@ export default function App() {
           if (localTs && remoteTs && remoteTs <= localTs) return;
           isRemoteUpdate.current = true;
           setTimeout(() => { isRemoteUpdate.current = false; }, 2000);
-          if (payload.new.listings?.length > 0) setListingsRaw(payload.new.listings);
-          if (payload.new.stock_data?.length > 0) setStockDataRaw(payload.new.stock_data);
+          // Only apply if remote has at least as many listings (prevents stale device overwriting)
+          if (payload.new.listings?.length > 0 &&
+              payload.new.listings.length >= listingsRef.current.length)
+            setListingsRaw(payload.new.listings);
+          if (payload.new.stock_data?.length > 0 &&
+              payload.new.stock_data.length >= stockDataRef.current.length)
+            setStockDataRaw(payload.new.stock_data);
           if (payload.new.goals) {
             setWeeklyGoal(payload.new.goals.weekly   || "");
             setMonthlyGoal(payload.new.goals.monthly || "");
@@ -6486,6 +6502,7 @@ export default function App() {
 
   const debouncedSave = useCallback((listings, stockData, goals) => {
     if (!hasLoaded.current) return;
+    if (isRemoteUpdate.current) return; // don't echo remote updates back to Supabase
     setStorageStatus("loading");
     clearTimeout(saveTimer.current);
     clearTimeout(versionTimer.current);
@@ -6617,7 +6634,7 @@ export default function App() {
 
   /* Shipping count for nav dot */
   const toShipCount = useMemo(
-    () => listings.filter(l => l.sold && !l.shipped).length,
+    () => listings.filter(l => l.sold && !l.shipped && !l.pendingReturn).length,
     [listings]
   );
 
