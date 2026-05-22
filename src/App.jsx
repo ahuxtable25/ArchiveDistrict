@@ -6358,7 +6358,16 @@ export default function App() {
   /* Wrapped setters — every mutation auto-saves a snapshot first */
   const setListings = useCallback((updater) => {
     saveSnap();
-    setListingsRaw(updater);
+    setListingsRaw(prev => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      const ts = new Date().toISOString();
+      const prevMap = new Map(prev.map(l => [l.sku, l]));
+      // Stamp updatedAt on any listing that was added or changed
+      return next.map(l => {
+        const p = prevMap.get(l.sku);
+        return (!p || p !== l) ? { ...l, updatedAt: ts } : l;
+      });
+    });
   }, [saveSnap]);
 
   const setStockData = useCallback((updater) => {
@@ -6456,43 +6465,90 @@ export default function App() {
     })();
   }, []);
 
+  /* ── Per-item merge — keeps newest version of each listing ── */
+  const mergeListings = (local, remote) => {
+    const localMap  = new Map(local.map(l => [l.sku, l]));
+    const remoteMap = new Map(remote.map(l => [l.sku, l]));
+    const allSkus   = new Set([...localMap.keys(), ...remoteMap.keys()]);
+    return [...allSkus].map(sku => {
+      const loc = localMap.get(sku);
+      const rem = remoteMap.get(sku);
+      if (!loc) return rem;   // new listing from remote device
+      if (!rem) return loc;   // new listing from local device
+      // Both have it — keep whichever was updated more recently
+      if (!loc.updatedAt) return rem;
+      if (!rem.updatedAt) return loc;
+      return loc.updatedAt >= rem.updatedAt ? loc : rem;
+    });
+  };
+
   /* ── Supabase Realtime — push changes from other devices instantly ── */
-  useEffect(() => {
-    const channel = supabase
+  const channelRef = useRef(null);
+
+  const applyRemotePayload = useCallback((data) => {
+    if (!data) return;
+    if (isRemoteUpdate.current) return;
+    const remoteTs = data.updated_at;
+    const localTs  = lastSaveTs.current;
+    if (localTs && remoteTs && remoteTs <= localTs) return;
+    isRemoteUpdate.current = true;
+    setTimeout(() => { isRemoteUpdate.current = false; }, 2000);
+    if (data.listings?.length > 0) {
+      const merged = mergeListings(listingsRef.current, data.listings);
+      setListingsRaw(merged);
+    }
+    if (data.stock_data?.length > 0 &&
+        data.stock_data.length >= stockDataRef.current.length)
+      setStockDataRaw(data.stock_data);
+    if (data.goals) {
+      setWeeklyGoal(data.goals.weekly   || "");
+      setMonthlyGoal(data.goals.monthly || "");
+      if (data.goals.liveData?.profitLog)
+        setLiveData(prev => ({ ...prev, profitLog: data.goals.liveData.profitLog }));
+    }
+    setStorageStatus("saved");
+  }, []);
+
+  const subscribeRealtime = useCallback(() => {
+    if (channelRef.current) supabase.removeChannel(channelRef.current);
+    channelRef.current = supabase
       .channel("app_state_realtime")
       .on(
         "postgres_changes",
         { event: "UPDATE", schema: "public", table: "app_state", filter: "id=eq.1" },
-        (payload) => {
-          if (!payload.new) return;
-          // Skip if WE just saved (avoid echo)
-          if (isRemoteUpdate.current) return;
-          // Only apply if remote data is NEWER than our last save
-          const remoteTs = payload.new.updated_at;
-          const localTs  = lastSaveTs.current;
-          if (localTs && remoteTs && remoteTs <= localTs) return;
-          isRemoteUpdate.current = true;
-          setTimeout(() => { isRemoteUpdate.current = false; }, 2000);
-          // Only apply if remote has at least as many listings (prevents stale device overwriting)
-          if (payload.new.listings?.length > 0 &&
-              payload.new.listings.length >= listingsRef.current.length)
-            setListingsRaw(payload.new.listings);
-          if (payload.new.stock_data?.length > 0 &&
-              payload.new.stock_data.length >= stockDataRef.current.length)
-            setStockDataRaw(payload.new.stock_data);
-          if (payload.new.goals) {
-            setWeeklyGoal(payload.new.goals.weekly   || "");
-            setMonthlyGoal(payload.new.goals.monthly || "");
-            if (payload.new.goals.liveData?.profitLog) {
-              setLiveData(prev => ({ ...prev, profitLog: payload.new.goals.liveData.profitLog }));
-            }
-          }
-          setStorageStatus("saved");
-        }
+        (payload) => applyRemotePayload(payload.new)
       )
       .subscribe();
-    return () => supabase.removeChannel(channel);
-  }, []);
+  }, [applyRemotePayload]);
+
+  useEffect(() => {
+    subscribeRealtime();
+    return () => { if (channelRef.current) supabase.removeChannel(channelRef.current); };
+  }, [subscribeRealtime]);
+
+  /* ── Visibility handler — re-fetch + reconnect when app comes to foreground ── */
+  useEffect(() => {
+    const onVisible = async () => {
+      if (document.visibilityState !== "visible") return;
+      // Re-fetch latest from Supabase and merge
+      try {
+        const { data } = await supabase
+          .from("app_state").select("*").eq("id", 1).single();
+        if (data) applyRemotePayload(data);
+      } catch (_) {}
+      // Reconnect real-time if channel dropped
+      const state = channelRef.current?.state;
+      if (state === "closed" || state === "errored" || !state) {
+        subscribeRealtime();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
+  }, [applyRemotePayload, subscribeRealtime]);
 
   /* ── Debounced save — fires 800ms after last change ── */
   const saveTimer      = useRef(null);
