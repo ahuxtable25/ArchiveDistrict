@@ -1011,7 +1011,13 @@ function EditStockDrawer({ stock, derived, onSave, onDelete, onClose, onAddListi
             </div>
             <div className="fr">
               <label className="fl">Date Received</label>
-              <input className="finp" type="date" value={form.dateArrived} onChange={e => set("dateArrived", e.target.value)} />
+              <div style={{display:"flex",alignItems:"center",gap:6}}>
+                <input className="finp" style={{flex:1}} type="date" value={form.dateArrived||""} onChange={e => set("dateArrived", e.target.value)} />
+                {form.dateArrived && (
+                  <button type="button" onClick={() => set("dateArrived", "")}
+                    style={{background:"none",border:"none",cursor:"pointer",color:"var(--txd)",fontSize:16,padding:"0 4px",lineHeight:1}}>×</button>
+                )}
+              </div>
             </div>
           </div>
           <div className="fr">
@@ -1250,8 +1256,14 @@ function AddStockModal({ stockData, onAdd, onClose }) {
             </div>
             <div className="fr">
               <label className="fl">Date Received</label>
-              <input className="finp" type="date" value={form.dateArrived}
-                onChange={e => set("dateArrived", e.target.value)} />
+              <div style={{display:"flex",alignItems:"center",gap:6}}>
+                <input className="finp" style={{flex:1}} type="date" value={form.dateArrived||""}
+                  onChange={e => set("dateArrived", e.target.value)} />
+                {form.dateArrived && (
+                  <button type="button" onClick={() => set("dateArrived", "")}
+                    style={{background:"none",border:"none",cursor:"pointer",color:"var(--txd)",fontSize:16,padding:"0 4px",lineHeight:1}}>×</button>
+                )}
+              </div>
             </div>
           </div>
           <div className="fr">
@@ -5863,8 +5875,10 @@ function Growth({ listings, stockData }) {
               {weeks.map((w,i)=>(
                 <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2,height:"100%",justifyContent:"flex-end"}}>
                   <div style={{width:"100%",position:"relative",height:"100%",display:"flex",flexDirection:"column",justifyContent:"flex-end",gap:2}}>
-                    <div title={`Profit: ${fmt(w.profit)}`} style={{width:"100%",height:`${Math.round(Math.abs(w.profit)/maxProf*80)}%`,background:w.profit>=0?"var(--gn)":"var(--ac)",borderRadius:"2px 2px 0 0",opacity:.7,minHeight:w.profit?2:0}}/>
-                    <div title={`Revenue: ${fmt(w.revenue)}`} style={{width:"100%",height:`${Math.round(w.revenue/maxRev*80)}%`,background:"var(--acl)",border:"1px solid var(--ac2)",borderRadius:"2px 2px 0 0",minHeight:w.revenue?2:0}}/>
+                    <div style={{width:"100%",height:"100%",position:"relative"}}>
+                      <div title={`Revenue: ${fmt(w.revenue)}`} style={{position:"absolute",bottom:0,left:0,right:0,height:`${Math.round(w.revenue/maxRev*100)}%`,background:"var(--acl)",border:"1px solid var(--ac2)",borderRadius:"2px 2px 0 0",minHeight:w.revenue?2:0}}/>
+                      <div title={`Profit: ${fmt(w.profit)}`} style={{position:"absolute",bottom:0,left:"15%",right:"15%",height:`${Math.round(Math.max(0,w.profit)/maxRev*100)}%`,background:w.profit>=0?"var(--gn)":"var(--ac)",borderRadius:"2px 2px 0 0",opacity:.85,minHeight:w.profit?2:0}}/>
+                    </div>
                   </div>
                   <div style={{fontSize:9,color:"var(--txd)",whiteSpace:"nowrap",transform:"rotate(-45deg)",transformOrigin:"center",marginTop:4,width:30,textAlign:"center"}}>{w.label}</div>
                 </div>
