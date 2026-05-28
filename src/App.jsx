@@ -6730,9 +6730,10 @@ export default function App() {
   /* JSON backup/restore */
   const exportJSON = () => {
     // Compute history snapshot at export time
+    const exportNow = new Date(); // fresh date at export time, not stale NOW constant
     const monthKeys = [];
     let _d = new Date(2024, 10, 1);
-    while (_d <= NOW) {
+    while (_d <= exportNow) {
       monthKeys.push(`${_d.getFullYear()}-${String(_d.getMonth()+1).padStart(2,'0')}`);
       _d = new Date(_d.getFullYear(), _d.getMonth()+1, 1);
     }
@@ -6772,13 +6773,21 @@ export default function App() {
       });
     }
     historyWeeks.reverse();
+    let historySnapshot = { months: historyMonths, weeks: historyWeeks };
+    try {
+      // Validate it serialises correctly
+      JSON.stringify(historySnapshot);
+    } catch(e) {
+      console.warn("History snapshot failed:", e);
+      historySnapshot = { months: [], weeks: [], error: String(e) };
+    }
     const payload = JSON.stringify({
       exportDate: TODAY,
       listings,
       stock: stockData,
       goals: { weekly:weeklyGoal, monthly:monthlyGoal },
       liveData,
-      history: { months: historyMonths, weeks: historyWeeks },
+      history: historySnapshot,
     }, null, 2);
     const a = document.createElement("a");
     a.href = "data:application/json;charset=utf-8," + encodeURIComponent(payload);
@@ -6793,11 +6802,14 @@ export default function App() {
         const d = JSON.parse(ev.target.result);
         if (d.listings) setListingsRaw(d.listings);
         if (d.stock)    setStockDataRaw(d.stock);
+        if (d.goals?.weekly)  setWeeklyGoal(d.goals.weekly);
+        if (d.goals?.monthly) setMonthlyGoal(d.goals.monthly);
+        if (d.liveData)       setLiveData(d.liveData);
         setStorageStatus("loading");
         const ok = await saveState(
           d.listings || listings,
           d.stock    || stockData,
-          { weekly: weeklyGoal, monthly: monthlyGoal }
+          { weekly: d.goals?.weekly || weeklyGoal, monthly: d.goals?.monthly || monthlyGoal }
         );
         if (ok) {
           setStorageStatus("saved");
