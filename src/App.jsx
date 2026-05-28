@@ -179,7 +179,7 @@ const getTag = (name, type, brand, listings) => {
   const items = listings.filter(l=>l.name===name&&l.type===type&&l.brand===brand&&l.listed);
   const sold  = items.filter(l=>l.sold&&l.days!==null);
   if (!sold.length) return "UNKNOWN";          // 0 sold — no data
-  if (sold.length < 3) return "NEW";           // 1–2 sold — too early to classify
+  if (sold.length < 3 && sold.length < items.length) return "NEW"; // too early only if unsold items remain
   const t = items.length;
   const p = (n)=>t?Math.round(sold.filter(l=>l.days<=n).length/t*100):0;
   const [p7,p14,p30,p42] = [p(7),p(14),p(30),p(42)];
@@ -995,9 +995,15 @@ function EditStockDrawer({ stock, derived, onSave, onDelete, onClose, onAddListi
           <div className="fr2">
             <div className="fr">
               <label className="fl">Website</label>
-              <select className="fsel" value={form.website} onChange={e => set("website", e.target.value)}>
+              <select className="fsel" value={WEBSITES.includes(form.website)&&form.website!=="Other"?form.website:"Other"}
+                onChange={e => set("website", e.target.value === "Other" ? "" : e.target.value)}>
                 {WEBSITES.map(w => <option key={w}>{w}</option>)}
               </select>
+              {(!WEBSITES.includes(form.website)||form.website==="Other"||!form.website) && (
+                <input className="finp" style={{marginTop:5}} placeholder="Type website / source..."
+                  value={WEBSITES.includes(form.website)&&form.website!=="Other"?"":form.website}
+                  onChange={e => set("website", e.target.value)} />
+              )}
             </div>
             <div className="fr">
               <label className="fl">Seller</label>
@@ -1238,9 +1244,15 @@ function AddStockModal({ stockData, onAdd, onClose }) {
           <div className="fr2">
             <div className="fr">
               <label className="fl">Website / Source</label>
-              <select className="fsel" value={form.website} onChange={e => set("website", e.target.value)}>
+              <select className="fsel" value={WEBSITES.includes(form.website)&&form.website!=="Other"?form.website:"Other"}
+                onChange={e => set("website", e.target.value === "Other" ? "" : e.target.value)}>
                 {WEBSITES.map(w => <option key={w}>{w}</option>)}
               </select>
+              {(!WEBSITES.includes(form.website)||form.website==="Other"||!form.website) && (
+                <input className="finp" style={{marginTop:5}} placeholder="Type website / source..."
+                  value={WEBSITES.includes(form.website)&&form.website!=="Other"?"":form.website}
+                  onChange={e => set("website", e.target.value)} />
+              )}
             </div>
             <div className="fr">
               <label className="fl">Seller</label>
@@ -3188,7 +3200,7 @@ function MovementTracker({ listings }) {
         <span style={{color:"#7a4e0e",fontWeight:700}}>MEDIUM</span> = 50%+ in 14d &nbsp;·&nbsp;
         <span style={{color:"var(--ac)",fontWeight:700}}>SLOW</span> = &lt;50% by 30d &nbsp;·&nbsp;
         <span style={{color:"#7a1020",fontWeight:700}}>DEAD</span> = sold some but none within 42d &nbsp;·&nbsp;
-        <span style={{color:"#2a4a9a",fontWeight:700}}>NEW</span> = 1–2 sold, too early to classify &nbsp;·&nbsp;
+        <span style={{color:"#2a4a9a",fontWeight:700}}>NEW</span> = 1–2 sold with unsold items remaining — too early to classify &nbsp;·&nbsp;
         <strong>UNKNOWN</strong> = 0 sold yet
       </div>
     </div>
