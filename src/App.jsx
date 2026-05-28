@@ -729,7 +729,7 @@ nav::-webkit-scrollbar-thumb{background:var(--bd);border-radius:2px}
 ═══════════════════════════════════════════════════════════════ */
 function exportToCSV(rows, colDefs, filename) {
   if (!rows.length) { alert("Nothing to export — check your filters."); return; }
-  const visCols = colDefs.filter(c => c.visible !== false && c.id !== "sel" && c.id !== "photo");
+  const visCols = colDefs.filter(c => c.id !== "sel" && c.id !== "photo"); // export all cols regardless of visibility
   const header  = visCols.map(c => c.label || c.id);
   const body    = rows.map(row =>
     visCols.map(c => {
@@ -6729,7 +6729,57 @@ export default function App() {
 
   /* JSON backup/restore */
   const exportJSON = () => {
-    const payload = JSON.stringify({ exportDate:TODAY, listings, stock:stockData, goals:{ weekly:weeklyGoal, monthly:monthlyGoal }, liveData }, null, 2);
+    // Compute history snapshot at export time
+    const monthKeys = [];
+    let _d = new Date(2024, 10, 1);
+    while (_d <= NOW) {
+      monthKeys.push(`${_d.getFullYear()}-${String(_d.getMonth()+1).padStart(2,'0')}`);
+      _d = new Date(_d.getFullYear(), _d.getMonth()+1, 1);
+    }
+    const historyMonths = monthKeys.map(mk => {
+      const [y,mo] = mk.split("-");
+      const mL = listings.filter(l => l.sold && l.daySold?.startsWith(mk));
+      const mS = stockData.filter(s => s.datePurchased?.startsWith(mk));
+      const pLog = liveData?.profitLog || [];
+      return {
+        label: new Date(+y,+mo-1,1).toLocaleDateString("en-GB",{month:"short",year:"numeric"}),
+        month: mk,
+        sold: mL.length,
+        proceeds: mL.reduce((a,l)=>a+(l.soldPrice||0),0),
+        profit:   mL.reduce((a,l)=>a+(l.profit||0),0),
+        profitKept: pLog.filter(e=>e.date?.startsWith(mk)).reduce((a,e)=>a+e.amount,0),
+        stockQty:   mS.reduce((a,s)=>a+(s.sellable||0),0),
+        stockSpend: mS.reduce((a,s)=>a+(s.totalCost||s.sellable*s.costPer||0),0),
+      };
+    }).reverse();
+    const historyWeeks = [];
+    for (let i=15; i>=0; i--) {
+      const ws = new Date(_wsd); ws.setDate(ws.getDate()-i*7);
+      const we = new Date(ws);   we.setDate(we.getDate()+6);
+      const wsStr = localDateStr(ws), weStr = localDateStr(we);
+      const wSold = listings.filter(l=>l.sold&&l.daySold>=wsStr&&l.daySold<=weStr);
+      const wStock = stockData.filter(s=>s.datePurchased>=wsStr&&s.datePurchased<=weStr);
+      const pLog = liveData?.profitLog || [];
+      historyWeeks.push({
+        label: ws.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"2-digit"}),
+        weekStart: wsStr, weekEnd: weStr,
+        listed:     listings.filter(l=>l.dayListed>=wsStr&&l.dayListed<=weStr).length,
+        sold:       wSold.length,
+        revenue:    wSold.reduce((a,l)=>a+(l.soldPrice||0),0),
+        profit:     wSold.reduce((a,l)=>a+(l.profit||0),0),
+        profitKept: pLog.filter(e=>e.week===wsStr).reduce((a,e)=>a+e.amount,0),
+        stockSpend: wStock.reduce((a,s)=>a+(s.totalCost||s.sellable*s.costPer||0),0),
+      });
+    }
+    historyWeeks.reverse();
+    const payload = JSON.stringify({
+      exportDate: TODAY,
+      listings,
+      stock: stockData,
+      goals: { weekly:weeklyGoal, monthly:monthlyGoal },
+      liveData,
+      history: { months: historyMonths, weeks: historyWeeks },
+    }, null, 2);
     const a = document.createElement("a");
     a.href = "data:application/json;charset=utf-8," + encodeURIComponent(payload);
     a.download = `archivedistrict_${TODAY}.json`;
