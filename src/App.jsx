@@ -5140,47 +5140,71 @@ function ShippingTab({ listings, setListings }) {
 /* ═══════════════════════════════════════════════════════════════
    DASHBOARD — Command 9
 ═══════════════════════════════════════════════════════════════ */
-function GoalCard({ title, period, profit, goal, setGoal, val, pct, avgProfit }) {
+function GoalCard({ title, period, profit, revenue, profitGoal, setProfit, profitVal, profitPct, revGoal, setRev, revVal, revPct, avgProfit, modeKey }) {
+  const [mode, setModeState] = React.useState(() => {
+    try { return localStorage.getItem(modeKey) || "profit"; } catch { return "profit"; }
+  });
+  const toggleMode = () => {
+    const next = mode === "profit" ? "revenue" : "profit";
+    setModeState(next);
+    try { localStorage.setItem(modeKey, next); } catch {}
+  };
+  const isProfit  = mode === "profit";
+  const actual    = isProfit ? profit   : revenue;
+  const goal      = isProfit ? profitGoal : revGoal;
+  const setGoal   = isProfit ? setProfit  : setRev;
+  const val       = isProfit ? profitVal  : revVal;
+  const pct       = isProfit ? profitPct  : revPct;
+  const secondary = isProfit ? revenue    : profit;
+  const secLabel  = isProfit ? "revenue"  : "profit";
+  const barColor  = pct>=100 ? "var(--gn)" : pct>=60 ? "var(--am)" : "var(--ac)";
   return (
     <div style={{background:"var(--sf)",border:"1px solid var(--bd)",borderRadius:"var(--r2)",padding:"14px 15px",boxShadow:"var(--sh)"}}>
-      <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".5px",color:"var(--txm)",marginBottom:3}}>{title}</div>
+      {/* Header row with title and mode toggle */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:2}}>
+        <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".5px",color:"var(--txm)"}}>{title}</div>
+        {/* Toggle switch */}
+        <div style={{display:"flex",alignItems:"center",gap:5,cursor:"pointer"}} onClick={toggleMode}>
+          <span style={{fontSize:9,color:"var(--txd)",fontWeight:700}}>{isProfit?"PROFIT":"REVENUE"}</span>
+          <div style={{width:30,height:17,borderRadius:9,background:isProfit?"var(--nv)":"var(--gn)",position:"relative",transition:"background .2s",flexShrink:0}}>
+            <div style={{width:13,height:13,borderRadius:"50%",background:"#fff",position:"absolute",top:2,left:isProfit?2:15,transition:"left .2s",boxShadow:"0 1px 3px rgba(0,0,0,.25)"}}/>
+          </div>
+        </div>
+      </div>
       <div style={{fontSize:11,color:"var(--txd)",marginBottom:9}}>{period}</div>
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
         <span style={{fontSize:11,color:"var(--txm)"}}>Target: £</span>
         <input
-          type="text"
-          inputMode="decimal"
-          value={val}
-          onChange={e => {
-            const v = e.target.value;
-            if (/^\d*\.?\d*$/.test(v)) setGoal(v);
-          }}
+          type="text" inputMode="decimal" value={val}
+          onChange={e => { const v=e.target.value; if(/^\d*\.?\d*$/.test(v)) setGoal(v); }}
           placeholder="0"
           style={{width:80,background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:"var(--r)",padding:"4px 8px",fontFamily:"Arial,sans-serif",fontSize:13,fontWeight:700,outline:"none",color:"var(--tx)"}}
         />
         {goal > 0 && (
-          <span style={{fontSize:12,fontWeight:700,color:pct>=100?"var(--gn)":pct>=60?"var(--am)":"var(--txm)"}}>
-            {pct}%
-          </span>
+          <span style={{fontSize:12,fontWeight:700,color:barColor}}>{pct}%</span>
         )}
       </div>
       <div style={{height:7,background:"var(--sf2)",borderRadius:4,overflow:"hidden",marginBottom:5}}>
-        <div style={{height:"100%",borderRadius:4,width:`${pct}%`,background:pct>=100?"var(--gn)":pct>=60?"var(--am)":"var(--ac)",transition:"width .5s ease"}} />
+        <div style={{height:"100%",borderRadius:4,width:`${pct}%`,background:barColor,transition:"width .5s ease"}} />
       </div>
       <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"var(--txm)"}}>
-        <span style={{fontWeight:700,color:"var(--gn)"}}>{fmt(profit)} made</span>
-        {goal > 0 && <span>{pct<100 ? `${fmt(goal-profit)} to go` : "🎉 Goal hit!"}</span>}
+        <span style={{fontWeight:700,color:"var(--gn)"}}>{fmt(actual)} {isProfit?"made":"revenue"}</span>
+        {goal > 0 && <span>{pct<100 ? `${fmt(goal-actual)} to go` : "🎉 Goal hit!"}</span>}
       </div>
-      {goal>0 && pct<100 && avgProfit>0 && (
-        <div style={{fontSize:11,color:"var(--txd)",marginTop:4}}>
-          ≈ {Math.ceil((goal-profit)/avgProfit)} more sales at avg {fmt(avgProfit)}
+      {/* Secondary metric */}
+      <div style={{fontSize:10,color:"var(--txd)",marginTop:5}}>
+        {fmt(secondary)} {secLabel} this period
+      </div>
+      {isProfit && goal>0 && pct<100 && avgProfit>0 && (
+        <div style={{fontSize:10,color:"var(--txd)",marginTop:1}}>
+          ≈ {Math.ceil((goal-actual)/avgProfit)} more sales at avg {fmt(avgProfit)}
         </div>
       )}
     </div>
   );
 }
 
-function Dashboard({ listings, stockData, weeklyGoal, setWeeklyGoal, monthlyGoal, setMonthlyGoal }) {
+function Dashboard({ listings, stockData, weeklyGoal, setWeeklyGoal, monthlyGoal, setMonthlyGoal, weeklyRevGoal, setWeeklyRevGoal, monthlyRevGoal, setMonthlyRevGoal }) {
   const sold    = listings.filter(l => l.sold);
   const active  = listings.filter(l => l.listed && !l.sold);
   const soldWk  = listings.filter(l => l.sold && l.daySold && l.daySold >= WEEK_START);
@@ -5194,12 +5218,18 @@ function Dashboard({ listings, stockData, weeklyGoal, setWeeklyGoal, monthlyGoal
   // avgProfit per sale = avg (soldPrice - costPerItem) using per-listing profit field
   const avgProfit     = sold.length ? sold.reduce((a,l)=>a+(l.profit||0),0)/sold.length : 0;
 
-  const wkProfit = soldWk.reduce((a,l) => a+(l.profit||0), 0);
-  const moProfit = soldMo.reduce((a,l) => a+(l.profit||0), 0);
-  const wg = parseFloat(weeklyGoal)||0;
-  const mg = parseFloat(monthlyGoal)||0;
-  const wPct = wg ? Math.min(100, Math.round(wkProfit/wg*100)) : 0;
-  const mPct = mg ? Math.min(100, Math.round(moProfit/mg*100)) : 0;
+  const wkProfit  = soldWk.reduce((a,l) => a+(l.profit||0), 0);
+  const moProfit  = soldMo.reduce((a,l) => a+(l.profit||0), 0);
+  const wkRevenue = soldWk.reduce((a,l) => a+(l.soldPrice||0), 0);
+  const moRevenue = soldMo.reduce((a,l) => a+(l.soldPrice||0), 0);
+  const wg  = parseFloat(weeklyGoal)||0;
+  const mg  = parseFloat(monthlyGoal)||0;
+  const wrg = parseFloat(weeklyRevGoal)||0;
+  const mrg = parseFloat(monthlyRevGoal)||0;
+  const wPct  = wg  ? Math.min(100, Math.round(wkProfit/wg*100))   : 0;
+  const mPct  = mg  ? Math.min(100, Math.round(moProfit/mg*100))   : 0;
+  const wrPct = wrg ? Math.min(100, Math.round(wkRevenue/wrg*100)) : 0;
+  const mrPct = mrg ? Math.min(100, Math.round(moRevenue/mrg*100)) : 0;
 
 
 
@@ -5225,13 +5255,19 @@ function Dashboard({ listings, stockData, weeklyGoal, setWeeklyGoal, monthlyGoal
       {/* Goal cards */}
       <div className="two-col" style={{marginBottom:16}}>
         <GoalCard
-          title="Weekly Profit Goal" period={`w/c ${WEEK_START}`}
-          profit={wkProfit} goal={wg} setGoal={setWeeklyGoal} val={weeklyGoal} pct={wPct} avgProfit={avgProfit}
+          title="Weekly Goal" period={`w/c ${WEEK_START}`}
+          profit={wkProfit} revenue={wkRevenue}
+          profitGoal={wg} setProfit={setWeeklyGoal} profitVal={weeklyGoal} profitPct={wPct}
+          revGoal={wrg} setRev={setWeeklyRevGoal} revVal={weeklyRevGoal} revPct={wrPct}
+          avgProfit={avgProfit} modeKey="weeklyGoalMode"
         />
         <GoalCard
-          title="Monthly Profit Goal"
+          title="Monthly Goal"
           period={NOW.toLocaleDateString("en-GB",{month:"long",year:"numeric"})}
-          profit={moProfit} goal={mg} setGoal={setMonthlyGoal} val={monthlyGoal} pct={mPct} avgProfit={avgProfit}
+          profit={moProfit} revenue={moRevenue}
+          profitGoal={mg} setProfit={setMonthlyGoal} profitVal={monthlyGoal} profitPct={mPct}
+          revGoal={mrg} setRev={setMonthlyRevGoal} revVal={monthlyRevGoal} revPct={mrPct}
+          avgProfit={avgProfit} modeKey="monthlyGoalMode"
         />
       </div>
 
@@ -6339,6 +6375,8 @@ export default function App() {
   const [stockData,       setStockDataRaw]    = useState(STOCK_INIT);
   const [weeklyGoal,      setWeeklyGoal]      = useState("");
   const [monthlyGoal,     setMonthlyGoal]     = useState("");
+  const [weeklyRevGoal,   setWeeklyRevGoal]   = useState("");
+  const [monthlyRevGoal,  setMonthlyRevGoal]  = useState("");
   const [liveData, setLiveDataRaw] = useState(() => {
     // Load from localStorage as fallback (survives Supabase failures)
     try {
@@ -6474,8 +6512,10 @@ export default function App() {
           if (data.listings?.length)    setListingsRaw(data.listings);
           if (data.stock_data?.length)  setStockDataRaw(data.stock_data);
           if (data.goals) {
-            setWeeklyGoal(data.goals.weekly   || "");
-            setMonthlyGoal(data.goals.monthly || "");
+            setWeeklyGoal(data.goals.weekly      || "");
+            setMonthlyGoal(data.goals.monthly    || "");
+            setWeeklyRevGoal(data.goals.weeklyRev   || "");
+            setMonthlyRevGoal(data.goals.monthlyRev || "");
             if (data.goals.liveData) setLiveData(data.goals.liveData);
           }
           setStorageStatus("saved");
@@ -6605,8 +6645,8 @@ export default function App() {
 
   /* Trigger save whenever data changes */
   useEffect(() => {
-    debouncedSave(listings, stockData, { weekly: weeklyGoal, monthly: monthlyGoal, liveData });
-  }, [listings, stockData, weeklyGoal, monthlyGoal, liveData, debouncedSave]);
+    debouncedSave(listings, stockData, { weekly: weeklyGoal, monthly: monthlyGoal, weeklyRev: weeklyRevGoal, monthlyRev: monthlyRevGoal, liveData });
+  }, [listings, stockData, weeklyGoal, monthlyGoal, weeklyRevGoal, monthlyRevGoal, liveData, debouncedSave]);
 
   /* ── beforeunload — always save to localStorage on tab close ── */
   useEffect(() => {
@@ -6676,7 +6716,7 @@ export default function App() {
     const ts = new Date().toISOString();
     lastSaveTs.current = ts;
     setTimeout(() => { isRemoteUpdate.current = false; }, 2000);
-    const ok = await saveState(listings, stockData, { weekly: weeklyGoal, monthly: monthlyGoal, liveData });
+    const ok = await saveState(listings, stockData, { weekly: weeklyGoal, monthly: monthlyGoal, weeklyRev: weeklyRevGoal, monthlyRev: monthlyRevGoal, liveData });
     saveLocalVersion(listings, stockData);
     const time = new Date().toLocaleTimeString("en-GB", { hour:"2-digit", minute:"2-digit" });
     setHardSaveMsg(ok ? `✓ Saved at ${time} — ${listings.length} listings` : "✗ Save failed — check connection");
@@ -6699,8 +6739,10 @@ export default function App() {
           if (data.listings?.length)    setListingsRaw(data.listings);
           if (data.stock_data?.length)  setStockDataRaw(data.stock_data);
           if (data.goals) {
-            setWeeklyGoal(data.goals.weekly   || "");
-            setMonthlyGoal(data.goals.monthly || "");
+            setWeeklyGoal(data.goals.weekly      || "");
+            setMonthlyGoal(data.goals.monthly    || "");
+            setWeeklyRevGoal(data.goals.weeklyRev   || "");
+            setMonthlyRevGoal(data.goals.monthlyRev || "");
             if (data.goals.liveData) setLiveData(data.goals.liveData);
           }
           setStorageStatus("saved");
@@ -6781,11 +6823,14 @@ export default function App() {
       console.warn("History snapshot failed:", e);
       historySnapshot = { months: [], weeks: [], error: String(e) };
     }
+    // Include derived stock data (with sellThru, profit, etc.) alongside raw
+    const stockDerived = deriveStock(stockData, listings);
     const payload = JSON.stringify({
       exportDate: TODAY,
       listings,
       stock: stockData,
-      goals: { weekly:weeklyGoal, monthly:monthlyGoal },
+      stockDerived,
+      goals: { weekly:weeklyGoal, monthly:monthlyGoal, weeklyRev:weeklyRevGoal, monthlyRev:monthlyRevGoal },
       liveData,
       history: historySnapshot,
     }, null, 2);
@@ -6802,14 +6847,16 @@ export default function App() {
         const d = JSON.parse(ev.target.result);
         if (d.listings) setListingsRaw(d.listings);
         if (d.stock)    setStockDataRaw(d.stock);
-        if (d.goals?.weekly)  setWeeklyGoal(d.goals.weekly);
-        if (d.goals?.monthly) setMonthlyGoal(d.goals.monthly);
+        if (d.goals?.weekly)     setWeeklyGoal(d.goals.weekly);
+        if (d.goals?.monthly)    setMonthlyGoal(d.goals.monthly);
+        if (d.goals?.weeklyRev)  setWeeklyRevGoal(d.goals.weeklyRev);
+        if (d.goals?.monthlyRev) setMonthlyRevGoal(d.goals.monthlyRev);
         if (d.liveData)       setLiveData(d.liveData);
         setStorageStatus("loading");
         const ok = await saveState(
           d.listings || listings,
           d.stock    || stockData,
-          { weekly: d.goals?.weekly || weeklyGoal, monthly: d.goals?.monthly || monthlyGoal }
+          { weekly: d.goals?.weekly || weeklyGoal, monthly: d.goals?.monthly || monthlyGoal, weeklyRev: d.goals?.weeklyRev || weeklyRevGoal, monthlyRev: d.goals?.monthlyRev || monthlyRevGoal }
         );
         if (ok) {
           setStorageStatus("saved");
@@ -6967,7 +7014,7 @@ export default function App() {
           </div>
 
           <div className="content">
-            {view==="dashboard"   && <Dashboard listings={listings} stockData={stockData} weeklyGoal={weeklyGoal} setWeeklyGoal={setWeeklyGoal} monthlyGoal={monthlyGoal} setMonthlyGoal={setMonthlyGoal} />}
+            {view==="dashboard"   && <Dashboard listings={listings} stockData={stockData} weeklyGoal={weeklyGoal} setWeeklyGoal={setWeeklyGoal} monthlyGoal={monthlyGoal} setMonthlyGoal={setMonthlyGoal} weeklyRevGoal={weeklyRevGoal} setWeeklyRevGoal={setWeeklyRevGoal} monthlyRevGoal={monthlyRevGoal} setMonthlyRevGoal={setMonthlyRevGoal} />}
             {view==="stock"       && <StockTab stockData={stockData} setStockData={setStockData} listings={listings} setListings={setListings} />}
             {view==="listings"    && <ListingsTab listings={listings} setListings={setListings} stockData={stockData} />}
             {view==="movement"    && <MovementTracker listings={listings} />}
