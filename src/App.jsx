@@ -5777,7 +5777,9 @@ function Analytics({ listings, stockData }) {
         : s.qtyRemaining<=4||tag==="MEDIUM"            ? "high"
         : "watch";
       return {...s, tag, urgency, autoFlag};
-    }).filter(Boolean).sort((a,b)=>
+    }).filter(Boolean)
+    .filter((item,idx,arr)=>arr.findIndex(x=>x.bundleSku===item.bundleSku&&x.name===item.name)===idx)
+    .sort((a,b)=>
       ["critical","high","watch"].indexOf(a.urgency)-["critical","high","watch"].indexOf(b.urgency)
     );
   }, [derived, listings]);
@@ -5866,7 +5868,7 @@ function Analytics({ listings, stockData }) {
               <tbody>
                 {restockItems.map((r,i)=>(
                   <tr key={i}>
-                    <td style={{fontWeight:700}}>{r.name.length>26?r.name.slice(0,26)+"…":r.name}</td>
+                    <td style={{fontWeight:700,fontSize:11}}>{r.name}</td>
                     <td><span style={{fontWeight:700,color:r.qtyRemaining<=2?"var(--ac)":r.qtyRemaining<=4?"var(--am)":"var(--tx)"}}>{r.qtyRemaining} left</span></td>
                     <td>
                       <div style={{display:"flex",alignItems:"center",gap:6}}>
@@ -5932,8 +5934,8 @@ function Analytics({ listings, stockData }) {
         })()}
 
         <div className="tw">
-          <div className="ts">
-            <table className="tbl">
+          <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
+            <table className="tbl" style={{minWidth:500}}>
               <thead><tr>
                 <th>Platform</th><th>Listed</th><th>Sold</th><th>Sell-through</th>
                 <th>Avg Days</th><th>Avg Price</th><th>Revenue</th>
@@ -5978,7 +5980,8 @@ function Analytics({ listings, stockData }) {
               <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".6px",color:"var(--nv)",marginBottom:10}}>
                 Top Sellers on {selPlatData.name}
               </div>
-              <table className="tbl" style={{fontSize:11}}>
+              <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
+              <table className="tbl" style={{fontSize:11,minWidth:380}}>
                 <thead><tr>
                   <th>Item</th><th>Type</th><th>Sold</th><th>Avg Price</th><th>Avg Days</th>
                 </tr></thead>
@@ -5999,6 +6002,7 @@ function Analytics({ listings, stockData }) {
                   )}
                 </tbody>
               </table>
+              </div>
             </div>
           )}
         </div>
@@ -6273,9 +6277,9 @@ function Growth({ listings, stockData }) {
             A small green bar inside a large pink bar means thin margins that week — worth investigating which items sold.
           </InfoTip>
         </div>
-        <div style={{display:"flex",alignItems:"flex-end",gap:4,height:120}}>
+        <div style={{display:"flex",alignItems:"flex-end",gap:4,height:120,overflow:"hidden",minWidth:0}}>
           {weeks12.map((w,i)=>(
-            <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",height:"100%",justifyContent:"flex-end"}}>
+            <div key={i} style={{flex:"1 1 0",minWidth:0,display:"flex",flexDirection:"column",alignItems:"center",height:"100%",justifyContent:"flex-end"}}>
               <div style={{width:"100%",height:"100%",position:"relative"}}>
                 <div title={`Revenue: ${fmt(w.revenue)}`} style={{position:"absolute",bottom:0,left:0,right:0,
                   height:`${Math.round(w.revenue/maxRev*100)}%`,background:"var(--acl)",
