@@ -5141,7 +5141,7 @@ function ShippingTab({ listings, setListings }) {
    DASHBOARD — Command 9
 ═══════════════════════════════════════════════════════════════ */
 function GoalCard({ title, period, profit, revenue, profitGoal, setProfit, profitVal, profitPct, revGoal, setRev, revVal, revPct, avgProfit, modeKey }) {
-  const [mode, setModeState] = React.useState(() => {
+  const [mode, setModeState] = useState(() => {
     try { return localStorage.getItem(modeKey) || "profit"; } catch { return "profit"; }
   });
   const toggleMode = () => {
@@ -5680,74 +5680,136 @@ const SLOW_COLS = [
   {id:"dayListed",label:"Listed On", visible:false},
 ];
 
+function InfoTip({ children }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span style={{display:"inline-block",verticalAlign:"middle",marginLeft:6}}>
+      <span onClick={() => setOpen(v=>!v)}
+        style={{display:"inline-flex",alignItems:"center",justifyContent:"center",
+          width:16,height:16,borderRadius:"50%",background:open?"var(--nv)":"var(--sf2)",
+          border:"1px solid var(--bdd)",color:open?"#fff":"var(--txd)",
+          fontSize:9,fontWeight:900,cursor:"pointer",fontStyle:"italic",
+          fontFamily:"Georgia,serif",flexShrink:0,transition:"all .12s",userSelect:"none"}}>
+        i
+      </span>
+      {open && (
+        <div style={{background:"var(--nv)",color:"#fff",borderRadius:"var(--r2)",
+          padding:"12px 14px",fontSize:11,lineHeight:1.6,marginTop:8,
+          position:"relative",animation:"fadeIn .15s ease"}}>
+          <button onClick={() => setOpen(false)}
+            style={{position:"absolute",top:8,right:10,background:"rgba(255,255,255,.15)",
+              border:"none",color:"#fff",width:18,height:18,borderRadius:"50%",
+              cursor:"pointer",fontSize:11,lineHeight:"18px",textAlign:"center"}}>×</button>
+          {children}
+        </div>
+      )}
+    </span>
+  );
+}
+
 function Analytics({ listings, stockData }) {
-  const [slowCols,       setSlowCols]      = useState(SLOW_COLS);
-  const [showSlowCP,     setShowSlowCP]    = useState(false);
-  const [slowSortCol,    setSlowSortCol]   = useState("daysLive");
-  const [slowSortDir,    setSlowSortDir]   = useState("desc");
+  const [slowCols,    setSlowCols]   = useState(SLOW_COLS);
+  const [showSlowCP,  setShowSlowCP] = useState(false);
+  const [slowSortCol, setSlowSortCol]= useState("daysLive");
+  const [slowSortDir, setSlowSortDir]= useState("desc");
+  const [selPlat,     setSelPlat]    = useState(null);
 
   const derived = useMemo(() => deriveStock(stockData, listings), [stockData, listings]);
 
-  /* Slow movers — active listings 14+ days */
+  /* ── Platform performance ── */
+  const platformStats = useMemo(() => {
+    const plats = ["Depop","Vinted","eBay","Whatnot","Grailed","Facebook Marketplace"];
+    return plats.map(plat => {
+      const platListings = listings.filter(l =>
+        l.listed && (l.platforms?.includes(plat) || l.platform === plat)
+      );
+      const soldItems = platListings.filter(l => l.sold);
+      const revenue   = soldItems.reduce((a,l)=>a+(l.soldPrice||0),0);
+      const avgDays   = soldItems.length
+        ? soldItems.reduce((a,l)=>a+(l.days||0),0)/soldItems.length : 0;
+      const avgPrice  = soldItems.length ? revenue/soldItems.length : 0;
+      const sellThru  = platListings.length
+        ? Math.round(soldItems.length/platListings.length*100) : 0;
+      if (!platListings.length) return null;
+
+      /* Top 5 items by sold count on this platform */
+      const itemMap = {};
+      soldItems.forEach(l => {
+        const key = `${l.name}||${l.type||""}`;
+        if (!itemMap[key]) itemMap[key] = {name:l.name,type:l.type,sold:0,revenue:0,days:0};
+        itemMap[key].sold++;
+        itemMap[key].revenue += l.soldPrice||0;
+        itemMap[key].days    += l.days||0;
+      });
+      const topItems = Object.values(itemMap)
+        .sort((a,b)=>b.sold-a.sold).slice(0,5)
+        .map(it => ({...it,
+          avgPrice: it.sold ? it.revenue/it.sold : 0,
+          avgDays:  it.sold ? it.days/it.sold    : 0,
+        }));
+
+      return { name:plat, items:platListings.length, sold:soldItems.length,
+        revenue, avgDays, avgPrice, sellThru, topItems };
+    }).filter(Boolean);
+  }, [listings]);
+
+  const minDays  = platformStats.length ? Math.min(...platformStats.map(p=>p.avgDays||999)) : 0;
+  const maxPrice = platformStats.length ? Math.max(...platformStats.map(p=>p.avgPrice))     : 0;
+
+  /* ── Restock intelligence ── */
+  const restockItems = useMemo(() => {
+    return derived.map(s => {
+      const tag = (() => {
+        const items = listings.filter(l=>l.bundleSku===s.bundleSku&&l.name===s.name&&l.listed);
+        const sold  = items.filter(l=>l.sold&&l.days!=null);
+        if (!sold.length) return "UNKNOWN";
+        if (sold.length<3&&sold.length<items.length) return "NEW";
+        const t=items.length;
+        const p=n=>t?Math.round(sold.filter(l=>l.days<=n).length/t*100):0;
+        if(p(7)>=60||p(14)>=80) return "FAST";
+        if(p(14)>=50) return "MEDIUM";
+        if(p(42)===0) return "DEAD";
+        return "SLOW";
+      })();
+      const autoFlag = s.sellThru>=60 && (tag==="FAST"||tag==="MEDIUM") && s.qtyRemaining<=5;
+      if (!autoFlag && !s.restock) return null;
+      const urgency = s.qtyRemaining<=2&&tag==="FAST" ? "critical"
+        : s.qtyRemaining<=4||tag==="MEDIUM"            ? "high"
+        : "watch";
+      return {...s, tag, urgency, autoFlag};
+    }).filter(Boolean).sort((a,b)=>
+      ["critical","high","watch"].indexOf(a.urgency)-["critical","high","watch"].indexOf(b.urgency)
+    );
+  }, [derived, listings]);
+
+  /* ── Slow movers ── */
   const slowRaw = useMemo(() => listings
     .filter(l => l.listed && !l.sold && l.dayListed)
     .map(l => ({
       ...l,
-      daysLive: Math.max(0, Math.floor(
-        (new Date(TODAY) - new Date(l.dayListed)) / 86400000
-      )),
-      tag: getTag(l.name, l.type, l.brand, listings),
+      daysLive: Math.max(0,Math.floor((new Date(TODAY)-new Date(l.dayListed))/86400000)),
+      tag: getTag(l.name,l.type,l.brand,listings),
     }))
     .filter(l => l.daysLive >= 14),
   [listings]);
 
   const slowF = useTableFilters(slowRaw, slowCols);
-
   const slowSorted = useMemo(() => {
     if (!slowSortCol) return slowF.filtered;
     return [...slowF.filtered].sort((a,b) => {
       const av=a[slowSortCol], bv=b[slowSortCol];
-      if (av==null) return 1; if (bv==null) return -1;
-      const res = typeof av==="number" ? av-bv : String(av).localeCompare(String(bv));
-      return slowSortDir==="asc" ? res : -res;
+      if(av==null) return 1; if(bv==null) return -1;
+      const res=typeof av==="number"?av-bv:String(av).localeCompare(String(bv));
+      return slowSortDir==="asc"?res:-res;
     });
   }, [slowF.filtered, slowSortCol, slowSortDir]);
 
-  const onSlowSort = (col) => {
-    setSlowSortDir(d => slowSortCol===col ? (d==="asc"?"desc":"asc") : "desc");
+  const onSlowSort = col => {
+    setSlowSortDir(d=>slowSortCol===col?(d==="asc"?"desc":"asc"):"desc");
     setSlowSortCol(col);
   };
 
-  /* Bar chart helper */
-  const BarChart = ({ data, labelKey, valKey, colour, fmt: fmtFn, maxOverride }) => {
-    const max = maxOverride || Math.max(...data.map(d => d[valKey]), 1);
-    return (
-      <div>
-        {data.map((d,i) => (
-          <div key={i} className="ana-bar-row">
-            <div className="ana-bar-label" style={{width:160}}>{d[labelKey]}</div>
-            <div className="ana-bar-track">
-              <div className="ana-bar-fill" style={{
-                width:`${Math.round((d[valKey]/max)*100)}%`,
-                background: colour || "var(--ac)",
-              }}/>
-            </div>
-            <div className="ana-bar-val">{fmtFn ? fmtFn(d[valKey]) : d[valKey]}</div>
-          </div>
-        ))}
-      </div>
-    );
-  };
-
-  const revenueData = [...derived]
-    .sort((a,b) => b.netProceeds - a.netProceeds)
-    .map(s => ({ label: s.name.length > 22 ? s.name.slice(0,22)+"…" : s.name, val: s.netProceeds }));
-
-  const sellThruData = [...derived]
-    .sort((a,b) => b.sellThru - a.sellThru)
-    .map(s => ({ label: s.name.length > 22 ? s.name.slice(0,22)+"…" : s.name, val: s.sellThru, colour: s.sellThru>60?"var(--gn)":s.sellThru>30?"var(--am)":"var(--ac)" }));
-
-  const renderSlowCell = (col, l) => {
+  const renderSlowCell = (col,l) => {
     if (col==="sku")      return <span className="sku">{l.sku}</span>;
     if (col==="name")     return <span style={{fontWeight:600}}>{l.name}</span>;
     if (col==="colour")   return l.colour;
@@ -5756,141 +5818,342 @@ function Analytics({ listings, stockData }) {
     if (col==="daysLive") return <span style={{fontWeight:700,color:l.daysLive>30?"var(--ac)":l.daysLive>21?"var(--am)":"var(--tx)"}}>{l.daysLive}d</span>;
     if (col==="price")    return fmt(l.price);
     if (col==="bundleSku")return <span className="bsku">{l.bundleSku}</span>;
-    if (col==="platform") return l.platform ? <span className="badge b-b">{l.platform}</span> : <span style={{color:"var(--txd)"}}>—</span>;
+    if (col==="platform") return l.platform?<span className="badge b-b">{l.platform}</span>:<span style={{color:"var(--txd)"}}>—</span>;
     if (col==="dayListed")return <span style={{color:"var(--txm)",fontSize:11}}>{l.dayListed||"—"}</span>;
     return "—";
   };
+  const visSlow = slowCols.filter(c=>c.visible);
 
-  const visSlow = slowCols.filter(c => c.visible);
+  const selPlatData = platformStats.find(p=>p.name===selPlat);
 
   return (
     <div>
-      {/* Revenue + Sell-through charts */}
-      <div className="ana-cols" style={{marginBottom:14}}>
-        <div className="tw" style={{padding:"16px 18px"}}>
-          <div className="st" style={{marginBottom:12}}>Revenue by Bundle</div>
-          <BarChart
-            data={revenueData}
-            labelKey="label" valKey="val"
-            colour="#c4a882"
-            fmt={fmt}
-          />
+      {/* ── RESTOCK INTELLIGENCE ── */}
+      <div className="sh" style={{marginBottom:8}}>
+        <div className="st">Restock Intelligence
+          <InfoTip>
+            <strong>Auto-detected</strong> — no manual flagging needed.<br/><br/>
+            Criteria: sell-through ≥60% + FAST or MEDIUM tag + ≤5 remaining.<br/><br/>
+            <strong>⚠ Now</strong> = critically low on a fast seller.<br/>
+            <strong>↑ Soon</strong> = running low, order soon.<br/>
+            <strong>Watch</strong> = not urgent yet.
+          </InfoTip>
         </div>
-        <div className="tw" style={{padding:"16px 18px"}}>
-          <div className="st" style={{marginBottom:12}}>Sell-through %</div>
-          {sellThruData.map((d,i) => (
-            <div key={i} className="ana-bar-row">
-              <div className="ana-bar-label" style={{width:110}}>{d.label}</div>
-              <div className="ana-bar-track">
-                <div className="ana-bar-fill" style={{width:`${d.val}%`,background:d.colour}}/>
-              </div>
-              <div className="ana-bar-val">{d.val}%</div>
-            </div>
-          ))}
-        </div>
+        <div className="ss" style={{marginLeft:4}}>Auto-detected + manually flagged</div>
       </div>
 
-      {/* Slow Movers table */}
-      <div className="sh">
-        <div className="st">
-          Slow Movers — 14+ Days Unsold
-          <span className="ss">{slowSorted.length} item{slowSorted.length!==1?"s":""}</span>
-        </div>
-      </div>
-
-      <div className="filter-bar" style={{paddingBottom:10}}>
-        <div style={{flex:1}}/>
-        <div style={{position:"relative"}}>
-          <button className="btn btn-o btn-sm" onClick={()=>slowF.setShowPanel(v=>!v)}>
-            ⚡ Filters {slowF.activeFilters.length>0 && <span style={{background:"var(--ac)",color:"#fff",borderRadius:10,padding:"0 5px",fontSize:9,marginLeft:3}}>{slowF.activeFilters.length}</span>}
-          </button>
-          {slowF.showPanel && (
-            <FilterPanel colDefs={slowCols} rows={slowRaw}
-              filters={slowF.filters} setFilter={slowF.setFilter}
-              clearAll={slowF.clearAll} onClose={()=>slowF.setShowPanel(false)} />
-          )}
-        </div>
-        <div style={{position:"relative"}}>
-          <button className="btn btn-o btn-sm" onClick={()=>setShowSlowCP(v=>!v)}>⚙ Columns</button>
-          {showSlowCP && <ColPanel cols={slowCols} setCols={setSlowCols} onClose={()=>setShowSlowCP(false)} />}
-        </div>
-        <button className="btn btn-o btn-sm"
-          onClick={()=>exportToCSV(slowSorted, slowCols, "slow_movers")}>
-          ↓ CSV
-        </button>
-      </div>
-
-      <FilterChips colDefs={slowCols} activeFilters={slowF.activeFilters} clearFilter={slowF.clearFilter} clearAll={slowF.clearAll} />
-
-      <div className="tw"><div className="ts">
-        <table className="tbl">
-          <thead>
-            <tr>
-              {visSlow.map(c => (
-                <STh key={c.id} col={c.id} sortCol={slowSortCol} sortDir={slowSortDir} onSort={onSlowSort}>
-                  {c.label}
-                </STh>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {slowSorted.length===0 ? (
-              <tr><td colSpan={visSlow.length} style={{textAlign:"center",padding:26,color:"var(--txd)"}}>
-                {slowRaw.length===0 ? "No listings have been unsold for 14+ days. 🎉" : "No items match filters."}
-              </td></tr>
-            ) : slowSorted.map(l => (
-              <tr key={l.sku}>
-                {visSlow.map(c => <td key={c.id}>{renderSlowCell(c.id, l)}</td>)}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div></div>
-
-      {/* Restock recommendations */}
-      {derived.filter(s=>s.restock).length > 0 && (
-        <div style={{marginTop:14}}>
-          <div className="st" style={{marginBottom:10}}>Restock Recommendations</div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:10}}>
-            {derived.filter(s=>s.restock).map(s => (
-              <div key={`${s.bundleSku}-${s.name}`} style={{padding:"11px 13px",border:"1px solid var(--bd)",borderRadius:"var(--r2)",background:"var(--sf)",boxShadow:"var(--sh)"}}>
-                <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-                  <span style={{fontWeight:700,fontSize:12}}>{s.name.length>24?s.name.slice(0,24)+"…":s.name}</span>
-                  <span className="badge b-r">Restock</span>
-                </div>
-                <div style={{fontSize:11,color:"var(--txm)"}}>
-                  {fmt(s.avgProfit)} avg profit · {s.sellThru}% sell-through · {s.qtyRemaining} left
-                </div>
+      {restockItems.length > 0 ? (
+        <>
+          <div className="kg3" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:12}}>
+            {[
+              {l:"Restock Now",  v:restockItems.filter(r=>r.urgency==="critical").length, c:"var(--ac)"},
+              {l:"Restock Soon", v:restockItems.filter(r=>r.urgency==="high").length,     c:"var(--am)"},
+              {l:"Watching",     v:restockItems.filter(r=>r.urgency==="watch").length,    c:"var(--txm)"},
+            ].map(k=>(
+              <div key={k.l} className="kc">
+                <div className="kl">{k.l}</div>
+                <div className="kv" style={{color:k.c,fontSize:20}}>{k.v}</div>
+                <div className="ks">bundles</div>
               </div>
             ))}
           </div>
+          <div className="tw"><div className="ts">
+            <table className="tbl">
+              <thead><tr>
+                <th>Bundle</th><th>Remaining</th><th>Sell-through</th>
+                <th>Avg Days</th><th>Avg Profit</th><th>Signal</th><th>Source</th>
+              </tr></thead>
+              <tbody>
+                {restockItems.map((r,i)=>(
+                  <tr key={i}>
+                    <td style={{fontWeight:700}}>{r.name.length>26?r.name.slice(0,26)+"…":r.name}</td>
+                    <td><span style={{fontWeight:700,color:r.qtyRemaining<=2?"var(--ac)":r.qtyRemaining<=4?"var(--am)":"var(--tx)"}}>{r.qtyRemaining} left</span></td>
+                    <td>
+                      <div style={{display:"flex",alignItems:"center",gap:6}}>
+                        <div style={{width:48,height:5,background:"var(--sf3)",borderRadius:3,overflow:"hidden",flexShrink:0}}>
+                          <div style={{height:"100%",width:`${r.sellThru}%`,background:r.sellThru>=75?"var(--gn)":"var(--am)",borderRadius:3}}/>
+                        </div>
+                        <span style={{fontWeight:700,fontSize:11}}>{r.sellThru}%</span>
+                      </div>
+                    </td>
+                    <td style={{color:"var(--txm)"}}>{r.avgDays||"—"}d</td>
+                    <td style={{fontWeight:700,color:"var(--gn)"}}>{r.avgProfit?fmt(r.avgProfit):"—"}</td>
+                    <td>
+                      {r.urgency==="critical"&&<span className="badge b-r">⚠ Now</span>}
+                      {r.urgency==="high"    &&<span className="badge b-am">↑ Soon</span>}
+                      {r.urgency==="watch"   &&<span style={{fontSize:10,color:"var(--txd)",fontWeight:700}}>Watch</span>}
+                    </td>
+                    <td><span style={{fontSize:10,color:"var(--txd)"}}>{r.autoFlag?"⚡ Auto":"📌 Manual"}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div></div>
+        </>
+      ) : (
+        <div className="tw" style={{padding:"24px",textAlign:"center",color:"var(--txd)",fontSize:12}}>
+          No restock candidates right now — all bundles have healthy stock levels.
         </div>
       )}
+
+      {/* ── PLATFORM PERFORMANCE ── */}
+      <div style={{marginTop:14}}>
+        <div className="sh" style={{marginBottom:8}}>
+          <div className="st">Platform Performance
+            <InfoTip>
+              <strong>Platform Performance</strong> shows how each sales channel is performing across all your listings.<br/><br/>
+              <strong>Sell-through %</strong> = sold ÷ total listed on that platform.<br/>
+              <strong>Avg Days</strong> = how quickly items sell once listed.<br/><br/>
+              Tap any row to expand the top 5 selling items on that platform.
+            </InfoTip>
+          </div>
+          <div className="ss" style={{marginLeft:4}}>Tap a row to see top sellers</div>
+        </div>
+
+        {platformStats.length > 0 && (() => {
+          const fastest  = platformStats.reduce((a,b)=>b.avgDays&&(!a.avgDays||b.avgDays<a.avgDays)?b:a);
+          const highPrice= platformStats.reduce((a,b)=>b.avgPrice>a.avgPrice?b:a);
+          const topRev   = platformStats.reduce((a,b)=>b.revenue>a.revenue?b:a);
+          return (
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:12}}>
+              {[
+                {l:"Fastest",       v:fastest.name,   s:`${fastest.avgDays.toFixed(1)}d avg`,     c:"var(--gn)"},
+                {l:"Highest Price", v:highPrice.name, s:`${fmt(highPrice.avgPrice)} avg`,          c:"var(--nv)"},
+                {l:"Most Revenue",  v:topRev.name,    s:`${fmt(topRev.revenue)} total`,            c:"var(--am)"},
+              ].map(k=>(
+                <div key={k.l} className="kc">
+                  <div className="kl">{k.l}</div>
+                  <div className="kv" style={{color:k.c,fontSize:16}}>{k.v}</div>
+                  <div className="ks">{k.s}</div>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
+
+        <div className="tw">
+          <div className="ts">
+            <table className="tbl">
+              <thead><tr>
+                <th>Platform</th><th>Listed</th><th>Sold</th><th>Sell-through</th>
+                <th>Avg Days</th><th>Avg Price</th><th>Revenue</th>
+              </tr></thead>
+              <tbody>
+                {platformStats.map(p=>{
+                  const sel  = selPlat===p.name;
+                  const fast = p.avgDays===minDays;
+                  const high = p.avgPrice===maxPrice;
+                  return (
+                    <tr key={p.name} className={sel?"selected-row":""} style={{cursor:"pointer"}}
+                      onClick={()=>setSelPlat(sel?null:p.name)}>
+                      <td>
+                        <span style={{fontSize:10,color:"var(--txd)",marginRight:6}}>{sel?"▼":"▶"}</span>
+                        <span style={{fontWeight:700}}>{p.name}</span>
+                      </td>
+                      <td style={{color:"var(--txm)"}}>{p.items}</td>
+                      <td style={{fontWeight:700}}>{p.sold}</td>
+                      <td>
+                        <div style={{display:"flex",alignItems:"center",gap:6}}>
+                          <div style={{width:40,height:5,background:"var(--sf3)",borderRadius:3,overflow:"hidden",flexShrink:0}}>
+                            <div style={{height:"100%",width:`${p.sellThru}%`,background:p.sellThru>=60?"var(--gn)":p.sellThru>=45?"var(--am)":"var(--ac)",borderRadius:3}}/>
+                          </div>
+                          <span style={{fontWeight:700,fontSize:11}}>{p.sellThru}%</span>
+                        </div>
+                      </td>
+                      <td style={{fontWeight:fast?700:400,color:fast?"var(--gn)":"var(--txm)"}}>
+                        {p.avgDays.toFixed(1)}d{fast?" ⚡":""}
+                      </td>
+                      <td style={{fontWeight:700,color:high?"var(--nv)":"var(--tx)"}}>
+                        {fmt(p.avgPrice)}{high?" 🏆":""}
+                      </td>
+                      <td style={{fontWeight:700}}>{fmt(p.revenue)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {selPlatData && (
+            <div style={{background:"var(--nvl)",borderTop:"2px solid var(--nv)",padding:"14px 16px"}}>
+              <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".6px",color:"var(--nv)",marginBottom:10}}>
+                Top Sellers on {selPlatData.name}
+              </div>
+              <table className="tbl" style={{fontSize:11}}>
+                <thead><tr>
+                  <th>Item</th><th>Type</th><th>Sold</th><th>Avg Price</th><th>Avg Days</th>
+                </tr></thead>
+                <tbody>
+                  {selPlatData.topItems.map((item,i)=>(
+                    <tr key={i}>
+                      <td style={{fontWeight:600}}>{item.name}</td>
+                      <td style={{color:"var(--txm)"}}>{item.type||"—"}</td>
+                      <td style={{fontWeight:700}}>{item.sold}</td>
+                      <td style={{fontWeight:700,color:"var(--gn)"}}>{fmt(item.avgPrice)}</td>
+                      <td style={{fontWeight:700,color:item.avgDays<10?"var(--gn)":item.avgDays<20?"var(--am)":"var(--ac)"}}>
+                        {item.avgDays.toFixed(1)}d
+                      </td>
+                    </tr>
+                  ))}
+                  {selPlatData.topItems.length===0&&(
+                    <tr><td colSpan={5} style={{textAlign:"center",padding:16,color:"var(--txd)",fontSize:11}}>No sales data for this platform yet.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── SLOW MOVERS ── */}
+      <div style={{marginTop:14}}>
+        <div className="sh">
+          <div className="st">Slow Movers — 14+ Days Unsold
+            <span className="ss" style={{marginLeft:6}}>{slowSorted.length} item{slowSorted.length!==1?"s":""}</span>
+          </div>
+        </div>
+
+        <div className="filter-bar" style={{paddingBottom:10}}>
+          <div style={{flex:1}}/>
+          <div style={{position:"relative"}}>
+            <button className="btn btn-o btn-sm" onClick={()=>slowF.setShowPanel(v=>!v)}>
+              ⚡ Filters {slowF.activeFilters.length>0&&<span style={{background:"var(--ac)",color:"#fff",borderRadius:10,padding:"0 5px",fontSize:9,marginLeft:3}}>{slowF.activeFilters.length}</span>}
+            </button>
+            {slowF.showPanel&&(<FilterPanel colDefs={slowCols} rows={slowRaw} filters={slowF.filters} setFilter={slowF.setFilter} clearAll={slowF.clearAll} onClose={()=>slowF.setShowPanel(false)}/>)}
+          </div>
+          <div style={{position:"relative"}}>
+            <button className="btn btn-o btn-sm" onClick={()=>setShowSlowCP(v=>!v)}>⚙ Columns</button>
+            {showSlowCP&&<ColPanel cols={slowCols} setCols={setSlowCols} onClose={()=>setShowSlowCP(false)}/>}
+          </div>
+          <button className="btn btn-o btn-sm" onClick={()=>exportToCSV(slowSorted,slowCols,"slow_movers")}>↓ CSV</button>
+        </div>
+
+        <FilterChips colDefs={slowCols} activeFilters={slowF.activeFilters} clearFilter={slowF.clearFilter} clearAll={slowF.clearAll}/>
+
+        <div className="tw"><div className="ts">
+          <table className="tbl">
+            <thead><tr>
+              {visSlow.map(c=>(
+                <STh key={c.id} col={c.id} sortCol={slowSortCol} sortDir={slowSortDir} onSort={onSlowSort}>{c.label}</STh>
+              ))}
+            </tr></thead>
+            <tbody>
+              {slowSorted.length===0?(
+                <tr><td colSpan={visSlow.length} style={{textAlign:"center",padding:26,color:"var(--txd)"}}>
+                  {slowRaw.length===0?"No listings have been unsold for 14+ days. 🎉":"No items match filters."}
+                </td></tr>
+              ):slowSorted.map(l=>(
+                <tr key={l.sku}>{visSlow.map(c=><td key={c.id}>{renderSlowCell(c.id,l)}</td>)}</tr>
+              ))}
+            </tbody>
+          </table>
+        </div></div>
+      </div>
     </div>
   );
 }
+
 
 /* ═══════════════════════════════════════════════════════════════
    GROWTH — Command 10
 ═══════════════════════════════════════════════════════════════ */
 function Growth({ listings, stockData }) {
-  const sold    = listings.filter(l => l.sold);
-  const active  = listings.filter(l => l.listed && !l.sold);
-  const soldWk  = listings.filter(l => l.sold && l.daySold && l.daySold >= WEEK_START);
-  const soldMo  = listings.filter(l => l.sold && l.daySold && l.daySold >= MONTH_START);
+  const [cashMode, setCashMode] = useState("chart");
+
+  const sold   = listings.filter(l=>l.sold);
+  const active = listings.filter(l=>l.listed&&!l.sold);
   const totalRevenue = sold.reduce((a,l)=>a+(l.soldPrice||0),0);
   const totalProfit  = sold.reduce((a,l)=>a+(l.profit||0),0);
-  const st = sold.length ? Math.round(active.length/sold.length*100) : 0;
+  const st = (sold.length+active.length) ? Math.round(sold.length/(sold.length+active.length)*100) : 0;
+
+  /* ── Cash Flow — last 8 weeks ── */
+  const cashWeeks = useMemo(() => {
+    const weeks = [];
+    for (let i=7;i>=0;i--) {
+      const ws=new Date(_wsd); ws.setDate(ws.getDate()-i*7);
+      const we=new Date(ws);   we.setDate(we.getDate()+6);
+      const wsStr=localDateStr(ws), weStr=localDateStr(we);
+      const moneyIn  = sold.filter(l=>l.daySold&&l.daySold>=wsStr&&l.daySold<=weStr)
+                           .reduce((a,l)=>a+(l.soldPrice||0),0);
+      const moneyOut = stockData.filter(s=>s.datePurchased&&s.datePurchased>=wsStr&&s.datePurchased<=weStr)
+                                .reduce((a,s)=>a+(s.totalCost||0),0);
+      weeks.push({
+        label: ws.toLocaleDateString("en-GB",{day:"numeric",month:"short"}),
+        moneyIn, moneyOut, net: moneyIn-moneyOut,
+      });
+    }
+    let running = 0;
+    weeks.forEach(w => { running += w.net; w.balance = running; });
+    return weeks;
+  }, [sold, stockData]);
+
+  const maxCash = Math.max(...cashWeeks.map(w=>Math.max(w.moneyIn,w.moneyOut)),1);
+  const minBal  = Math.min(...cashWeeks.map(w=>w.balance),0);
+  const maxBal  = Math.max(...cashWeeks.map(w=>w.balance),1);
+  const balRange= maxBal-minBal||1;
+  const svgH    = 50;
+  const balPoints = cashWeeks.map((w,i)=>{
+    const x = cashWeeks.length===1 ? 50 : (i/(cashWeeks.length-1))*100;
+    const y = svgH-5-((w.balance-minBal)/balRange)*(svgH-10);
+    return {x,y,w};
+  });
+
+  /* ── 12-week revenue/profit ── */
+  const weeks12 = useMemo(() => {
+    const weeks=[];
+    for(let i=11;i>=0;i--){
+      const ws=new Date(_wsd); ws.setDate(ws.getDate()-i*7);
+      const we=new Date(ws);   we.setDate(we.getDate()+6);
+      const wsStr=localDateStr(ws), weStr=localDateStr(we);
+      const wSold=sold.filter(l=>l.daySold&&l.daySold>=wsStr&&l.daySold<=weStr);
+      weeks.push({
+        label:ws.toLocaleDateString("en-GB",{day:"numeric",month:"short"}),
+        revenue:wSold.reduce((a,l)=>a+(l.soldPrice||0),0),
+        profit:wSold.reduce((a,l)=>a+(l.profit||0),0),
+        count:wSold.length,
+      });
+    }
+    return weeks;
+  }, [sold]);
+  const maxRev = Math.max(...weeks12.map(w=>w.revenue),1);
+
+  /* ── Best weeks (24-week window) ── */
+  const bestWeeks = useMemo(() => {
+    const weeks=[];
+    for(let i=23;i>=0;i--){
+      const ws=new Date(_wsd); ws.setDate(ws.getDate()-i*7);
+      const we=new Date(ws);   we.setDate(we.getDate()+6);
+      const wsStr=localDateStr(ws), weStr=localDateStr(we);
+      const wSold=sold.filter(l=>l.daySold&&l.daySold>=wsStr&&l.daySold<=weStr);
+      const rev=wSold.reduce((a,l)=>a+(l.soldPrice||0),0);
+      if(rev>0) weeks.push({label:ws.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"2-digit"}),revenue:rev,count:wSold.length});
+    }
+    return [...weeks].sort((a,b)=>b.revenue-a.revenue);
+  }, [sold]);
+
+  /* ── Monthly avg profit ── */
+  const monthlyAvg = useMemo(() => {
+    const mons=[];
+    let d=new Date(2024,10,1);
+    while(d<=NOW){
+      const mk=d.toISOString().slice(0,7);
+      const mSold=sold.filter(l=>l.daySold&&l.daySold.startsWith(mk));
+      const prof=mSold.reduce((a,l)=>a+(l.profit||0),0);
+      if(mSold.length) mons.push({label:d.toLocaleDateString("en-GB",{month:"short",year:"2-digit"}),avg:prof/mSold.length,count:mSold.length});
+      d=new Date(d.getFullYear(),d.getMonth()+1,1);
+    }
+    return mons;
+  }, [sold]);
 
   return (
     <div>
+      {/* KPI cards */}
       <div className="kg kg3" style={{marginBottom:14}}>
         {[
-          {l:"All-time Revenue", v:sold.length?fmt(totalRevenue):"—", b:"",   s:`${sold.length} items sold`},
-          {l:"All-time Profit",  v:sold.length?fmt(totalProfit):"—",  b:"gn", s:"Net after stock costs"},
-          {l:"Sell-through %",  v:sold.length?`${st}%`:"—",           b:"nv", s:`${sold.length} of ${sold.length+active.length}`},
+          {l:"All-time Revenue",v:sold.length?fmt(totalRevenue):"—",b:"",   s:`${sold.length} items sold`},
+          {l:"All-time Profit", v:sold.length?fmt(totalProfit):"—", b:"gn", s:"Net after stock costs"},
+          {l:"Sell-through %",  v:`${st}%`,                          b:"nv", s:`${sold.length} of ${sold.length+active.length}`},
         ].map(k=>(
-          <div key={k.l} className={`kc ${k.v==="—"?"empty":""}`}>
+          <div key={k.l} className="kc">
             <div className={`kb ${k.b}`}/>
             <div className="kl">{k.l}</div>
             <div className="kv" style={{fontSize:typeof k.v==="string"&&k.v.startsWith("£")?18:24}}>{k.v}</div>
@@ -5898,104 +6161,178 @@ function Growth({ listings, stockData }) {
           </div>
         ))}
       </div>
-      {/* Weekly revenue chart */}
-      {(() => {
-        const weeks = [];
-        for (let i=11;i>=0;i--) {
-          const ws=new Date(_wsd); ws.setDate(ws.getDate()-i*7);
-          const we=new Date(ws);  we.setDate(we.getDate()+6);
-          const wsStr=localDateStr(ws);
-          const weStr=localDateStr(we);
-          const wSold=sold.filter(l=>l.daySold&&l.daySold>=wsStr&&l.daySold<=weStr);
-          weeks.push({
-            label:ws.toLocaleDateString("en-GB",{day:"numeric",month:"short"}),
-            revenue:wSold.reduce((a,l)=>a+(l.soldPrice||0),0),
-            profit:wSold.reduce((a,l)=>a+(l.profit||0),0),
-            count:wSold.length,
-          });
-        }
-        const maxRev=Math.max(...weeks.map(w=>w.revenue),1);
-        const maxProf=Math.max(...weeks.map(w=>Math.abs(w.profit)),1);
-        return (
-          <div className="tw" style={{padding:"18px 20px",marginBottom:14}}>
-            <div className="st" style={{marginBottom:14}}>Revenue & Profit — Last 12 Weeks</div>
-            <div style={{display:"flex",alignItems:"flex-end",gap:4,height:120}}>
-              {weeks.map((w,i)=>(
-                <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2,height:"100%",justifyContent:"flex-end"}}>
-                  <div style={{width:"100%",position:"relative",height:"100%",display:"flex",flexDirection:"column",justifyContent:"flex-end",gap:2}}>
-                    <div style={{width:"100%",height:"100%",position:"relative"}}>
-                      <div title={`Revenue: ${fmt(w.revenue)}`} style={{position:"absolute",bottom:0,left:0,right:0,height:`${Math.round(w.revenue/maxRev*100)}%`,background:"var(--acl)",border:"1px solid var(--ac2)",borderRadius:"2px 2px 0 0",minHeight:w.revenue?2:0}}/>
-                      <div title={`Profit: ${fmt(w.profit)}`} style={{position:"absolute",bottom:0,left:"15%",right:"15%",height:`${Math.round(Math.max(0,w.profit)/maxRev*100)}%`,background:w.profit>=0?"var(--gn)":"var(--ac)",borderRadius:"2px 2px 0 0",opacity:.85,minHeight:w.profit?2:0}}/>
-                    </div>
-                  </div>
-                  <div style={{fontSize:9,color:"var(--txd)",whiteSpace:"nowrap",transform:"rotate(-45deg)",transformOrigin:"center",marginTop:4,width:30,textAlign:"center"}}>{w.label}</div>
+
+      {/* ── CASH FLOW (first) ── */}
+      <div className="tw" style={{padding:"18px 20px",marginBottom:14}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
+          <div>
+            <div style={{display:"flex",alignItems:"center",gap:4}}>
+              <div className="st">Cash Flow — Last 8 Weeks</div>
+              <InfoTip>
+                <strong>Cash Flow</strong> tracks money moving in and out of your business each week.<br/><br/>
+                <strong style={{color:"#a8e6b0"}}>Green bars</strong> = sales proceeds that week.<br/>
+                <strong style={{color:"#f4a4a4"}}>Red bars</strong> = stock purchased that week.<br/><br/>
+                The <strong>balance line</strong> shows your running cash position — use it to judge whether you can afford the next bale before committing.
+              </InfoTip>
+            </div>
+            <div className="ss">Money in (sales) vs money out (stock spend)</div>
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            {["chart","table"].map(m=>(
+              <button key={m} onClick={()=>setCashMode(m)}
+                style={{padding:"4px 12px",fontSize:11,fontWeight:700,border:"1px solid var(--bdd)",
+                  borderRadius:20,cursor:"pointer",
+                  background:cashMode===m?"var(--nv)":"var(--sf)",
+                  color:cashMode===m?"#fff":"var(--txm)"}}>
+                {m==="chart"?"Chart":"Table"}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {cashMode==="chart" && (
+          <div>
+            {/* Bars */}
+            <div style={{display:"flex",gap:6,alignItems:"flex-end",height:100,marginBottom:8}}>
+              {cashWeeks.map((w,i)=>(
+                <div key={i} style={{flex:1,display:"flex",gap:2,alignItems:"flex-end",height:"100%"}}>
+                  <div style={{flex:1,height:`${Math.round(w.moneyIn/maxCash*100)}%`,
+                    background:"var(--gnl)",border:"1px solid var(--gn)",
+                    borderRadius:"2px 2px 0 0",minHeight:w.moneyIn?2:0}}/>
+                  {w.moneyOut>0
+                    ? <div style={{flex:1,height:`${Math.round(w.moneyOut/maxCash*100)}%`,
+                        background:"var(--acl)",border:"1px solid var(--ac2)",
+                        borderRadius:"2px 2px 0 0",minHeight:2}}/>
+                    : <div style={{flex:1}}/>
+                  }
                 </div>
               ))}
             </div>
-            <div style={{display:"flex",gap:14,marginTop:18,fontSize:10,color:"var(--txm)"}}>
-              <span><span style={{display:"inline-block",width:10,height:10,background:"var(--acl)",border:"1px solid var(--ac2)",borderRadius:2,marginRight:4,verticalAlign:"middle"}}/>Revenue</span>
-              <span><span style={{display:"inline-block",width:10,height:10,background:"var(--gn)",borderRadius:2,marginRight:4,verticalAlign:"middle",opacity:.7}}/>Profit</span>
+            <div style={{display:"flex",gap:6,marginBottom:14}}>
+              {cashWeeks.map((w,i)=>(
+                <div key={i} style={{flex:1,fontSize:7,color:"var(--txd)",textAlign:"center"}}>{w.label}</div>
+              ))}
+            </div>
+            {/* Balance sparkline */}
+            <div style={{background:"var(--sf2)",borderRadius:"var(--r)",padding:"10px 12px",marginBottom:10}}>
+              <div style={{fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:".5px",color:"var(--txd)",marginBottom:8}}>
+                Running Cash Balance
+              </div>
+              <svg width="100%" height={svgH} style={{overflow:"visible",display:"block"}}>
+                {balPoints.map((pt,i)=>{
+                  if(i===0) return null;
+                  const prev=balPoints[i-1];
+                  return <line key={i}
+                    x1={`${prev.x}%`} y1={prev.y}
+                    x2={`${pt.x}%`}   y2={pt.y}
+                    stroke="var(--nv)" strokeWidth="2" strokeLinecap="round"/>;
+                })}
+                {balPoints.map((pt,i)=>(
+                  <circle key={i} cx={`${pt.x}%`} cy={pt.y} r="3" fill="var(--nv)"/>
+                ))}
+              </svg>
+              <div style={{display:"flex",justifyContent:"space-between",marginTop:4,fontSize:10}}>
+                <span style={{color:"var(--txd)"}}>8-week net: {cashWeeks.reduce((a,w)=>a+w.net,0)>=0?"+":""}{fmt(cashWeeks.reduce((a,w)=>a+w.net,0))}</span>
+                <span style={{fontWeight:700,color:cashWeeks.at(-1).balance>=0?"var(--nv)":"var(--ac)"}}>
+                  Current balance: {fmt(cashWeeks.at(-1).balance)}
+                </span>
+              </div>
+            </div>
+            <div style={{display:"flex",gap:14,fontSize:10,color:"var(--txm)"}}>
+              <span><span style={{display:"inline-block",width:10,height:10,background:"var(--gnl)",border:"1px solid var(--gn)",borderRadius:2,marginRight:4,verticalAlign:"middle"}}/> Money In</span>
+              <span><span style={{display:"inline-block",width:10,height:10,background:"var(--acl)",border:"1px solid var(--ac2)",borderRadius:2,marginRight:4,verticalAlign:"middle"}}/> Stock Spend</span>
             </div>
           </div>
-        );
-      })()}
+        )}
 
+        {cashMode==="table" && (
+          <table className="tbl">
+            <thead><tr><th>Week</th><th>Money In</th><th>Stock Spend</th><th>Net</th><th>Running Balance</th></tr></thead>
+            <tbody>
+              {cashWeeks.map((w,i)=>(
+                <tr key={i}>
+                  <td style={{fontWeight:700}}>{w.label}</td>
+                  <td style={{color:"var(--gn)",fontWeight:700}}>{w.moneyIn>0?fmt(w.moneyIn):"—"}</td>
+                  <td style={{color:w.moneyOut>0?"var(--ac)":"var(--txd)"}}>{w.moneyOut>0?fmt(w.moneyOut):"—"}</td>
+                  <td style={{fontWeight:700,color:w.net>=0?"var(--gn)":"var(--ac)"}}>{w.net>=0?"+":""}{fmt(w.net)}</td>
+                  <td style={{fontWeight:700,color:w.balance<0?"var(--ac)":"var(--nv)"}}>{fmt(w.balance)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* ── REVENUE & PROFIT CHART (second) ── */}
+      <div className="tw" style={{padding:"18px 20px",marginBottom:14}}>
+        <div style={{display:"flex",alignItems:"center",gap:4,marginBottom:14}}>
+          <div className="st">Revenue & Profit — Last 12 Weeks</div>
+          <InfoTip>
+            <strong style={{color:"#f4a4a4"}}>Pink bars</strong> = total revenue (what buyers paid) that week.<br/><br/>
+            <strong style={{color:"#a8e6b0"}}>Green bars</strong> = net profit — revenue minus your stock cost. Overlaid inside the pink bar.<br/><br/>
+            A small green bar inside a large pink bar means thin margins that week — worth investigating which items sold.
+          </InfoTip>
+        </div>
+        <div style={{display:"flex",alignItems:"flex-end",gap:4,height:120}}>
+          {weeks12.map((w,i)=>(
+            <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",height:"100%",justifyContent:"flex-end"}}>
+              <div style={{width:"100%",height:"100%",position:"relative"}}>
+                <div title={`Revenue: ${fmt(w.revenue)}`} style={{position:"absolute",bottom:0,left:0,right:0,
+                  height:`${Math.round(w.revenue/maxRev*100)}%`,background:"var(--acl)",
+                  border:"1px solid var(--ac2)",borderRadius:"2px 2px 0 0",minHeight:w.revenue?2:0}}/>
+                <div title={`Profit: ${fmt(w.profit)}`} style={{position:"absolute",bottom:0,left:"15%",right:"15%",
+                  height:`${Math.round(Math.max(0,w.profit)/maxRev*100)}%`,
+                  background:w.profit>=0?"var(--gn)":"var(--ac)",
+                  borderRadius:"2px 2px 0 0",opacity:.85,minHeight:w.profit?2:0}}/>
+              </div>
+              <div style={{fontSize:9,color:"var(--txd)",whiteSpace:"nowrap",
+                transform:"rotate(-45deg)",transformOrigin:"center",marginTop:4,width:30,textAlign:"center"}}>
+                {w.label}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div style={{display:"flex",gap:14,marginTop:18,fontSize:10,color:"var(--txm)"}}>
+          <span><span style={{display:"inline-block",width:10,height:10,background:"var(--acl)",border:"1px solid var(--ac2)",borderRadius:2,marginRight:4,verticalAlign:"middle"}}/>Revenue</span>
+          <span><span style={{display:"inline-block",width:10,height:10,background:"var(--gn)",borderRadius:2,marginRight:4,verticalAlign:"middle",opacity:.7}}/>Profit</span>
+        </div>
+      </div>
+
+      {/* ── BEST WEEKS + MONTHLY AVG ── */}
       <div className="two-col">
-        {/* Best performing weeks */}
-        {(() => {
-          const weeks=[];
-          for(let i=23;i>=0;i--){
-            const ws=new Date(_wsd); ws.setDate(ws.getDate()-i*7);
-            const we=new Date(ws);   we.setDate(we.getDate()+6);
-            const wsStr=localDateStr(ws);
-            const weStr=localDateStr(we);
-            const wSold=sold.filter(l=>l.daySold&&l.daySold>=wsStr&&l.daySold<=weStr);
-            const rev=wSold.reduce((a,l)=>a+(l.soldPrice||0),0);
-            if(rev>0) weeks.push({label:ws.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"2-digit"}),revenue:rev,count:wSold.length});
-          }
-          weeks.sort((a,b)=>b.revenue-a.revenue);
-          return (
-            <div className="tw" style={{padding:"16px 18px"}}>
-              <div className="st" style={{marginBottom:10}}>🏆 Best Weeks by Revenue</div>
-              {weeks.slice(0,5).map((w,i)=>(
-                <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid var(--bd)",fontSize:12}}>
-                  <span><span style={{fontWeight:700,color:"var(--ac)",marginRight:8}}>#{i+1}</span>{w.label}</span>
-                  <span style={{fontWeight:700,color:"var(--gn)"}}>{fmt(w.revenue)}<span style={{fontSize:10,color:"var(--txd)",marginLeft:6}}>{w.count} sold</span></span>
-                </div>
-              ))}
-              {weeks.length===0 && <div style={{fontSize:12,color:"var(--txd)"}}>No sales data yet.</div>}
+        <div className="tw" style={{padding:"16px 18px"}}>
+          <div style={{display:"flex",alignItems:"center",gap:4,marginBottom:10}}>
+            <div className="st">🏆 Best Weeks by Revenue</div>
+            <InfoTip>
+              Your top 5 revenue weeks of all time. Useful for spotting seasonality — if your best weeks cluster around the same months, plan restocking and listing volume around those peaks.
+            </InfoTip>
+          </div>
+          {bestWeeks.slice(0,5).map((w,i)=>(
+            <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+              padding:"6px 0",borderBottom:"1px solid var(--bd)",fontSize:12}}>
+              <span><span style={{fontWeight:700,color:"var(--ac)",marginRight:8}}>#{i+1}</span>{w.label}</span>
+              <span style={{fontWeight:700,color:"var(--gn)"}}>{fmt(w.revenue)}<span style={{fontSize:10,color:"var(--txd)",marginLeft:6}}>{w.count} sold</span></span>
             </div>
-          );
-        })()}
+          ))}
+          {bestWeeks.length===0&&<div style={{fontSize:12,color:"var(--txd)"}}>No sales data yet.</div>}
+        </div>
 
-        {/* Avg profit trend by month */}
-        {(() => {
-          const mons=[];
-          let d=new Date(2024,10,1);
-          while(d<=NOW){
-            const mk=d.toISOString().slice(0,7);
-            const mSold=sold.filter(l=>l.daySold&&l.daySold.startsWith(mk));
-            const prof=mSold.reduce((a,l)=>a+(l.profit||0),0);
-            if(mSold.length) mons.push({label:d.toLocaleDateString("en-GB",{month:"short",year:"2-digit"}),avg:prof/mSold.length,count:mSold.length});
-            d=new Date(d.getFullYear(),d.getMonth()+1,1);
-          }
-          return (
-            <div className="tw" style={{padding:"16px 18px"}}>
-              <div className="st" style={{marginBottom:10}}>📈 Avg Profit / Sale by Month</div>
-              {mons.map((m,i)=>(
-                <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid var(--bd)",fontSize:12}}>
-                  <span style={{color:"var(--txm)"}}>{m.label}</span>
-                  <span style={{fontWeight:700,color:m.avg>=0?"var(--gn)":"var(--ac)"}}>{fmt(m.avg)}<span style={{fontSize:10,color:"var(--txd)",marginLeft:6}}>{m.count} sold</span></span>
-                </div>
-              ))}
-              {mons.length===0 && <div style={{fontSize:12,color:"var(--txd)"}}>No sales data yet.</div>}
+        <div className="tw" style={{padding:"16px 18px"}}>
+          <div className="st" style={{marginBottom:10}}>📈 Avg Profit / Sale by Month</div>
+          {monthlyAvg.map((m,i)=>(
+            <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+              padding:"6px 0",borderBottom:"1px solid var(--bd)",fontSize:12}}>
+              <span style={{color:"var(--txm)"}}>{m.label}</span>
+              <span style={{fontWeight:700,color:m.avg>=0?"var(--gn)":"var(--ac)"}}>{fmt(m.avg)}<span style={{fontSize:10,color:"var(--txd)",marginLeft:6}}>{m.count} sold</span></span>
             </div>
-          );
-        })()}
+          ))}
+          {monthlyAvg.length===0&&<div style={{fontSize:12,color:"var(--txd)"}}>No sales data yet.</div>}
+        </div>
       </div>
     </div>
   );
 }
+
 
 /* ═══════════════════════════════════════════════════════════════
    HISTORY — Command 10
