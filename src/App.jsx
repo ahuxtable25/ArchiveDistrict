@@ -124,8 +124,9 @@ async function sendPushNotification(payload) {
 const DEFAULT_PLATFORMS = [
   "Depop","Vinted","eBay","Whatnot","Tilt","Facebook Marketplace","Grailed","Other",
 ];
-// Legacy alias — replaced at runtime by customPlatforms from liveData
-let PLATFORMS = DEFAULT_PLATFORMS;
+// Both updated at runtime from customPlatforms (see App useEffect)
+let PLATFORMS          = DEFAULT_PLATFORMS;
+let MARK_LISTED_PLATS  = DEFAULT_PLATFORMS;
 const PLAT_FEES = {
   "Depop":10,"Vinted":5,"eBay":12.9,
   "Whatnot":8,"Tilt":8,
@@ -6853,6 +6854,11 @@ export default function App() {
     (liveData?.platforms?.length ? liveData.platforms : DEFAULT_PLATFORMS),
     [liveData?.platforms]
   );
+  // Keep module-level aliases in sync so all components see the current list
+  useEffect(() => {
+    PLATFORMS         = customPlatforms;
+    MARK_LISTED_PLATS = customPlatforms;
+  }, [customPlatforms]);
 
   const setLiveData = (updater) => {
     setLiveDataRaw(prev => {
