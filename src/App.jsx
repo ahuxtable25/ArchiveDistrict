@@ -121,9 +121,12 @@ async function sendPushNotification(payload) {
 }
 
 /* ─── PLATFORM CONFIG ─── */
-const PLATFORMS = [
+const DEFAULT_PLATFORMS = [
   "Depop","Vinted","eBay","Whatnot","Tilt","Facebook Marketplace","Grailed","Other",
 ];
+// Both updated at runtime from customPlatforms (see App useEffect)
+let PLATFORMS          = DEFAULT_PLATFORMS;
+let MARK_LISTED_PLATS  = DEFAULT_PLATFORMS;
 const PLAT_FEES = {
   "Depop":10,"Vinted":5,"eBay":12.9,
   "Whatnot":8,"Tilt":8,
@@ -427,12 +430,14 @@ const NAV = [
   {id:"growth",      label:"Growth",         icon:"📈",group:"Reports"  },
   {id:"history",     label:"History",        icon:"🗂", group:"Reports"  },
   {id:"versions",    label:"Version History", icon:"🔄", group:"Reports"  },
+  {id:"settings",    label:"Settings",        icon:"⚙️", group:"Settings"  },
 ];
 const TITLES = {
   dashboard:"Dashboard",stock:"Stock Inventory",listings:"Listings",
   movement:"Movement Tracker",listingdata:"Listing Data",marklisted:"Mark as Listed",drafter:"Listing Drafter",
   marksold:"Mark as Sold",shipping:"Shipping",livedata:"Live Data",
   calculator:"Price Calculator",analytics:"Analytics",growth:"Growth",history:"History",
+  settings:"Settings",
 };
 
 /* ═══════════════════════════════════════════════════════════════
@@ -546,7 +551,7 @@ nav::-webkit-scrollbar-thumb{background:var(--bd);border-radius:2px}
 .tbl th:hover{color:var(--tx)}.tbl th.no-sort{cursor:default}.tbl th.no-sort:hover{color:var(--txm)}
 .tbl{table-layout:auto}.tbl td{padding:9px 11px;border-bottom:1px solid var(--bd);color:var(--tx);vertical-align:middle;white-space:nowrap;max-width:180px;overflow:hidden;text-overflow:ellipsis}
 .tbl td.full{max-width:none;overflow:visible}
-.tbl td.name-cell{min-width:180px;max-width:260px}
+.tbl td.name-cell{min-width:160px;max-width:280px;white-space:normal;word-break:break-word;font-size:11px}
 .zoom-bar{display:flex;align-items:center;gap:5px;padding:6px 12px;background:var(--sf2);border-bottom:1px solid var(--bd);flex-wrap:wrap}
 .zoom-bar .zb{width:26px;height:26px;border:1px solid var(--bdd);border-radius:var(--r);background:var(--sf);cursor:pointer;font-size:15px;font-weight:700;color:var(--txm);display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .zoom-bar .zb:hover{background:var(--sf2);color:var(--tx)}
@@ -1445,6 +1450,40 @@ const NUMERIC_STOCK_COLS = new Set([
   "netProceeds","stockValLeft","sellThru","avgSoldPrice","avgProfit",
 ]);
 
+// Exports stock data in the exact column order the Google Sheets STOCK tab expects
+// Columns: Date Purchased | Date Arrived | Bundle SKU | Website | Seller | Stock Name
+//          | Sellable Pieces | Cost per Piece | Content Details | Received Pieces | Imported
+function exportStockForSheets(stockData) {
+  const headers = [
+    "Date Purchased","Date Arrived","Bundle SKU","Website","Seller","Stock Name",
+    "Sellable Pieces","Cost per Piece","Content Details","Received Pieces","Imported (1=yes)",
+  ];
+  const rows = stockData.map(s => [
+    s.datePurchased  || "",
+    s.dateArrived    || "",
+    s.bundleSku      || "",
+    s.website        || "",
+    s.seller         || "",
+    s.name           || "",
+    s.sellable       || "",
+    s.costPer        != null ? Number(s.costPer).toFixed(4) : "",
+    s.contentDetails || "",
+    s.received       || "",
+    s.imported       ? 1 : 0,
+  ]);
+  const csv = [headers, ...rows]
+    .map(r => r.map(v => {
+      const s = String(v ?? "");
+      return s.includes(",") || s.includes('"') || s.includes("\n")
+        ? `"${s.replace(/"/g,'""')}"` : s;
+    }).join(","))
+    .join("\r\n");
+  const a = document.createElement("a");
+  a.href = "data:text/csv;charset=utf-8,\uFEFF" + encodeURIComponent(csv);
+  a.download = `AD_Stock_ForSheets_${TODAY}.csv`;
+  a.click();
+}
+
 function StockTab({ stockData, setStockData, listings, setListings }) {
   const [cols,         setCols]        = useState(STOCK_COLS);
   const [showColPanel, setShowColPanel]= useState(false);
@@ -1502,17 +1541,35 @@ function StockTab({ stockData, setStockData, listings, setListings }) {
   const visCols = cols.filter(c => c.visible);
   const { getStyle: getStockColStyle, onMouseDown: onStockColResize } = useColWidths(cols);
   const stockZoom = useZoom(100);
-  const handleAddStock    = (ns) => setStockData(p => [...p, ns]);
+  const handleAddStock    = (ns) => {
+    // Prevent duplicate SKU — if this SKU already exists with a different name, bump to next
+    const hasDupe = stockData.some(s => s.bundleSku === ns.bundleSku && s.name !== ns.name);
+    const safeSku = hasDupe ? getNextBundleSku([...stockData, {bundleSku: ns.bundleSku}]) : ns.bundleSku;
+    setStockData(p => [...p, { ...ns, bundleSku: safeSku }]);
+  };
   const handleDeleteStock = (bsku, originalName) => {
     setStockData(prev => prev.filter(s => !(s.bundleSku === bsku && s.name === originalName)));
     setEditStock(null);
   };
-  const handleSaveStock = (updated) =>
+  const handleSaveStock = (updated) => {
+    const oldName = updated._originalName;
+    const newName = updated.name;
+    const nameChanged = oldName && oldName !== newName;
+    // Update stock row
     setStockData(p => p.map(s =>
-      s.bundleSku === updated.bundleSku && s.name === updated._originalName
+      s.bundleSku === updated.bundleSku && s.name === oldName
         ? { ...updated, _originalName: undefined }
         : s
     ));
+    // If name changed, cascade to all listings with same bundleSku + old name
+    if (nameChanged) {
+      setListings(p => p.map(l =>
+        l.bundleSku === updated.bundleSku && l.name === oldName
+          ? { ...l, name: newName }
+          : l
+      ));
+    }
+  };
 
   const handleAutoImport = (stock, count) => {
     const nextSkuNum = (() => {
@@ -1620,6 +1677,11 @@ function StockTab({ stockData, setStockData, listings, setListings }) {
           {showColPanel && <ColPanel cols={cols} setCols={setCols} onClose={()=>setShowColPanel(false)} />}
         </div>
         <button className="btn btn-o btn-sm" onClick={()=>exportToCSV(filtered, cols, "stock")}>↓ CSV</button>
+        <button className="btn btn-o btn-sm" title="Export in exact column order for Google Sheets STOCK tab"
+          onClick={()=>exportStockForSheets(stockData)}
+          style={{background:"var(--gnl)",borderColor:"var(--gn)",color:"var(--gn)",fontWeight:700}}>
+          → Sheets
+        </button>
         <button className="btn btn-o btn-sm" onClick={()=>setShowImport(true)}>↓ Import</button>
         <button className="btn btn-p btn-sm" onClick={()=>setShowAdd(true)}>+ Add Stock</button>
       </div>
@@ -2446,7 +2508,7 @@ function AddListingModal({ listings, stockData, onAdd, onClose }) {
 
 const SORTABLE_LISTING_COLS = new Set(["sku","price","soldPrice","profit","days","dayListed","daySold"]);
 
-function ListingsTab({ listings, setListings, stockData }) {
+function ListingsTab({ listings, setListings, stockData, customPlatforms }) {
   const [cols,         setCols]        = useState(DEFAULT_COLS);
   const [showColPanel, setShowColPanel]= useState(false);
   const [showAdd,      setShowAdd]     = useState(false);
@@ -2663,7 +2725,7 @@ function ListingsTab({ listings, setListings, stockData }) {
 
         <select className="fs" value={platFilter} onChange={e=>setPlatFilter(e.target.value)}>
           <option value="All">All Platforms</option>
-          {PLATFORMS.map(p => <option key={p}>{p}</option>)}
+          {(customPlatforms||DEFAULT_PLATFORMS).map(p => <option key={p}>{p}</option>)}
         </select>
 
         <select className="fs" value={sizeFilter} onChange={e=>setSizeFilter(e.target.value)}>
@@ -3036,7 +3098,7 @@ function FilterChips({ colDefs, activeFilters, clearFilter, clearAll }) {
    MOVEMENT TRACKER COLS
 ═══════════════════════════════════════════════════════════════ */
 const MOVEMENT_COLS = [
-  {id:"name",    label:"Stock Name",  visible:true },
+  {id:"name",    label:"Stock Name",  visible:true, minW:200 },
   {id:"type",    label:"Type",        visible:true },
   {id:"brand",   label:"Brand",       visible:true },
   {id:"tag",     label:"Tag",         visible:true },
@@ -3185,7 +3247,7 @@ function MovementTracker({ listings }) {
                 <tr><td colSpan={visCols.length} style={{textAlign:"center",padding:28,color:"var(--txd)"}}>No groups match filters.</td></tr>
               ) : sorted.map((row,i) => (
                 <tr key={i}>
-                  {visCols.map(c => <td key={c.id}>{renderCell(c.id, row)}</td>)}
+                  {visCols.map(c => <td key={c.id} className={c.id==="name"?"name-cell":""} title={c.id==="name"?row.name:undefined}>{renderCell(c.id, row)}</td>)}
                 </tr>
               ))}
             </tbody>
@@ -3444,9 +3506,7 @@ function ListingDataTab({ listings }) {
 /* ═══════════════════════════════════════════════════════════════
    MARK AS LISTED — Command 6
 ═══════════════════════════════════════════════════════════════ */
-const MARK_LISTED_PLATS = [
-  "Depop","Vinted","eBay","Whatnot","Tilt","Facebook Marketplace","Grailed",
-];
+// MARK_LISTED_PLATS is now dynamic — see customPlatforms in App
 
 /* ── ListingRecap — today's listing session summary ── */
 const RECAP_PLAT_STYLE = {
@@ -3577,9 +3637,10 @@ function ListingRecap({ listings, platFilt, setPlatFilt }) {
   );
 }
 
-function MarkAsListed({ listings, setListings }) {
+function MarkAsListed({ listings, setListings, customPlatforms }) {
   // Search all non-sold items — allows adding platforms to already-listed items
   const unlisted   = useMemo(() => listings.filter(l => !l.sold), [listings]);
+  const _platforms = customPlatforms || DEFAULT_PLATFORMS;
 
   // ── Single-item mode ──
   const [skuInput,    setSkuInput]    = useState("");
@@ -3609,8 +3670,7 @@ function MarkAsListed({ listings, setListings }) {
 
   const PlatGrid = ({ sel, onToggle, existingPlats=[] }) => (
     <div className="plat-grid-4">
-      {MARK_LISTED_PLATS.map(p => {
-        const isExisting = existingPlats.includes(p);
+      {_platforms.map(p => {
         const isSelected = sel.has(p);
         return (
           <button key={p}
@@ -4648,8 +4708,9 @@ function DrafterMarkListed({ item, setListings }) {
 /* ═══════════════════════════════════════════════════════════════
    MARK AS SOLD — Command 8
 ═══════════════════════════════════════════════════════════════ */
-function QuickMarkSold({ listings, setListings }) {
+function QuickMarkSold({ listings, setListings, customPlatforms }) {
   const unsold = useMemo(() => listings.filter(l => l.listed && !l.sold), [listings]);
+  const _platforms = customPlatforms || DEFAULT_PLATFORMS;
 
   // Single mode
   const [selSku,    setSelSku]    = useState("");
@@ -4769,8 +4830,7 @@ function QuickMarkSold({ listings, setListings }) {
 
           <div className="qu-title" style={{marginTop:4}}>3 · Platform Sold On</div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginTop:6}}>
-            {MARK_LISTED_PLATS.map(p=>(
-              <button key={p} onClick={()=>setPlatSel(p===platSel?null:p)} style={{
+            {_platforms.map(p=>(
                 padding:"7px 4px",fontSize:11,fontWeight:700,textAlign:"center",
                 border:`1.5px solid ${platSel===p?"var(--ac)":"var(--bd)"}`,
                 borderRadius:"var(--r)",cursor:"pointer",
@@ -5294,7 +5354,7 @@ function Dashboard({ listings, stockData, weeklyGoal, setWeeklyGoal, monthlyGoal
 /* ═══════════════════════════════════════════════════════════════
    LIVE DATA — Command 9
 ═══════════════════════════════════════════════════════════════ */
-function LiveData({ listings, stockData, liveData, setLiveData }) {
+function LiveData({ listings, stockData, liveData, setLiveData, customPlatforms }) {
   const set = (k, v) => setLiveData(prev => ({ ...prev, [k]: v }));
   const { vinted="", withdrawn="", ebayBal="", ebayPend="", depopPend="", vintedPend="", whatnotPend="", profitPocketed="", globalNotes="" } = liveData;
 
@@ -5707,7 +5767,7 @@ function InfoTip({ children }) {
   );
 }
 
-function Analytics({ listings, stockData }) {
+function Analytics({ listings, stockData, customPlatforms: cpArg }) {
   const [slowCols,    setSlowCols]   = useState(SLOW_COLS);
   const [showSlowCP,  setShowSlowCP] = useState(false);
   const [slowSortCol, setSlowSortCol]= useState("daysLive");
@@ -5718,7 +5778,7 @@ function Analytics({ listings, stockData }) {
 
   /* ── Platform performance ── */
   const platformStats = useMemo(() => {
-    const plats = ["Depop","Vinted","eBay","Whatnot","Grailed","Facebook Marketplace"];
+    const plats = cpArg || DEFAULT_PLATFORMS;
     return plats.map(plat => {
       const platListings = listings.filter(l =>
         l.listed && (l.platforms?.includes(plat) || l.platform === plat)
@@ -6347,7 +6407,7 @@ const MONTH_HIST_COLS = [
   {id:"proceeds",   label:"Proceeds",     visible:true },
   {id:"profit",     label:"Profit Kept",  visible:true },
   {id:"stockQty",   label:"Stock Items",  visible:true },
-  {id:"stockSpend", label:"Stock Spend",  visible:true },
+  {id:"stockSpend", label:"Stock Purchased (£)",  visible:true },
 ];
 const WEEK_HIST_COLS = [
   {id:"label",      label:"Week Starting", visible:true },
@@ -6355,7 +6415,7 @@ const WEEK_HIST_COLS = [
   {id:"sold",       label:"Sold",          visible:true },
   {id:"revenue",    label:"Revenue",       visible:true },
   {id:"profit",     label:"Profit Kept",   visible:true },
-  {id:"stockSpend", label:"Stock Spend",   visible:true },
+  {id:"stockSpend", label:"Stock Purchased (£)",   visible:true },
   {id:"activeLive", label:"Active at EOW", visible:true },
 ];
 
@@ -6709,6 +6769,107 @@ function Placeholder({ title, icon, note }) {
 /* ═══════════════════════════════════════════════════════════════
    APP ROOT
 ═══════════════════════════════════════════════════════════════ */
+
+/* ═══════════════════════════════════════════════════════════════
+   SETTINGS — Platform management
+═══════════════════════════════════════════════════════════════ */
+function Settings({ liveData, setLiveData, customPlatforms }) {
+  const [platforms, setPlatforms] = useState(() => [...customPlatforms]);
+  const [newName,   setNewName]   = useState("");
+  const [editIdx,   setEditIdx]   = useState(null);
+  const [editVal,   setEditVal]   = useState("");
+  const [saved,     setSaved]     = useState(false);
+
+  const save = () => {
+    setLiveData(prev => ({ ...prev, platforms }));
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2200);
+  };
+  const addPlatform = () => {
+    const n = newName.trim();
+    if (!n || platforms.includes(n)) return;
+    setPlatforms(p => [...p, n]);
+    setNewName("");
+  };
+  const deletePlatform = idx => setPlatforms(p => p.filter((_,i) => i!==idx));
+  const saveEdit = idx => {
+    const v = editVal.trim();
+    if (!v) return;
+    setPlatforms(p => p.map((pl,i) => i===idx ? v : pl));
+    setEditIdx(null); setEditVal("");
+  };
+  const moveUp   = idx => { if(idx===0) return; setPlatforms(p => { const a=[...p]; [a[idx-1],a[idx]]=[a[idx],a[idx-1]]; return a; }); };
+  const moveDown = idx => setPlatforms(p => { if(idx>=p.length-1) return p; const a=[...p]; [a[idx],a[idx+1]]=[a[idx+1],a[idx]]; return a; });
+
+  return (
+    <div style={{maxWidth:520,margin:"0 auto",padding:"0 4px"}}>
+      <div style={{fontWeight:900,fontSize:16,marginBottom:4}}>Settings</div>
+      <div style={{fontSize:12,color:"var(--txd)",marginBottom:20}}>App-wide preferences</div>
+      <div className="tw" style={{padding:"18px 20px",marginBottom:14}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+          <div style={{fontWeight:900,fontSize:12,textTransform:"uppercase",letterSpacing:".5px",color:"var(--txm)"}}>Sales Platforms</div>
+          <button onClick={()=>setPlatforms([...DEFAULT_PLATFORMS])}
+            style={{fontSize:10,color:"var(--txd)",background:"none",border:"none",cursor:"pointer",textDecoration:"underline"}}>
+            Reset to defaults
+          </button>
+        </div>
+        <div style={{fontSize:11,color:"var(--txd)",marginBottom:14,lineHeight:1.5}}>
+          These appear in every platform dropdown — Mark as Listed, Sold, Drafter, Analytics.
+          Add names like <strong>"Vinted 1"</strong> and <strong>"Vinted 2"</strong> to track multiple accounts separately.
+        </div>
+        {platforms.map((pl, idx) => (
+          <div key={idx} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 0",borderBottom:"1px solid var(--bd)"}}>
+            <div style={{display:"flex",flexDirection:"column",gap:1}}>
+              <button onClick={()=>moveUp(idx)} style={{background:"none",border:"none",cursor:"pointer",fontSize:9,color:"var(--txd)",lineHeight:1,padding:"1px 4px"}}>▲</button>
+              <button onClick={()=>moveDown(idx)} style={{background:"none",border:"none",cursor:"pointer",fontSize:9,color:"var(--txd)",lineHeight:1,padding:"1px 4px"}}>▼</button>
+            </div>
+            {editIdx===idx ? (
+              <div style={{display:"flex",flex:1,gap:6}}>
+                <input value={editVal} onChange={e=>setEditVal(e.target.value)}
+                  onKeyDown={e=>e.key==="Enter"&&saveEdit(idx)}
+                  style={{flex:1,background:"var(--sf2)",border:"1px solid var(--ac)",borderRadius:"var(--r)",padding:"4px 8px",fontFamily:"Arial,sans-serif",fontSize:12,outline:"none"}}
+                  autoFocus/>
+                <button onClick={()=>saveEdit(idx)}
+                  style={{background:"var(--gn)",color:"#fff",border:"none",borderRadius:"var(--r)",padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700}}>Save</button>
+                <button onClick={()=>{setEditIdx(null);setEditVal("");}}
+                  style={{background:"var(--sf2)",color:"var(--txm)",border:"1px solid var(--bdd)",borderRadius:"var(--r)",padding:"4px 8px",cursor:"pointer",fontSize:11}}>✕</button>
+              </div>
+            ) : (
+              <div style={{display:"flex",flex:1,alignItems:"center",gap:8}}>
+                <span style={{flex:1,fontSize:13,fontWeight:600}}>{pl}</span>
+                <button onClick={()=>{setEditIdx(idx);setEditVal(pl);}}
+                  style={{background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:"var(--r)",padding:"3px 10px",cursor:"pointer",fontSize:11,color:"var(--txm)"}}>Edit</button>
+                <button onClick={()=>deletePlatform(idx)}
+                  style={{background:"var(--acl)",border:"1px solid var(--ac2)",borderRadius:"var(--r)",padding:"3px 8px",cursor:"pointer",fontSize:11,color:"var(--ac)",fontWeight:700}}>✕</button>
+              </div>
+            )}
+          </div>
+        ))}
+        <div style={{display:"flex",gap:8,marginTop:12}}>
+          <input value={newName} onChange={e=>setNewName(e.target.value)}
+            onKeyDown={e=>e.key==="Enter"&&addPlatform()}
+            placeholder="e.g. Vinted 2, Depop Alt..."
+            style={{flex:1,background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:"var(--r)",padding:"6px 10px",fontFamily:"Arial,sans-serif",fontSize:12,outline:"none"}}/>
+          <button onClick={addPlatform}
+            style={{background:"var(--nv)",color:"#fff",border:"none",borderRadius:"var(--r)",padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,flexShrink:0}}>
+            + Add
+          </button>
+        </div>
+        <div style={{marginTop:14,display:"flex",justifyContent:"flex-end",gap:10,alignItems:"center"}}>
+          {saved && <span style={{fontSize:11,color:"var(--gn)",fontWeight:700}}>✓ Platforms saved</span>}
+          <button onClick={save}
+            style={{background:"var(--gn)",color:"#fff",border:"none",borderRadius:"var(--r)",padding:"8px 20px",cursor:"pointer",fontSize:12,fontWeight:700}}>
+            Save Platforms
+          </button>
+        </div>
+      </div>
+      <div style={{fontSize:10,color:"var(--txd)",lineHeight:1.6}}>
+        Changes apply immediately after saving. Existing listing data is unaffected — only dropdown options change.
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [view,            setView]            = useState("dashboard");
   const [sidebarOpen,     setSidebarOpen]     = useState(true);
@@ -6722,10 +6883,27 @@ export default function App() {
     // Load from localStorage as fallback (survives Supabase failures)
     try {
       const saved = localStorage.getItem("ad_livedata");
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (typeof parsed === "object" && parsed !== null) {
+          // Ensure globalNotes always exists
+          return { globalNotes:"", ...parsed };
+        }
+      }
     } catch (_) {}
-    return { vinted:"", withdrawn:"", ebayBal:"", ebayPend:"", depopPend:"", vintedPend:"", whatnotPend:"" };
+    return { vinted:"", withdrawn:"", ebayBal:"", ebayPend:"", depopPend:"", vintedPend:"", whatnotPend:"", globalNotes:"" };
   });
+
+  // Dynamic platforms — stored in liveData, falls back to defaults
+  const customPlatforms = useMemo(() =>
+    (liveData?.platforms?.length ? liveData.platforms : DEFAULT_PLATFORMS),
+    [liveData?.platforms]
+  );
+  // Keep module-level aliases in sync so all components see the current list
+  useEffect(() => {
+    PLATFORMS         = customPlatforms;
+    MARK_LISTED_PLATS = customPlatforms;
+  }, [customPlatforms]);
 
   const setLiveData = (updater) => {
     setLiveDataRaw(prev => {
@@ -7357,18 +7535,19 @@ export default function App() {
           <div className="content">
             {view==="dashboard"   && <Dashboard listings={listings} stockData={stockData} weeklyGoal={weeklyGoal} setWeeklyGoal={setWeeklyGoal} monthlyGoal={monthlyGoal} setMonthlyGoal={setMonthlyGoal} weeklyRevGoal={weeklyRevGoal} setWeeklyRevGoal={setWeeklyRevGoal} monthlyRevGoal={monthlyRevGoal} setMonthlyRevGoal={setMonthlyRevGoal} />}
             {view==="stock"       && <StockTab stockData={stockData} setStockData={setStockData} listings={listings} setListings={setListings} />}
-            {view==="listings"    && <ListingsTab listings={listings} setListings={setListings} stockData={stockData} />}
+            {view==="listings"    && <ListingsTab listings={listings} setListings={setListings} stockData={stockData} customPlatforms={customPlatforms} />}
             {view==="movement"    && <MovementTracker listings={listings} />}
             {view==="listingdata" && <ListingDataTab listings={listings} />}
-            {view==="marklisted"  && <MarkAsListed listings={listings} setListings={setListings} />}
+            {view==="marklisted"  && <MarkAsListed listings={listings} setListings={setListings} customPlatforms={customPlatforms} />}
             {view==="drafter"     && <ListingDrafter listings={listings} setListings={setListings} />}
-            {view==="marksold"    && <QuickMarkSold listings={listings} setListings={setListings} />}
+            {view==="marksold"    && <QuickMarkSold listings={listings} setListings={setListings} customPlatforms={customPlatforms} />}
             {view==="shipping"    && <ShippingTab listings={listings} setListings={setListings} />}
-            {view==="livedata"    && <LiveData listings={listings} stockData={stockData} liveData={liveData} setLiveData={setLiveData} />}
+            {view==="livedata"    && <LiveData listings={listings} stockData={stockData} liveData={liveData} setLiveData={setLiveData} customPlatforms={customPlatforms} />}
             {view==="calculator"  && <PriceCalculator listings={listings} />}
-            {view==="analytics"   && <Analytics listings={listings} stockData={stockData} />}
+            {view==="analytics"   && <Analytics listings={listings} stockData={stockData} customPlatforms={customPlatforms} />}
             {view==="growth"      && <Growth listings={listings} stockData={stockData} />}
             {view==="history"     && <History listings={listings} stockData={stockData} liveData={liveData} />}
+            {view==="settings"    && <Settings liveData={liveData} setLiveData={setLiveData} customPlatforms={customPlatforms} />}
             {view==="versions"    && <VersionHistory onRestore={(v)=>{ setListingsRaw(v.listings); setStockDataRaw(v.stockData); setView("dashboard"); }} />}
           </div>
         </div>
