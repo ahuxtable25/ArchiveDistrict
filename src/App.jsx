@@ -105,9 +105,57 @@ const WEEK_START  = getWeekStart();
 const MONTH_START = getMonthStart();
 const IS_SUNDAY   = getIsSunday();
 
+/* ── App-wide settings helpers ── */
+// These read from liveData.appSettings passed via context; fallback to safe defaults
+const DEFAULT_APP_SETTINGS = {
+  currency:          "£",
+  dateFormat:        "DD/MM",
+  weeklyGoal:        "",
+  monthlyGoal:       "",
+  weeklyRevGoal:     "",
+  monthlyRevGoal:    "",
+  slowMoverDays:     14,
+  sellThruWarning:   60,
+  cashBuffer:        85,
+  defaultCondition:  "Excellent",
+  defaultAccounts:   [],
+  compactMode:       false,
+  sidebarCollapsed:  false,
+};
+const getAS = (liveData) => ({ ...DEFAULT_APP_SETTINGS, ...(liveData?.appSettings||{}) });
+const fmtCurrency = (n, liveData) => {
+  const sym = getAS(liveData).currency || "£";
+  return `${sym}${(+(n)||0).toFixed(2)}`;
+};
+const fmtDate = (str, liveData) => {
+  if (!str) return "—";
+  const fmt_ = getAS(liveData).dateFormat || "DD/MM";
+  try {
+    const d = new Date(str);
+    if (isNaN(d)) return str;
+    const dd = String(d.getDate()).padStart(2,"0");
+    const mm = String(d.getMonth()+1).padStart(2,"0");
+    const yy = String(d.getFullYear()).slice(2);
+    return fmt_ === "MM/DD" ? `${mm}/${dd}/${yy}` : `${dd}/${mm}/${yy}`;
+  } catch { return str; }
+};
+
 /* ─── PUSH NOTIFICATIONS ─── */
 /* ── OneSignal — send push to all subscribed devices ── */
 async function sendPushNotification(payload) {
+  // Check notification preferences from appSettings
+  if (payload.notifKey !== undefined) {
+    try {
+      const saved = localStorage.getItem("ad_livedata");
+      if (saved) {
+        const ld = JSON.parse(saved);
+        const as = { ...DEFAULT_APP_SETTINGS, ...(ld?.appSettings||{}) };
+        // Check if this notification type is enabled (default: use DEFAULT_APP_SETTINGS)
+        const enabled = as[payload.notifKey] !== undefined ? as[payload.notifKey] : true;
+        if (!enabled) return;
+      }
+    } catch (_) {}
+  }
   try {
     await fetch("/api/push", {
       method:  "POST",
@@ -189,6 +237,7 @@ const LISTINGS_INIT = [];
    HELPER FUNCTIONS
 ═══════════════════════════════════════════════════════════════ */
 const fmt = (n) => `£${(+(n)||0).toFixed(2)}`;
+
 const copyText = (t) => { try { navigator.clipboard.writeText(t); } catch (_) {} };
 
 const getNextSku = (listings) => {
@@ -752,6 +801,10 @@ nav::-webkit-scrollbar-thumb{background:var(--bd);border-radius:2px}
 .ana-bar-track{flex:1;height:6px;background:var(--sf2);border-radius:3px;overflow:hidden}
 .ana-bar-fill{height:100%;border-radius:3px;transition:width .5s ease}
 .ana-bar-val{font-size:11px;font-weight:700;white-space:nowrap;text-align:right;min-width:48px}
+.compact .tbl td{padding:5px 8px !important}
+.compact .tbl th{padding:5px 8px !important}
+.compact .kv{font-size:18px !important}
+.compact .kc{padding:9px 10px 7px !important}
 `;
 
 
@@ -2068,6 +2121,7 @@ function EditListingDrawer({ listing, stockData, onSave, onDelete, onClose }) {
                     title: "ArchiveDistrict",
                     body:  `↩ ${prevSku} — return raised${reason ? ": " + reason : ""}`,
                     tag:   `return-raised-${prevSku}`,
+      notifKey: "notifReturn",
                   });
                 }}
               >
@@ -2106,6 +2160,7 @@ function EditListingDrawer({ listing, stockData, onSave, onDelete, onClose }) {
                       title: "ArchiveDistrict",
                       body:  `📦 ${prevSku} returned — relisted`,
                       tag:   `return-${prevSku}`,
+      notifKey: "notifReturn",
                     });
                   }}
                 >
@@ -2131,6 +2186,7 @@ function EditListingDrawer({ listing, stockData, onSave, onDelete, onClose }) {
                       title: "ArchiveDistrict",
                       body:  `📦 ${prevSku} returned — re-inventoried`,
                       tag:   `return-${prevSku}`,
+      notifKey: "notifReturn",
                     });
                   }}
                 >
@@ -3658,7 +3714,7 @@ function ListingRecap({ listings, platFilt, setPlatFilt }) {
   );
 }
 
-function MarkAsListed({ listings, setListings, customPlatforms }) {
+function MarkAsListed({ listings, setListings, customPlatforms, liveData }) {
   // Search all non-sold items — allows adding platforms to already-listed items
   const unlisted   = useMemo(() => listings.filter(l => !l.sold), [listings]);
   const _platforms = customPlatforms || DEFAULT_PLATFORMS;
@@ -3666,7 +3722,7 @@ function MarkAsListed({ listings, setListings, customPlatforms }) {
   // ── Single-item mode ──
   const [skuInput,    setSkuInput]    = useState("");
   const [skuSearch,   setSkuSearch]   = useState("");
-  const [platSel,     setPlatSel]     = useState(new Set());
+  const [platSel,     setPlatSel]     = useState(() => new Set(getAS(liveData).defaultAccounts||[]));
   const [singleDate,  setSingleDate]  = useState(getToday());
   const [singlePrev,  setSinglePrev]  = useState(null); // preview item
   const [singleDone,  setSingleDone]  = useState(false);
@@ -3762,6 +3818,7 @@ function MarkAsListed({ listings, setListings, customPlatforms }) {
       title: "ArchiveDistrict",
       body:  `🏷️ ${singlePrev.sku} listed on ${platsArr.join(" and ")}`,
       tag:   `listed-${singlePrev.sku}`,
+      notifKey: "notifListed",
     });
   };
 
@@ -3814,6 +3871,7 @@ function MarkAsListed({ listings, setListings, customPlatforms }) {
       title: "ArchiveDistrict",
       body:  `🏷️ ${valid.length} item${valid.length!==1?"s":""} listed on ${platsArr.join(" and ")}`,
       tag:   "bulk-listed",
+      notifKey: "notifListed",
     });
   };
 
@@ -4023,17 +4081,20 @@ function MarkAsListed({ listings, setListings, customPlatforms }) {
                 onClick={parseBulk} disabled={!bulkInput.trim()}>
                 Preview →
               </button>
-              {bulkParsed.length > 0 && (
-                <button
-                  className="btn btn-p" style={{flex:1,justifyContent:"center"}}
-                  onClick={confirmBulk}
-                  disabled={bulkValid.length===0 || bulkPlats.size===0}
-                >
-                  ✓ Confirm {bulkValid.length} item{bulkValid.length!==1?"s":""}
-                </button>
-              )}
+              <button
+                className="btn btn-p" style={{flex:1,justifyContent:"center"}}
+                onClick={confirmBulk}
+                disabled={bulkValid.length===0 || bulkPlats.size===0}
+              >
+                ✓ Confirm{bulkValid.length>0?` ${bulkValid.length} item${bulkValid.length!==1?"s":""}` : ""}
+              </button>
             </div>
 
+            {bulkParsed.length===0 && (
+              <div style={{fontSize:11,color:"var(--txd)",marginTop:8}}>
+                Paste SKUs above and click Preview first.
+              </div>
+            )}
             {bulkPlats.size===0 && bulkParsed.length>0 && (
               <div style={{fontSize:11,color:"var(--ac)",marginTop:8,fontWeight:700}}>
                 ● Tick at least one platform before confirming
@@ -4102,12 +4163,12 @@ function MarkAsListed({ listings, setListings, customPlatforms }) {
 /* ═══════════════════════════════════════════════════════════════
    LISTING DRAFTER — Command 7 (AI-powered)
 ═══════════════════════════════════════════════════════════════ */
-function ListingDrafter({ listings, setListings }) {
+function ListingDrafter({ listings, setListings, liveData }) {
   const unlisted = useMemo(() => listings.filter(l => !l.sold), [listings]);
 
   const [selSku,      setSelSku]      = useState("");
   const [drafterSearch,setDrafterSearch]= useState("");
-  const [condition,   setCondition]   = useState("Excellent");
+  const [condition,   setCondition]   = useState(() => getAS(liveData).defaultCondition || "Excellent");
   const [notes,       setNotes]       = useState("");
   const [photoUrl,    setPhotoUrl]    = useState("");
   const [loading,     setLoading]     = useState(false);
@@ -4649,6 +4710,7 @@ function DrafterMarkListed({ item, setListings }) {
       title: "ArchiveDistrict",
       body:  `🏷️ ${item.sku} listed on ${arr.join(" and ")}`,
       tag:   `listed-${item.sku}`,
+      notifKey: "notifListed",
     });
     setDone(true);
   };
@@ -4730,7 +4792,7 @@ function DrafterMarkListed({ item, setListings }) {
 /* ═══════════════════════════════════════════════════════════════
    MARK AS SOLD — Command 8
 ═══════════════════════════════════════════════════════════════ */
-function QuickMarkSold({ listings, setListings, customPlatforms }) {
+function QuickMarkSold({ listings, setListings, customPlatforms, liveData }) {
   const unsold = useMemo(() => listings.filter(l => l.listed && !l.sold), [listings]);
   const _platforms = customPlatforms || DEFAULT_PLATFORMS;
 
@@ -4788,6 +4850,7 @@ function QuickMarkSold({ listings, setListings, customPlatforms }) {
         ? `💰 Sold! Delist ${item.sku} from ${delistFrom.join(" and ")}`
         : `💰 ${item.sku} sold on ${platSel} for ${fmt(price)}`,
       tag:   `sold-${item.sku}`,
+      notifKey: "notifSold",
     });
     setDone(true);
   };
@@ -5287,7 +5350,17 @@ function GoalCard({ title, period, profit, revenue, profitGoal, setProfit, profi
   );
 }
 
-function Dashboard({ listings, stockData, weeklyGoal, setWeeklyGoal, monthlyGoal, setMonthlyGoal, weeklyRevGoal, setWeeklyRevGoal, monthlyRevGoal, setMonthlyRevGoal }) {
+function Dashboard({ listings, stockData, liveData, setLiveData }) {
+  const as = getAS(liveData);
+  const weeklyGoal     = as.weeklyGoal;
+  const monthlyGoal    = as.monthlyGoal;
+  const weeklyRevGoal  = as.weeklyRevGoal;
+  const monthlyRevGoal = as.monthlyRevGoal;
+  const setWeeklyGoal     = v => setLiveData(p => ({ ...p, appSettings: { ...getAS(p), weeklyGoal: v } }));
+  const setMonthlyGoal    = v => setLiveData(p => ({ ...p, appSettings: { ...getAS(p), monthlyGoal: v } }));
+  const setWeeklyRevGoal  = v => setLiveData(p => ({ ...p, appSettings: { ...getAS(p), weeklyRevGoal: v } }));
+  const setMonthlyRevGoal = v => setLiveData(p => ({ ...p, appSettings: { ...getAS(p), monthlyRevGoal: v } }));
+
   const sold    = listings.filter(l => l.sold);
   const active  = listings.filter(l => l.listed && !l.sold);
   const soldWk  = listings.filter(l => l.sold && l.daySold && l.daySold >= WEEK_START);
@@ -5393,6 +5466,7 @@ function LiveData({ listings, stockData, liveData, setLiveData, customPlatforms 
           title: "ArchiveDistrict",
           body:  `📝 Note: ${globalNotes.slice(0, 80)}${globalNotes.length > 80 ? "…" : ""}`,
           tag:   "live-notes",
+        notifKey: "notifNotes",
         });
       }
       prevNotesRef.current = globalNotes;
@@ -5506,13 +5580,21 @@ function LiveData({ listings, stockData, liveData, setLiveData, customPlatforms 
 
           <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".5px",color:"var(--txm)",margin:"11px 0 7px"}}>Cash Breakdown</div>
           <div className="pct-g">
-            {[80,60,40,30,20,10].map(p => (
-              <div key={p} className="pct-c">
-                <div className="pct-l">{p}%</div>
-                <div className="pct-v">{fmt(total*(p/100))}</div>
-              </div>
-            ))}
+            {[80,60,40,30,20,10].map(p => {
+              const isBuffer = p === (getAS(liveData).cashBuffer||85);
+              return (
+                <div key={p} className="pct-c" style={isBuffer?{background:"var(--gnl)",border:"1px solid rgba(31,92,53,.25)"}:{}}>
+                  <div className="pct-l" style={isBuffer?{color:"var(--gn)",fontWeight:900}:{}}>{p}%{isBuffer?" ★":""}</div>
+                  <div className="pct-v">{fmt(total*(p/100))}</div>
+                </div>
+              );
+            })}
           </div>
+          {getAS(liveData).cashBuffer && ![80,60,40,30,20,10].includes(+(getAS(liveData).cashBuffer)) && (
+            <div style={{marginTop:8,padding:"8px 10px",background:"var(--gnl)",border:"1px solid rgba(31,92,53,.2)",borderRadius:"var(--r)",fontSize:11,color:"var(--gn)",fontWeight:700}}>
+              Cash buffer target ({getAS(liveData).cashBuffer}%): <strong>{fmt(total*(getAS(liveData).cashBuffer/100))}</strong>
+            </div>
+          )}
         </div>
 
         {/* This Week */}
@@ -5790,7 +5872,7 @@ function InfoTip({ children }) {
   );
 }
 
-function Analytics({ listings, stockData, customPlatforms: cpArg }) {
+function Analytics({ listings, stockData, customPlatforms: cpArg, liveData }) {
   const [slowCols,    setSlowCols]   = useState(SLOW_COLS);
   const [showSlowCP,  setShowSlowCP] = useState(false);
   const [slowSortCol, setSlowSortCol]= useState("daysLive");
@@ -5854,7 +5936,8 @@ function Analytics({ listings, stockData, customPlatforms: cpArg }) {
         if(p(42)===0) return "DEAD";
         return "SLOW";
       })();
-      const autoFlag = s.sellThru>=60 && (tag==="FAST"||tag==="MEDIUM") && s.qtyRemaining<=5;
+      const stWarn = getAS(liveData).sellThruWarning||60;
+      const autoFlag = s.sellThru>=stWarn && (tag==="FAST"||tag==="MEDIUM") && s.qtyRemaining<=5;
       if (!autoFlag && !s.restock) return null;
       const urgency = s.qtyRemaining<=2&&tag==="FAST" ? "critical"
         : s.qtyRemaining<=4||tag==="MEDIUM"            ? "high"
@@ -5875,7 +5958,7 @@ function Analytics({ listings, stockData, customPlatforms: cpArg }) {
       daysLive: Math.max(0,Math.floor((new Date(TODAY)-new Date(l.dayListed))/86400000)),
       tag: getTag(l.name,l.type,l.brand,listings),
     }))
-    .filter(l => l.daysLive >= 14),
+    .filter(l => l.daysLive >= (getAS(liveData).slowMoverDays||14)),
   [listings]);
 
   const slowF = useTableFilters(slowRaw, slowCols);
@@ -6094,7 +6177,7 @@ function Analytics({ listings, stockData, customPlatforms: cpArg }) {
       {/* ── SLOW MOVERS ── */}
       <div style={{marginTop:14}}>
         <div className="sh">
-          <div className="st">Slow Movers — 14+ Days Unsold
+          <div className="st">{`Slow Movers — ${getAS(liveData).slowMoverDays||14}+ Days Unsold`}
             <span className="ss" style={{marginLeft:6}}>{slowSorted.length} item{slowSorted.length!==1?"s":""}</span>
           </div>
         </div>
@@ -6126,7 +6209,7 @@ function Analytics({ listings, stockData, customPlatforms: cpArg }) {
             <tbody>
               {slowSorted.length===0?(
                 <tr><td colSpan={visSlow.length} style={{textAlign:"center",padding:26,color:"var(--txd)"}}>
-                  {slowRaw.length===0?"No listings have been unsold for 14+ days. 🎉":"No items match filters."}
+                  {slowRaw.length===0?`No listings have been unsold for ${getAS(liveData).slowMoverDays||14}+ days. 🎉`:"No items match filters."}
                 </td></tr>
               ):slowSorted.map(l=>(
                 <tr key={l.sku}>{visSlow.map(c=><td key={c.id}>{renderSlowCell(c.id,l)}</td>)}</tr>
@@ -6897,10 +6980,55 @@ function Settings({ liveData, setLiveData, customPlatforms, setListings }) {
     pendingRenames.current = {};
   };
 
+  const [settingsTab, setSettingsTab] = useState("platforms");
+  const as = getAS(liveData);
+  const setAS = (key, val) => setLiveData(p => ({ ...p, appSettings: { ...getAS(p), [key]: val } }));
+
+  /* ── Shared section header ── */
+  const SH = ({ title, sub }) => (
+    <div style={{marginBottom:16}}>
+      <div style={{fontWeight:900,fontSize:12,textTransform:"uppercase",letterSpacing:".5px",color:"var(--txm)",marginBottom:2}}>{title}</div>
+      {sub && <div style={{fontSize:11,color:"var(--txd)",lineHeight:1.5}}>{sub}</div>}
+    </div>
+  );
+  const Row_ = ({ label, children }) => (
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 0",borderBottom:"1px solid var(--bd)",gap:12}}>
+      <span style={{fontSize:12,color:"var(--txm)",flex:1}}>{label}</span>
+      <div style={{flexShrink:0}}>{children}</div>
+    </div>
+  );
+  const Toggle = ({ value, onChange }) => (
+    <div onClick={()=>onChange(!value)} style={{width:38,height:22,borderRadius:11,background:value?"var(--gn)":"var(--bdd)",position:"relative",cursor:"pointer",transition:"background .2s",flexShrink:0}}>
+      <div style={{width:16,height:16,borderRadius:"50%",background:"#fff",position:"absolute",top:3,left:value?19:3,transition:"left .2s",boxShadow:"0 1px 3px rgba(0,0,0,.2)"}}/>
+    </div>
+  );
+  const NumInput = ({ value, onChange, min, max, placeholder, width=80 }) => (
+    <input type="number" min={min} max={max} placeholder={placeholder}
+      value={value||""} onChange={e=>onChange(e.target.value)}
+      style={{width,background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:"var(--r)",padding:"5px 8px",fontFamily:"Arial,sans-serif",fontSize:12,fontWeight:700,outline:"none",textAlign:"right"}}/>
+  );
+
   return (
-    <div style={{maxWidth:540,margin:"0 auto",padding:"0 4px"}}>
+    <div style={{maxWidth:560,margin:"0 auto",padding:"0 4px"}}>
       <div style={{fontWeight:900,fontSize:16,marginBottom:4}}>Settings</div>
-      <div style={{fontSize:12,color:"var(--txd)",marginBottom:20}}>App-wide preferences</div>
+      <div style={{fontSize:12,color:"var(--txd)",marginBottom:16}}>App-wide preferences</div>
+
+      {/* Settings tab bar */}
+      <div className="tab-bar" style={{marginBottom:18}}>
+        {[
+          {id:"platforms", label:"Platforms"},
+          {id:"goals",     label:"Goals"},
+          {id:"listings_",  label:"Listings"},
+          {id:"stock_",     label:"Stock"},
+          {id:"display",   label:"Display"},
+          {id:"notifs",    label:"Notifications"},
+        ].map(t => (
+          <div key={t.id} className={`tab ${settingsTab===t.id?"active":""}`} onClick={()=>setSettingsTab(t.id)}>{t.label}</div>
+        ))}
+      </div>
+
+      {/* ── PLATFORMS TAB ── */}
+      {settingsTab==="platforms" && (
       <div className="tw" style={{padding:"18px 20px",marginBottom:14}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
           <div style={{fontWeight:900,fontSize:12,textTransform:"uppercase",letterSpacing:".5px",color:"var(--txm)"}}>Sales Platforms & Accounts</div>
@@ -7002,23 +7130,146 @@ function Settings({ liveData, setLiveData, customPlatforms, setListings }) {
             Save Platforms
           </button>
         </div>
+        <div style={{fontSize:10,color:"var(--txd)",lineHeight:1.6,marginTop:10}}>
+          Renaming an account updates all matching listing data on Save. Data always groups by platform globally.
+        </div>
       </div>
-      <div style={{fontSize:10,color:"var(--txd)",lineHeight:1.6}}>
-        Renaming an account updates all matching listing data on Save. Data always groups by platform — individual accounts are only shown in selection dropdowns.
+      )}
+
+      {/* ── GOALS TAB ── */}
+      {settingsTab==="goals" && (
+      <div className="tw" style={{padding:"18px 20px",marginBottom:14}}>
+        <SH title="Weekly & Monthly Goals" sub="Set default targets — shown on the Dashboard. These persist across sessions." />
+        <Row_ label="Weekly profit target £"><NumInput value={as.weeklyGoal} onChange={v=>setAS("weeklyGoal",v)} placeholder="e.g. 250" /></Row_>
+        <Row_ label="Weekly revenue target £"><NumInput value={as.weeklyRevGoal} onChange={v=>setAS("weeklyRevGoal",v)} placeholder="e.g. 500" /></Row_>
+        <Row_ label="Monthly profit target £"><NumInput value={as.monthlyGoal} onChange={v=>setAS("monthlyGoal",v)} placeholder="e.g. 1000" /></Row_>
+        <Row_ label="Monthly revenue target £"><NumInput value={as.monthlyRevGoal} onChange={v=>setAS("monthlyRevGoal",v)} placeholder="e.g. 2000" /></Row_>
+        <div style={{height:10}}/>
+        <SH title="Thresholds" sub="Used throughout the app to flag underperformance." />
+        <Row_ label={<span>Sell-through warning % <span style={{fontSize:10,color:"var(--txd)"}}>— restock flags trigger above this</span></span>}>
+          <NumInput value={as.sellThruWarning} onChange={v=>setAS("sellThruWarning",+v)} min={1} max={100} placeholder="60" />
+        </Row_>
+        <Row_ label={<span>Slow mover threshold <span style={{fontSize:10,color:"var(--txd)"}}>days unsold before flagged</span></span>}>
+          <NumInput value={as.slowMoverDays} onChange={v=>setAS("slowMoverDays",+v)} min={1} max={365} placeholder="14" />
+        </Row_>
       </div>
+      )}
+
+      {/* ── LISTING DEFAULTS TAB ── */}
+      {settingsTab==="listings_" && (
+      <div className="tw" style={{padding:"18px 20px",marginBottom:14}}>
+        <SH title="Listing Drafter" sub="Pre-fills fields when you open the Drafter." />
+        <Row_ label="Default condition">
+          <select value={as.defaultCondition||"Excellent"} onChange={e=>setAS("defaultCondition",e.target.value)}
+            style={{background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:"var(--r)",padding:"5px 9px",fontFamily:"Arial,sans-serif",fontSize:12,outline:"none"}}>
+            {["Excellent","Very Good","Good","Fair"].map(c=><option key={c}>{c}</option>)}
+          </select>
+        </Row_>
+        <div style={{height:10}}/>
+        <SH title="Mark as Listed" sub="These accounts will be pre-ticked when you open Mark as Listed." />
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:7,marginTop:4}}>
+          {(customPlatforms||DEFAULT_PLATFORMS).map(p => {
+            const sel = (as.defaultAccounts||[]).includes(p);
+            const col = getPlatColour(p);
+            return (
+              <button key={p} onClick={()=>{
+                const cur = as.defaultAccounts||[];
+                setAS("defaultAccounts", sel ? cur.filter(x=>x!==p) : [...cur,p]);
+              }} style={{
+                padding:"7px 4px",fontSize:11,fontWeight:700,textAlign:"center",
+                border:`1.5px solid ${sel?col:"var(--bd)"}`,
+                borderRadius:"var(--r)",cursor:"pointer",
+                background:sel?col+"18":"var(--sf2)",
+                color:sel?col:"var(--txm)",transition:"all .12s",
+              }}>{p}{sel?" ✓":""}</button>
+            );
+          })}
+        </div>
+      </div>
+      )}
+
+      {/* ── STOCK TAB ── */}
+      {settingsTab==="stock_" && (
+      <div className="tw" style={{padding:"18px 20px",marginBottom:14}}>
+        <SH title="Stock Purchasing" sub="Guides your buying decisions on the Live Data tab." />
+        <Row_ label={<span>Cash buffer guideline % <span style={{fontSize:10,color:"var(--txd)"}}>— highlighted in Live Data cash breakdown</span></span>}>
+          <NumInput value={as.cashBuffer} onChange={v=>setAS("cashBuffer",+v)} min={1} max={100} placeholder="85" />
+        </Row_>
+        <div style={{fontSize:11,color:"var(--txd)",marginTop:8,lineHeight:1.6}}>
+          Example: at 85%, if your liquid cash is £500 the app highlights £425 as your safe spending limit.
+        </div>
+      </div>
+      )}
+
+      {/* ── DISPLAY TAB ── */}
+      {settingsTab==="display" && (
+      <div className="tw" style={{padding:"18px 20px",marginBottom:14}}>
+        <SH title="Currency & Dates" />
+        <Row_ label="Currency symbol">
+          <select value={as.currency||"£"} onChange={e=>setAS("currency",e.target.value)}
+            style={{background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:"var(--r)",padding:"5px 9px",fontFamily:"Arial,sans-serif",fontSize:12,outline:"none"}}>
+            {["£","$","€","¥","₹","A$","C$"].map(c=><option key={c} value={c}>{c}</option>)}
+          </select>
+        </Row_>
+        <Row_ label="Date format">
+          <select value={as.dateFormat||"DD/MM"} onChange={e=>setAS("dateFormat",e.target.value)}
+            style={{background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:"var(--r)",padding:"5px 9px",fontFamily:"Arial,sans-serif",fontSize:12,outline:"none"}}>
+            <option value="DD/MM">DD/MM/YY</option>
+            <option value="MM/DD">MM/DD/YY</option>
+          </select>
+        </Row_>
+        <div style={{height:10}}/>
+        <SH title="Appearance" />
+        <Row_ label={<span>Compact mode <span style={{fontSize:10,color:"var(--txd)"}}>— smaller table row heights</span></span>}>
+          <Toggle value={!!as.compactMode} onChange={v=>setAS("compactMode",v)} />
+        </Row_>
+        <Row_ label={<span>Sidebar collapsed by default <span style={{fontSize:10,color:"var(--txd)"}}>— on mobile</span></span>}>
+          <Toggle value={!!as.sidebarCollapsed} onChange={v=>setAS("sidebarCollapsed",v)} />
+        </Row_>
+      </div>
+      )}
+
+      {/* ── NOTIFICATIONS TAB ── */}
+      {settingsTab==="notifs" && (
+      <div className="tw" style={{padding:"18px 20px",marginBottom:14}}>
+        <SH title="Push Notifications" sub="Choose which events trigger a push notification on your device." />
+        {[
+          {key:"notifSold",        label:"Item sold",                    def:true},
+          {key:"notifListed",      label:"Item marked as listed",        def:false},
+          {key:"notifReturn",      label:"Return raised",                def:true},
+          {key:"notifShipped",     label:"Item shipped",                 def:false},
+          {key:"notifSundayBackup",label:"Sunday backup reminder",       def:true},
+          {key:"notifNotes",       label:"Global notes updated",         def:false},
+        ].map(({key,label,def}) => (
+          <Row_ key={key} label={label}>
+            <Toggle
+              value={as[key]!==undefined ? !!as[key] : def}
+              onChange={v=>setAS(key,v)}
+            />
+          </Row_>
+        ))}
+        <div style={{fontSize:11,color:"var(--txd)",marginTop:12,lineHeight:1.6}}>
+          Push notifications require browser permission. Tap the 🔔 icon in the top bar to enable.
+        </div>
+      </div>
+      )}
+
     </div>
   );
 }
 
 export default function App() {
   const [view,            setView]            = useState("dashboard");
-  const [sidebarOpen,     setSidebarOpen]     = useState(true);
+  const [sidebarOpen,     setSidebarOpen]     = useState(() => {
+    try {
+      const saved = localStorage.getItem("ad_livedata");
+      if (saved) { const p = JSON.parse(saved); return !p?.appSettings?.sidebarCollapsed; }
+    } catch {}
+    return true;
+  });
   const [listings,        setListingsRaw]     = useState(LISTINGS_INIT);
   const [stockData,       setStockDataRaw]    = useState(STOCK_INIT);
-  const [weeklyGoal,      setWeeklyGoal]      = useState("");
-  const [monthlyGoal,     setMonthlyGoal]     = useState("");
-  const [weeklyRevGoal,   setWeeklyRevGoal]   = useState("");
-  const [monthlyRevGoal,  setMonthlyRevGoal]  = useState("");
+  // Goals are now in liveData.appSettings — no separate state needed
   const [liveData, setLiveDataRaw] = useState(() => {
     // Load from localStorage as fallback (survives Supabase failures)
     try {
@@ -7181,10 +7432,6 @@ export default function App() {
           if (data.listings?.length)    setListingsRaw(data.listings);
           if (data.stock_data?.length)  setStockDataRaw(data.stock_data);
           if (data.goals) {
-            setWeeklyGoal(data.goals.weekly      || "");
-            setMonthlyGoal(data.goals.monthly    || "");
-            setWeeklyRevGoal(data.goals.weeklyRev   || "");
-            setMonthlyRevGoal(data.goals.monthlyRev || "");
             if (data.goals.liveData) setLiveData(data.goals.liveData);
           }
           setStorageStatus("saved");
@@ -7235,11 +7482,8 @@ export default function App() {
     if (data.stock_data?.length > 0 &&
         data.stock_data.length >= stockDataRef.current.length)
       setStockDataRaw(data.stock_data);
-    if (data.goals) {
-      setWeeklyGoal(data.goals.weekly   || "");
-      setMonthlyGoal(data.goals.monthly || "");
-      if (data.goals.liveData?.profitLog)
-        setLiveData(prev => ({ ...prev, profitLog: data.goals.liveData.profitLog }));
+    if (data.goals?.liveData) {
+      setLiveData(prev => ({ ...prev, ...data.goals.liveData }));
     }
     setStorageStatus("saved");
   }, []);
@@ -7314,8 +7558,8 @@ export default function App() {
 
   /* Trigger save whenever data changes */
   useEffect(() => {
-    debouncedSave(listings, stockData, { weekly: weeklyGoal, monthly: monthlyGoal, weeklyRev: weeklyRevGoal, monthlyRev: monthlyRevGoal, liveData });
-  }, [listings, stockData, weeklyGoal, monthlyGoal, weeklyRevGoal, monthlyRevGoal, liveData, debouncedSave]);
+    debouncedSave(listings, stockData, { liveData });
+  }, [listings, stockData, liveData, debouncedSave]);
 
   /* ── beforeunload — always save to localStorage on tab close ── */
   useEffect(() => {
@@ -7359,6 +7603,7 @@ export default function App() {
             title: "ArchiveDistrict",
             body:  "💾 Weekly backup reminder — export your data",
             tag:   "sunday-backup",
+          notifKey: "notifSundayBackup",
           });
         }, ms);
       }
@@ -7385,7 +7630,7 @@ export default function App() {
     const ts = new Date().toISOString();
     lastSaveTs.current = ts;
     setTimeout(() => { isRemoteUpdate.current = false; }, 2000);
-    const ok = await saveState(listings, stockData, { weekly: weeklyGoal, monthly: monthlyGoal, weeklyRev: weeklyRevGoal, monthlyRev: monthlyRevGoal, liveData });
+    const ok = await saveState(listings, stockData, { liveData });
     saveLocalVersion(listings, stockData);
     const time = new Date().toLocaleTimeString("en-GB", { hour:"2-digit", minute:"2-digit" });
     setHardSaveMsg(ok ? `✓ Saved at ${time} — ${listings.length} listings` : "✗ Save failed — check connection");
@@ -7499,7 +7744,7 @@ export default function App() {
       listings,
       stock: stockData,
       stockDerived,
-      goals: { weekly:weeklyGoal, monthly:monthlyGoal, weeklyRev:weeklyRevGoal, monthlyRev:monthlyRevGoal },
+      goals: { liveData },
       liveData,
       history: historySnapshot,
     }, null, 2);
@@ -7516,16 +7761,13 @@ export default function App() {
         const d = JSON.parse(ev.target.result);
         if (d.listings) setListingsRaw(d.listings);
         if (d.stock)    setStockDataRaw(d.stock);
-        if (d.goals?.weekly)     setWeeklyGoal(d.goals.weekly);
-        if (d.goals?.monthly)    setMonthlyGoal(d.goals.monthly);
-        if (d.goals?.weeklyRev)  setWeeklyRevGoal(d.goals.weeklyRev);
-        if (d.goals?.monthlyRev) setMonthlyRevGoal(d.goals.monthlyRev);
+        // Goals now live in liveData.appSettings
         if (d.liveData)       setLiveData(d.liveData);
         setStorageStatus("loading");
         const ok = await saveState(
           d.listings || listings,
           d.stock    || stockData,
-          { weekly: d.goals?.weekly || weeklyGoal, monthly: d.goals?.monthly || monthlyGoal, weeklyRev: d.goals?.weeklyRev || weeklyRevGoal, monthlyRev: d.goals?.monthlyRev || monthlyRevGoal }
+          { liveData: d.liveData || liveData }
         );
         if (ok) {
           setStorageStatus("saved");
@@ -7568,7 +7810,7 @@ export default function App() {
   return (
     <>
       <style>{CSS}</style>
-      <div className="app">
+      <div className={`app${getAS(liveData).compactMode?" compact":""}`}>
 
         {/* Mobile backdrop */}
         {isMobile && sidebarOpen && (
@@ -7683,18 +7925,18 @@ export default function App() {
           </div>
 
           <div className="content">
-            {view==="dashboard"   && <Dashboard listings={listings} stockData={stockData} weeklyGoal={weeklyGoal} setWeeklyGoal={setWeeklyGoal} monthlyGoal={monthlyGoal} setMonthlyGoal={setMonthlyGoal} weeklyRevGoal={weeklyRevGoal} setWeeklyRevGoal={setWeeklyRevGoal} monthlyRevGoal={monthlyRevGoal} setMonthlyRevGoal={setMonthlyRevGoal} />}
+            {view==="dashboard"   && <Dashboard listings={listings} stockData={stockData} liveData={liveData} setLiveData={setLiveData} />}
             {view==="stock"       && <StockTab stockData={stockData} setStockData={setStockData} listings={listings} setListings={setListings} />}
-            {view==="listings"    && <ListingsTab listings={listings} setListings={setListings} stockData={stockData} customPlatforms={customPlatforms} />}
+            {view==="listings"    && <ListingsTab listings={listings} setListings={setListings} stockData={stockData} customPlatforms={customPlatforms} liveData={liveData} />}
             {view==="movement"    && <MovementTracker listings={listings} />}
             {view==="listingdata" && <ListingDataTab listings={listings} />}
-            {view==="marklisted"  && <MarkAsListed listings={listings} setListings={setListings} customPlatforms={customPlatforms} />}
-            {view==="drafter"     && <ListingDrafter listings={listings} setListings={setListings} />}
-            {view==="marksold"    && <QuickMarkSold listings={listings} setListings={setListings} customPlatforms={customPlatforms} />}
+            {view==="marklisted"  && <MarkAsListed listings={listings} setListings={setListings} customPlatforms={customPlatforms} liveData={liveData} />}
+            {view==="drafter"     && <ListingDrafter listings={listings} setListings={setListings} liveData={liveData} />}
+            {view==="marksold"    && <QuickMarkSold listings={listings} setListings={setListings} customPlatforms={customPlatforms} liveData={liveData} />}
             {view==="shipping"    && <ShippingTab listings={listings} setListings={setListings} />}
             {view==="livedata"    && <LiveData listings={listings} stockData={stockData} liveData={liveData} setLiveData={setLiveData} customPlatforms={customPlatforms} />}
             {view==="calculator"  && <PriceCalculator listings={listings} />}
-            {view==="analytics"   && <Analytics listings={listings} stockData={stockData} customPlatforms={customPlatforms} />}
+            {view==="analytics"   && <Analytics listings={listings} stockData={stockData} customPlatforms={customPlatforms} liveData={liveData} />}
             {view==="growth"      && <Growth listings={listings} stockData={stockData} />}
             {view==="history"     && <History listings={listings} stockData={stockData} liveData={liveData} />}
             {view==="settings"    && <Settings liveData={liveData} setLiveData={setLiveData} customPlatforms={customPlatforms} setListings={setListings} />}
