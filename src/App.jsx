@@ -4831,6 +4831,7 @@ function QuickMarkSold({ listings, setListings, customPlatforms }) {
           <div className="qu-title" style={{marginTop:4}}>3 · Platform Sold On</div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginTop:6}}>
             {_platforms.map(p=>(
+              <button key={p} onClick={()=>setPlatSel(p===platSel?null:p)} style={{
                 padding:"7px 4px",fontSize:11,fontWeight:700,textAlign:"center",
                 border:`1.5px solid ${platSel===p?"var(--ac)":"var(--bd)"}`,
                 borderRadius:"var(--r)",cursor:"pointer",
