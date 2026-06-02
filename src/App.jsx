@@ -3671,6 +3671,7 @@ function MarkAsListed({ listings, setListings, customPlatforms }) {
   const PlatGrid = ({ sel, onToggle, existingPlats=[] }) => (
     <div className="plat-grid-4">
       {_platforms.map(p => {
+        const isExisting = existingPlats.includes(p);
         const isSelected = sel.has(p);
         return (
           <button key={p}
@@ -6774,18 +6775,52 @@ function Placeholder({ title, icon, note }) {
 /* ═══════════════════════════════════════════════════════════════
    SETTINGS — Platform management
 ═══════════════════════════════════════════════════════════════ */
-function Settings({ liveData, setLiveData, customPlatforms }) {
+function Settings({ liveData, setLiveData, customPlatforms, setListings }) {
   const [platforms, setPlatforms] = useState(() => [...customPlatforms]);
   const [newName,   setNewName]   = useState("");
   const [editIdx,   setEditIdx]   = useState(null);
   const [editVal,   setEditVal]   = useState("");
   const [saved,     setSaved]     = useState(false);
+  // Track renames: { oldName -> newName } accumulated before Save is pressed
+  const pendingRenames = useRef({});
 
   const save = () => {
     setLiveData(prev => ({ ...prev, platforms }));
+    // Cascade all accumulated renames into listing data
+    const renames = pendingRenames.current;
+    if (Object.keys(renames).length > 0 && setListings) {
+      setListings(prev => prev.map(l => {
+        let changed = false;
+        let platform   = l.platform;
+        let platforms_ = l.platforms ? [...l.platforms] : [];
+        let platformDates = l.platformDates ? { ...l.platformDates } : {};
+
+        // Rename primary platform
+        if (platform && renames[platform]) {
+          platform = renames[platform];
+          changed = true;
+        }
+        // Rename in platforms array
+        platforms_ = platforms_.map(p => {
+          if (renames[p]) { changed = true; return renames[p]; }
+          return p;
+        });
+        // Rename keys in platformDates
+        const newDates = {};
+        Object.entries(platformDates).forEach(([k, v]) => {
+          newDates[renames[k] || k] = v;
+          if (renames[k]) changed = true;
+        });
+
+        if (!changed) return l;
+        return { ...l, platform, platforms: platforms_, platformDates: newDates };
+      }));
+    }
+    pendingRenames.current = {};
     setSaved(true);
     setTimeout(() => setSaved(false), 2200);
   };
+
   const addPlatform = () => {
     const n = newName.trim();
     if (!n || platforms.includes(n)) return;
@@ -6796,6 +6831,18 @@ function Settings({ liveData, setLiveData, customPlatforms }) {
   const saveEdit = idx => {
     const v = editVal.trim();
     if (!v) return;
+    const oldName = platforms[idx];
+    if (oldName !== v) {
+      // Record rename — chain through any previous renames of the same original name
+      const existingOrig = Object.keys(pendingRenames.current).find(
+        k => pendingRenames.current[k] === oldName
+      );
+      if (existingOrig) {
+        pendingRenames.current[existingOrig] = v;
+      } else {
+        pendingRenames.current[oldName] = v;
+      }
+    }
     setPlatforms(p => p.map((pl,i) => i===idx ? v : pl));
     setEditIdx(null); setEditVal("");
   };
@@ -6816,6 +6863,7 @@ function Settings({ liveData, setLiveData, customPlatforms }) {
         </div>
         <div style={{fontSize:11,color:"var(--txd)",marginBottom:14,lineHeight:1.5}}>
           These appear in every platform dropdown — Mark as Listed, Sold, Drafter, Analytics.
+          <strong style={{color:"var(--tx)"}}> Renaming a platform updates all existing listing data globally</strong> when you press Save Platforms.
           Add names like <strong>"Vinted 1"</strong> and <strong>"Vinted 2"</strong> to track multiple accounts separately.
         </div>
         {platforms.map((pl, idx) => (
@@ -6865,7 +6913,7 @@ function Settings({ liveData, setLiveData, customPlatforms }) {
         </div>
       </div>
       <div style={{fontSize:10,color:"var(--txd)",lineHeight:1.6}}>
-        Changes apply immediately after saving. Existing listing data is unaffected — only dropdown options change.
+        Renaming a platform cascades to all listing data on Save — platform sold, platforms listed, and dated entries all update. Adding or deleting platforms only changes the dropdown list.
       </div>
     </div>
   );
@@ -7548,7 +7596,7 @@ export default function App() {
             {view==="analytics"   && <Analytics listings={listings} stockData={stockData} customPlatforms={customPlatforms} />}
             {view==="growth"      && <Growth listings={listings} stockData={stockData} />}
             {view==="history"     && <History listings={listings} stockData={stockData} liveData={liveData} />}
-            {view==="settings"    && <Settings liveData={liveData} setLiveData={setLiveData} customPlatforms={customPlatforms} />}
+            {view==="settings"    && <Settings liveData={liveData} setLiveData={setLiveData} customPlatforms={customPlatforms} setListings={setListings} />}
             {view==="versions"    && <VersionHistory onRestore={(v)=>{ setListingsRaw(v.listings); setStockDataRaw(v.stockData); setView("dashboard"); }} />}
           </div>
         </div>
