@@ -134,6 +134,34 @@ const PLAT_FEES = {
 };
 const WEBSITES = ["Fleek","VWS","Depop","eBay","Vinted","Other"];
 
+/* ─── PLATFORM FAMILY UTILITIES ───
+   "Vinted 1", "Vinted 2" → family "Vinted"
+   Used everywhere data is DISPLAYED or GROUPED.
+   Dropdowns for SELECTING a platform always use the full name.
+─── */
+const PLAT_FAMILY_BASES = ["Depop","Vinted","eBay","Whatnot","Tilt","Facebook Marketplace","Grailed","Other"];
+const PLAT_COLOURS = {
+  Depop:"#ff2300", Vinted:"#09b1ba", eBay:"#e53238",
+  Whatnot:"#7c3aed", Grailed:"#1a1a1a",
+  "Facebook Marketplace":"#1877f2", Tilt:"#f59e0b",
+};
+const getPlatFamily = (name) => {
+  if (!name) return name;
+  const match = PLAT_FAMILY_BASES.find(b => name.toLowerCase().startsWith(b.toLowerCase()));
+  return match || name;
+};
+const getPlatColour = (name) => {
+  if (!name) return "#888";
+  if (PLAT_COLOURS[name]) return PLAT_COLOURS[name];
+  const base = getPlatFamily(name);
+  return PLAT_COLOURS[base] || "#888";
+};
+const getPlatFamilies = (plats) => [...new Set((plats||[]).map(getPlatFamily))];
+const listingHasFamily = (l, family) => {
+  const allPlats = [...new Set([...(l.platforms||[]), l.platform].filter(Boolean))];
+  return allPlats.some(p => getPlatFamily(p) === family);
+};
+
 /* ─── LISTING DROPDOWN OPTIONS (from real data + common extras) ─── */
 const DEFAULT_COLOURS = [
   "Black","White","Navy","Blue","Grey","Brown","Beige","Green","Red","Yellow",
@@ -1892,12 +1920,7 @@ function EditListingDrawer({ listing, stockData, onSave, onDelete, onClose }) {
             <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,marginTop:4}}>
               {MARK_LISTED_PLATS.map(p => {
                 const isSelected = (form.platforms||[]).includes(p) || form.platform === p;
-                const PLAT_DOTS = {
-                  Depop:"#ff2300",Vinted:"#09b1ba",eBay:"#e53238",
-                  Whatnot:"#7c3aed","Facebook Marketplace":"#1877f2",
-                  Tilt:"#f59e0b",Grailed:"#1a1a1a",
-                };
-                const col = isSelected ? (PLAT_DOTS[p]||"var(--ac)") : null;
+                const col = isSelected ? getPlatColour(p) : null;
                 return (
                   <button key={p}
                     onClick={() => {
@@ -2197,14 +2220,18 @@ function ListingCell({ colId, l, onShipToggle, onSelect, selected }) {
     </span>
   );
   if (colId === "notes")    return <span style={{color:"var(--txm)",fontSize:11}}>{l.notes || "—"}</span>;
-  if (colId === "platform") return l.platform
-    ? <span className="badge b-b">{l.platform}</span>
-    : <span style={{color:"var(--txd)"}}>—</span>;
+  if (colId === "platform") {
+    // Show family name (e.g. "Vinted 1" → "Vinted")
+    const fam = l.platform ? getPlatFamily(l.platform) : null;
+    return fam ? <span className="badge b-b">{fam}</span> : <span style={{color:"var(--txd)"}}>—</span>;
+  }
   if (colId === "platforms") {
     const plats = l.platforms?.length ? l.platforms : l.platform ? [l.platform] : [];
-    return plats.length
+    // Deduplicate by family so "Vinted 1" and "Vinted 2" show as one "Vinted" badge
+    const families = getPlatFamilies(plats);
+    return families.length
       ? <div style={{display:"flex",flexWrap:"wrap",gap:3}}>
-          {plats.map(p => <span key={p} className="badge b-b" style={{fontSize:9,padding:"1px 5px"}}>{p}</span>)}
+          {families.map(f => <span key={f} className="badge b-b" style={{fontSize:9,padding:"1px 5px"}}>{f}</span>)}
         </div>
       : <span style={{color:"var(--txd)"}}>—</span>;
   }
@@ -2212,24 +2239,27 @@ function ListingCell({ colId, l, onShipToggle, onSelect, selected }) {
     const pd = l.platformDates || {};
     const plats = l.platforms?.length ? l.platforms : l.platform ? [l.platform] : [];
     if (!plats.length) return <span style={{color:"var(--txd)"}}>—</span>;
-    const PLAT_DOTS = {
-      Depop:"#ff2300",Vinted:"#09b1ba",eBay:"#e53238",
-      Whatnot:"#7c3aed",Grailed:"#1a1a1a",
-      "Facebook Marketplace":"#1877f2",Tilt:"#f59e0b",
-    };
+    // Group by family — show earliest date per family
+    const familyMap = {};
+    plats.forEach(p => {
+      const fam = getPlatFamily(p);
+      const date = pd[p] || l.dayListed;
+      if (!familyMap[fam] || (date && date < familyMap[fam].date)) {
+        familyMap[fam] = { date };
+      }
+    });
     return (
       <div style={{display:"flex",flexDirection:"column",gap:2}}>
-        {plats.map(p => {
-          const date = pd[p] || l.dayListed;
-          const col  = PLAT_DOTS[p] || "var(--txm)";
+        {Object.entries(familyMap).map(([fam, {date}]) => {
+          const col = getPlatColour(fam);
           return (
-            <div key={p} style={{
+            <div key={fam} style={{
               display:"inline-flex",alignItems:"center",gap:5,
               background:col+"18",border:`1px solid ${col}55`,
               borderRadius:20,padding:"2px 7px",fontSize:10,whiteSpace:"nowrap",
             }}>
               <span style={{width:6,height:6,borderRadius:"50%",background:col,flexShrink:0,display:"inline-block"}}/>
-              <span style={{fontWeight:700,color:col}}>{p}</span>
+              <span style={{fontWeight:700,color:col}}>{fam}</span>
               {date && <span style={{color:"#666",fontSize:9}}>
                 {new Date(date).toLocaleDateString("en-GB",{day:"numeric",month:"short"})}
               </span>}
@@ -2569,7 +2599,7 @@ function ListingsTab({ listings, setListings, stockData, customPlatforms }) {
 
     // Dropdown filters
     if (bundleFilter !== "All") d = d.filter(l => l.bundleSku === bundleFilter);
-    if (platFilter   !== "All") d = d.filter(l => l.platform === platFilter);
+    if (platFilter   !== "All") d = d.filter(l => listingHasFamily(l, platFilter));
     if (sizeFilter   !== "All") d = d.filter(l => l.size === sizeFilter);
 
     // Sort
@@ -2725,7 +2755,7 @@ function ListingsTab({ listings, setListings, stockData, customPlatforms }) {
 
         <select className="fs" value={platFilter} onChange={e=>setPlatFilter(e.target.value)}>
           <option value="All">All Platforms</option>
-          {(customPlatforms||DEFAULT_PLATFORMS).map(p => <option key={p}>{p}</option>)}
+          {getPlatFamilies(customPlatforms||DEFAULT_PLATFORMS).map(f => <option key={f} value={f}>{f}</option>)}
         </select>
 
         <select className="fs" value={sizeFilter} onChange={e=>setSizeFilter(e.target.value)}>
@@ -3363,7 +3393,7 @@ function ListingDataTab({ listings }) {
     if (col==="dayListed")return <span style={{color:"var(--txm)",fontSize:11}}>{l.dayListed||"—"}</span>;
     if (col==="tag")      return <MovTag tag={l.tag} />;
     if (col==="bundleSku")return <span className="bsku">{l.bundleSku}</span>;
-    if (col==="platform") return l.platform ? <span className="badge b-b">{l.platform}</span> : <span style={{color:"var(--txd)"}}>—</span>;
+    if (col==="platform") return l.platform ? <span className="badge b-b">{getPlatFamily(l.platform)}</span> : <span style={{color:"var(--txd)"}}>—</span>;
     return "—";
   };
 
@@ -3509,15 +3539,6 @@ function ListingDataTab({ listings }) {
 // MARK_LISTED_PLATS is now dynamic — see customPlatforms in App
 
 /* ── ListingRecap — today's listing session summary ── */
-const RECAP_PLAT_STYLE = {
-  Depop:   {bg:"#fde8e8",col:"#993c1d"},
-  Vinted:  {bg:"#e1f7f7",col:"#0f6e56"},
-  eBay:    {bg:"#e6f0fb",col:"#185fa5"},
-  Whatnot: {bg:"#f0ecfe",col:"#534ab7"},
-  Grailed: {bg:"#f0f0f0",col:"#444"},
-  "Facebook Marketplace":{bg:"#e6f0fb",col:"#185fa5"},
-  Tilt:    {bg:"#fff8e1",col:"#7a4e0e"},
-};
 
 function ListingRecap({ listings, platFilt, setPlatFilt }) {
   const today = getToday();
@@ -3547,9 +3568,9 @@ function ListingRecap({ listings, platFilt, setPlatFilt }) {
     })
     .sort((a,b) => a.sku.localeCompare(b.sku));
 
-  const platforms   = [...new Set(todayItems.flatMap(it => it.plats))];
+  const platforms   = getPlatFamilies(todayItems.flatMap(it => it.plats));
   const crossListed = todayItems.filter(it => it.plats.length > 1).length;
-  const filtered    = platFilt === "All" ? todayItems : todayItems.filter(it => it.plats.includes(platFilt));
+  const filtered    = platFilt === "All" ? todayItems : todayItems.filter(it => it.plats.some(p => getPlatFamily(p) === platFilt));
 
   if (todayItems.length === 0) return null;
 
@@ -3621,10 +3642,10 @@ function ListingRecap({ listings, platFilt, setPlatFilt }) {
               </div>
             </div>
             <div style={{display:"flex",gap:4,flexShrink:0,flexWrap:"wrap",justifyContent:"flex-end"}}>
-              {it.plats.map(p=>{
-                const s=RECAP_PLAT_STYLE[p]||{bg:"#f0f0f0",col:"#555"};
-                return <span key={p} style={{fontSize:10,fontWeight:600,padding:"2px 7px",
-                  borderRadius:20,background:s.bg,color:s.col}}>{p}</span>;
+              {getPlatFamilies(it.plats).map(fam=>{
+                const col=getPlatColour(fam);
+                return <span key={fam} style={{fontSize:10,fontWeight:600,padding:"2px 7px",
+                  borderRadius:20,background:col+"18",color:col,border:`1px solid ${col}55`}}>{fam}</span>;
               })}
             </div>
             <span style={{fontSize:10,color:"var(--txd)",flexShrink:0,minWidth:32,textAlign:"right"}}>
@@ -4988,11 +5009,11 @@ function ShippingTab({ listings, setListings }) {
     prev.map(l => (l.sold && !l.shipped) ? { ...l, shipped:true, shippedDate:TODAY } : l)
   );
 
-  /* Group by platform */
+  /* Group by platform family (e.g. "Vinted 1" and "Vinted 2" → "Vinted") */
   const byPlat = useMemo(() => {
     const m = {};
     toShip.forEach(l => {
-      const k = l.platform || "No Platform";
+      const k = l.platform ? getPlatFamily(l.platform) : "No Platform";
       if (!m[k]) m[k] = [];
       m[k].push(l);
     });
@@ -5008,7 +5029,7 @@ function ShippingTab({ listings, setListings }) {
     if (col==="name")      return <span style={{fontWeight:600}}>{l.name}</span>;
     if (col==="colour")    return l.colour;
     if (col==="size")      return <span style={{color:"var(--txm)"}}>{l.size}</span>;
-    if (col==="platform")  return l.platform ? <span className="badge b-b">{l.platform}</span> : <span style={{color:"var(--txd)"}}>—</span>;
+    if (col==="platform")  return l.platform ? <span className="badge b-b">{getPlatFamily(l.platform)}</span> : <span style={{color:"var(--txd)"}}>—</span>;
     if (col==="soldPrice") return <span style={{fontWeight:700,color:"var(--gn)"}}>{fmt(l.soldPrice)}</span>;
     if (col==="daySold")   return <span style={{color:"var(--txm)",fontSize:11}}>{l.daySold||"—"}</span>;
     if (col==="bundleSku") return <span className="bsku">{l.bundleSku}</span>;
@@ -5781,9 +5802,11 @@ function Analytics({ listings, stockData, customPlatforms: cpArg }) {
   /* ── Platform performance ── */
   const platformStats = useMemo(() => {
     const plats = cpArg || DEFAULT_PLATFORMS;
-    return plats.map(plat => {
+    const families = getPlatFamilies(plats);
+    return families.map(family => {
+      const familyPlats = plats.filter(p => getPlatFamily(p) === family);
       const platListings = listings.filter(l =>
-        l.listed && (l.platforms?.includes(plat) || l.platform === plat)
+        l.listed && familyPlats.some(fp => l.platforms?.includes(fp) || l.platform === fp)
       );
       const soldItems = platListings.filter(l => l.sold);
       const revenue   = soldItems.reduce((a,l)=>a+(l.soldPrice||0),0);
@@ -5793,8 +5816,7 @@ function Analytics({ listings, stockData, customPlatforms: cpArg }) {
       const sellThru  = platListings.length
         ? Math.round(soldItems.length/platListings.length*100) : 0;
       if (!platListings.length) return null;
-
-      /* Top 5 items by sold count on this platform */
+      const displayName = family; // always show base family name
       const itemMap = {};
       soldItems.forEach(l => {
         const key = `${l.name}||${l.type||""}`;
@@ -5809,11 +5831,10 @@ function Analytics({ listings, stockData, customPlatforms: cpArg }) {
           avgPrice: it.sold ? it.revenue/it.sold : 0,
           avgDays:  it.sold ? it.days/it.sold    : 0,
         }));
-
-      return { name:plat, items:platListings.length, sold:soldItems.length,
+      return { name:displayName, family, items:platListings.length, sold:soldItems.length,
         revenue, avgDays, avgPrice, sellThru, topItems };
     }).filter(Boolean);
-  }, [listings]);
+  }, [listings, cpArg]);
 
   const minDays  = platformStats.length ? Math.min(...platformStats.map(p=>p.avgDays||999)) : 0;
   const maxPrice = platformStats.length ? Math.max(...platformStats.map(p=>p.avgPrice))     : 0;
@@ -5882,7 +5903,7 @@ function Analytics({ listings, stockData, customPlatforms: cpArg }) {
     if (col==="daysLive") return <span style={{fontWeight:700,color:l.daysLive>30?"var(--ac)":l.daysLive>21?"var(--am)":"var(--tx)"}}>{l.daysLive}d</span>;
     if (col==="price")    return fmt(l.price);
     if (col==="bundleSku")return <span className="bsku">{l.bundleSku}</span>;
-    if (col==="platform") return l.platform?<span className="badge b-b">{l.platform}</span>:<span style={{color:"var(--txd)"}}>—</span>;
+    if (col==="platform") return l.platform?<span className="badge b-b">{getPlatFamily(l.platform)}</span>:<span style={{color:"var(--txd)"}}>—</span>;
     if (col==="dayListed")return <span style={{color:"var(--txm)",fontSize:11}}>{l.dayListed||"—"}</span>;
     return "—";
   };
@@ -6776,136 +6797,206 @@ function Placeholder({ title, icon, note }) {
    SETTINGS — Platform management
 ═══════════════════════════════════════════════════════════════ */
 function Settings({ liveData, setLiveData, customPlatforms, setListings }) {
-  const [platforms, setPlatforms] = useState(() => [...customPlatforms]);
-  const [newName,   setNewName]   = useState("");
-  const [editIdx,   setEditIdx]   = useState(null);
+  // platformAccounts shape: { Vinted: ["Vinted 1","Vinted 2"], Depop: ["Depop"], ... }
+  const initAccounts = () => {
+    const pa = liveData?.platformAccounts;
+    if (pa && typeof pa === "object" && !Array.isArray(pa)) return pa;
+    // Migrate from old flat array OR build from scratch
+    const flat = Array.isArray(liveData?.platforms) ? liveData.platforms : [];
+    const result = {};
+    PLAT_FAMILY_BASES.forEach(base => {
+      // Find any accounts in old flat list belonging to this base
+      const matches = flat.filter(p => getPlatFamily(p) === base);
+      result[base] = matches.length ? matches : [base];
+    });
+    return result;
+  };
+
+  const [accounts,  setAccounts]  = useState(initAccounts);
+  const [expanded,  setExpanded]  = useState({});   // { platform: true/false }
+  const [editKey,   setEditKey]   = useState(null);  // { platform, idx }
   const [editVal,   setEditVal]   = useState("");
+  const [newAccVal, setNewAccVal] = useState({});    // { platform: inputValue }
   const [saved,     setSaved]     = useState(false);
-  // Track renames: { oldName -> newName } accumulated before Save is pressed
-  const pendingRenames = useRef({});
+  const pendingRenames = useRef({});                 // { oldAccountName: newAccountName }
+
+  const toggleExpand = (plat) => setExpanded(p => ({ ...p, [plat]: !p[plat] }));
+
+  const addAccount = (plat) => {
+    const v = (newAccVal[plat] || "").trim();
+    if (!v) return;
+    const allAccounts = Object.values(accounts).flat();
+    if (allAccounts.includes(v)) return; // duplicate
+    setAccounts(prev => ({ ...prev, [plat]: [...(prev[plat]||[]), v] }));
+    setNewAccVal(prev => ({ ...prev, [plat]: "" }));
+  };
+
+  const deleteAccount = (plat, idx) => {
+    setAccounts(prev => {
+      const updated = prev[plat].filter((_,i) => i !== idx);
+      // Always keep at least one account per platform (the platform name itself)
+      return { ...prev, [plat]: updated.length ? updated : [plat] };
+    });
+  };
+
+  const startEdit = (plat, idx) => {
+    setEditKey({ plat, idx });
+    setEditVal(accounts[plat][idx]);
+  };
+
+  const saveEdit = () => {
+    if (!editKey) return;
+    const v = editVal.trim();
+    if (!v) return;
+    const { plat, idx } = editKey;
+    const oldName = accounts[plat][idx];
+    if (oldName !== v) {
+      // Chain renames correctly
+      const existingOrig = Object.keys(pendingRenames.current).find(
+        k => pendingRenames.current[k] === oldName
+      );
+      if (existingOrig) pendingRenames.current[existingOrig] = v;
+      else pendingRenames.current[oldName] = v;
+    }
+    setAccounts(prev => ({
+      ...prev,
+      [plat]: prev[plat].map((a, i) => i === idx ? v : a),
+    }));
+    setEditKey(null); setEditVal("");
+  };
 
   const save = () => {
-    setLiveData(prev => ({ ...prev, platforms }));
-    // Cascade all accumulated renames into listing data
+    // Derive flat account list for customPlatforms
+    const flatAccounts = Object.values(accounts).flat();
+    // Cascade renames into listing data
     const renames = pendingRenames.current;
     if (Object.keys(renames).length > 0 && setListings) {
       setListings(prev => prev.map(l => {
         let changed = false;
-        let platform   = l.platform;
-        let platforms_ = l.platforms ? [...l.platforms] : [];
+        let platform      = l.platform;
+        let platforms_    = l.platforms ? [...l.platforms] : [];
         let platformDates = l.platformDates ? { ...l.platformDates } : {};
-
-        // Rename primary platform
-        if (platform && renames[platform]) {
-          platform = renames[platform];
-          changed = true;
-        }
-        // Rename in platforms array
-        platforms_ = platforms_.map(p => {
-          if (renames[p]) { changed = true; return renames[p]; }
-          return p;
-        });
-        // Rename keys in platformDates
+        if (platform && renames[platform]) { platform = renames[platform]; changed = true; }
+        platforms_ = platforms_.map(p => { if (renames[p]) { changed = true; return renames[p]; } return p; });
         const newDates = {};
-        Object.entries(platformDates).forEach(([k, v]) => {
-          newDates[renames[k] || k] = v;
-          if (renames[k]) changed = true;
-        });
-
+        Object.entries(platformDates).forEach(([k, v]) => { newDates[renames[k]||k] = v; if (renames[k]) changed = true; });
         if (!changed) return l;
         return { ...l, platform, platforms: platforms_, platformDates: newDates };
       }));
     }
     pendingRenames.current = {};
+    setLiveData(prev => ({ ...prev, platformAccounts: accounts, platforms: flatAccounts }));
     setSaved(true);
     setTimeout(() => setSaved(false), 2200);
   };
 
-  const addPlatform = () => {
-    const n = newName.trim();
-    if (!n || platforms.includes(n)) return;
-    setPlatforms(p => [...p, n]);
-    setNewName("");
+  const resetToDefaults = () => {
+    const def = {};
+    PLAT_FAMILY_BASES.forEach(b => { def[b] = [b]; });
+    setAccounts(def);
+    pendingRenames.current = {};
   };
-  const deletePlatform = idx => setPlatforms(p => p.filter((_,i) => i!==idx));
-  const saveEdit = idx => {
-    const v = editVal.trim();
-    if (!v) return;
-    const oldName = platforms[idx];
-    if (oldName !== v) {
-      // Record rename — chain through any previous renames of the same original name
-      const existingOrig = Object.keys(pendingRenames.current).find(
-        k => pendingRenames.current[k] === oldName
-      );
-      if (existingOrig) {
-        pendingRenames.current[existingOrig] = v;
-      } else {
-        pendingRenames.current[oldName] = v;
-      }
-    }
-    setPlatforms(p => p.map((pl,i) => i===idx ? v : pl));
-    setEditIdx(null); setEditVal("");
-  };
-  const moveUp   = idx => { if(idx===0) return; setPlatforms(p => { const a=[...p]; [a[idx-1],a[idx]]=[a[idx],a[idx-1]]; return a; }); };
-  const moveDown = idx => setPlatforms(p => { if(idx>=p.length-1) return p; const a=[...p]; [a[idx],a[idx+1]]=[a[idx+1],a[idx]]; return a; });
 
   return (
-    <div style={{maxWidth:520,margin:"0 auto",padding:"0 4px"}}>
+    <div style={{maxWidth:540,margin:"0 auto",padding:"0 4px"}}>
       <div style={{fontWeight:900,fontSize:16,marginBottom:4}}>Settings</div>
       <div style={{fontSize:12,color:"var(--txd)",marginBottom:20}}>App-wide preferences</div>
       <div className="tw" style={{padding:"18px 20px",marginBottom:14}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
-          <div style={{fontWeight:900,fontSize:12,textTransform:"uppercase",letterSpacing:".5px",color:"var(--txm)"}}>Sales Platforms</div>
-          <button onClick={()=>setPlatforms([...DEFAULT_PLATFORMS])}
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+          <div style={{fontWeight:900,fontSize:12,textTransform:"uppercase",letterSpacing:".5px",color:"var(--txm)"}}>Sales Platforms & Accounts</div>
+          <button onClick={resetToDefaults}
             style={{fontSize:10,color:"var(--txd)",background:"none",border:"none",cursor:"pointer",textDecoration:"underline"}}>
             Reset to defaults
           </button>
         </div>
-        <div style={{fontSize:11,color:"var(--txd)",marginBottom:14,lineHeight:1.5}}>
-          These appear in every platform dropdown — Mark as Listed, Sold, Drafter, Analytics.
-          <strong style={{color:"var(--tx)"}}> Renaming a platform updates all existing listing data globally</strong> when you press Save Platforms.
-          Add names like <strong>"Vinted 1"</strong> and <strong>"Vinted 2"</strong> to track multiple accounts separately.
+        <div style={{fontSize:11,color:"var(--txd)",marginBottom:16,lineHeight:1.6}}>
+          Platforms are fixed. Add named accounts under each platform to track multiple accounts separately — e.g. Vinted Main + Vinted 2. All data groups by platform globally.
         </div>
-        {platforms.map((pl, idx) => (
-          <div key={idx} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 0",borderBottom:"1px solid var(--bd)"}}>
-            <div style={{display:"flex",flexDirection:"column",gap:1}}>
-              <button onClick={()=>moveUp(idx)} style={{background:"none",border:"none",cursor:"pointer",fontSize:9,color:"var(--txd)",lineHeight:1,padding:"1px 4px"}}>▲</button>
-              <button onClick={()=>moveDown(idx)} style={{background:"none",border:"none",cursor:"pointer",fontSize:9,color:"var(--txd)",lineHeight:1,padding:"1px 4px"}}>▼</button>
+
+        {PLAT_FAMILY_BASES.map(plat => {
+          const col   = getPlatColour(plat);
+          const accs  = accounts[plat] || [plat];
+          const isOpen = !!expanded[plat];
+          return (
+            <div key={plat} style={{marginBottom:8,border:"1px solid var(--bd)",borderRadius:"var(--r2)",overflow:"hidden"}}>
+              {/* Platform header row */}
+              <div
+                onClick={() => toggleExpand(plat)}
+                style={{
+                  display:"flex",alignItems:"center",gap:10,padding:"10px 14px",
+                  background:"var(--sf2)",cursor:"pointer",userSelect:"none",
+                  borderBottom: isOpen ? "1px solid var(--bd)" : "none",
+                }}
+              >
+                <span style={{width:10,height:10,borderRadius:"50%",background:col,flexShrink:0,display:"inline-block"}}/>
+                <span style={{flex:1,fontWeight:700,fontSize:13}}>{plat}</span>
+                <span style={{fontSize:11,color:"var(--txd)"}}>{accs.length} account{accs.length!==1?"s":""}</span>
+                <span style={{fontSize:11,color:"var(--txd)",marginLeft:4}}>{isOpen?"▲":"▼"}</span>
+              </div>
+
+              {/* Accounts list — only shown when expanded */}
+              {isOpen && (
+                <div style={{padding:"10px 14px",background:"var(--sf)"}}>
+                  {accs.map((acc, idx) => {
+                    const isEditing = editKey?.plat === plat && editKey?.idx === idx;
+                    return (
+                      <div key={idx} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0",borderBottom:"1px solid var(--bd)"}}>
+                        {isEditing ? (
+                          <>
+                            <input
+                              value={editVal}
+                              onChange={e => setEditVal(e.target.value)}
+                              onKeyDown={e => { if(e.key==="Enter") saveEdit(); if(e.key==="Escape"){setEditKey(null);setEditVal("");} }}
+                              autoFocus
+                              style={{flex:1,background:"var(--sf2)",border:"1px solid var(--ac)",borderRadius:"var(--r)",padding:"4px 8px",fontFamily:"Arial,sans-serif",fontSize:12,outline:"none"}}
+                            />
+                            <button onClick={saveEdit}
+                              style={{background:"var(--gn)",color:"#fff",border:"none",borderRadius:"var(--r)",padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700}}>Save</button>
+                            <button onClick={()=>{setEditKey(null);setEditVal("");}}
+                              style={{background:"var(--sf2)",color:"var(--txm)",border:"1px solid var(--bdd)",borderRadius:"var(--r)",padding:"4px 8px",cursor:"pointer",fontSize:11}}>✕</button>
+                          </>
+                        ) : (
+                          <>
+                            <span style={{
+                              flex:1,fontSize:12,fontWeight:500,
+                              padding:"2px 8px",borderRadius:20,
+                              background:col+"15",color:col,
+                              border:`1px solid ${col}44`,display:"inline-block",
+                            }}>{acc}</span>
+                            <button onClick={() => startEdit(plat, idx)}
+                              style={{background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:"var(--r)",padding:"3px 10px",cursor:"pointer",fontSize:11,color:"var(--txm)",flexShrink:0}}>Rename</button>
+                            {accs.length > 1 && (
+                              <button onClick={() => deleteAccount(plat, idx)}
+                                style={{background:"var(--acl)",border:"1px solid var(--ac2)",borderRadius:"var(--r)",padding:"3px 8px",cursor:"pointer",fontSize:11,color:"var(--ac)",fontWeight:700,flexShrink:0}}>✕</button>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  {/* Add account input */}
+                  <div style={{display:"flex",gap:7,marginTop:10}}>
+                    <input
+                      value={newAccVal[plat]||""}
+                      onChange={e => setNewAccVal(prev => ({...prev,[plat]:e.target.value}))}
+                      onKeyDown={e => e.key==="Enter" && addAccount(plat)}
+                      placeholder={`Add ${plat} account name…`}
+                      style={{flex:1,background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:"var(--r)",padding:"5px 9px",fontFamily:"Arial,sans-serif",fontSize:12,outline:"none"}}
+                    />
+                    <button onClick={() => addAccount(plat)}
+                      style={{background:col,color:"#fff",border:"none",borderRadius:"var(--r)",padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,flexShrink:0}}>
+                      + Add
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
-            {editIdx===idx ? (
-              <div style={{display:"flex",flex:1,gap:6}}>
-                <input value={editVal} onChange={e=>setEditVal(e.target.value)}
-                  onKeyDown={e=>e.key==="Enter"&&saveEdit(idx)}
-                  style={{flex:1,background:"var(--sf2)",border:"1px solid var(--ac)",borderRadius:"var(--r)",padding:"4px 8px",fontFamily:"Arial,sans-serif",fontSize:12,outline:"none"}}
-                  autoFocus/>
-                <button onClick={()=>saveEdit(idx)}
-                  style={{background:"var(--gn)",color:"#fff",border:"none",borderRadius:"var(--r)",padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700}}>Save</button>
-                <button onClick={()=>{setEditIdx(null);setEditVal("");}}
-                  style={{background:"var(--sf2)",color:"var(--txm)",border:"1px solid var(--bdd)",borderRadius:"var(--r)",padding:"4px 8px",cursor:"pointer",fontSize:11}}>✕</button>
-              </div>
-            ) : (
-              <div style={{display:"flex",flex:1,alignItems:"center",gap:8}}>
-                <span style={{flex:1,fontSize:13,fontWeight:600}}>{pl}</span>
-                <button onClick={()=>{setEditIdx(idx);setEditVal(pl);}}
-                  style={{background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:"var(--r)",padding:"3px 10px",cursor:"pointer",fontSize:11,color:"var(--txm)"}}>Edit</button>
-                <button onClick={()=>deletePlatform(idx)}
-                  style={{background:"var(--acl)",border:"1px solid var(--ac2)",borderRadius:"var(--r)",padding:"3px 8px",cursor:"pointer",fontSize:11,color:"var(--ac)",fontWeight:700}}>✕</button>
-              </div>
-            )}
-          </div>
-        ))}
-        <div style={{display:"flex",gap:8,marginTop:12}}>
-          <input value={newName} onChange={e=>setNewName(e.target.value)}
-            onKeyDown={e=>e.key==="Enter"&&addPlatform()}
-            placeholder="e.g. Vinted 2, Depop Alt..."
-            style={{flex:1,background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:"var(--r)",padding:"6px 10px",fontFamily:"Arial,sans-serif",fontSize:12,outline:"none"}}/>
-          <button onClick={addPlatform}
-            style={{background:"var(--nv)",color:"#fff",border:"none",borderRadius:"var(--r)",padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,flexShrink:0}}>
-            + Add
-          </button>
-        </div>
-        <div style={{marginTop:14,display:"flex",justifyContent:"flex-end",gap:10,alignItems:"center"}}>
-          {saved && <span style={{fontSize:11,color:"var(--gn)",fontWeight:700}}>✓ Platforms saved</span>}
+          );
+        })}
+
+        <div style={{marginTop:16,display:"flex",justifyContent:"flex-end",gap:10,alignItems:"center"}}>
+          {saved && <span style={{fontSize:11,color:"var(--gn)",fontWeight:700}}>✓ Saved — changes applied globally</span>}
           <button onClick={save}
             style={{background:"var(--gn)",color:"#fff",border:"none",borderRadius:"var(--r)",padding:"8px 20px",cursor:"pointer",fontSize:12,fontWeight:700}}>
             Save Platforms
@@ -6913,7 +7004,7 @@ function Settings({ liveData, setLiveData, customPlatforms, setListings }) {
         </div>
       </div>
       <div style={{fontSize:10,color:"var(--txd)",lineHeight:1.6}}>
-        Renaming a platform cascades to all listing data on Save — platform sold, platforms listed, and dated entries all update. Adding or deleting platforms only changes the dropdown list.
+        Renaming an account updates all matching listing data on Save. Data always groups by platform — individual accounts are only shown in selection dropdowns.
       </div>
     </div>
   );
@@ -6943,11 +7034,21 @@ export default function App() {
     return { vinted:"", withdrawn:"", ebayBal:"", ebayPend:"", depopPend:"", vintedPend:"", whatnotPend:"", globalNotes:"" };
   });
 
-  // Dynamic platforms — stored in liveData, falls back to defaults
-  const customPlatforms = useMemo(() =>
-    (liveData?.platforms?.length ? liveData.platforms : DEFAULT_PLATFORMS),
-    [liveData?.platforms]
-  );
+  // Derive flat account list from two-tier platformAccounts structure
+  // Falls back to old flat platforms array, then DEFAULT_PLATFORMS
+  const customPlatforms = useMemo(() => {
+    const pa = liveData?.platformAccounts;
+    if (pa && typeof pa === "object" && !Array.isArray(pa)) {
+      // New two-tier structure — flatten all accounts in platform order
+      return Object.values(pa).flat().filter(Boolean);
+    }
+    // Legacy: old flat array
+    if (Array.isArray(liveData?.platforms) && liveData.platforms.length) {
+      return liveData.platforms;
+    }
+    return DEFAULT_PLATFORMS;
+  }, [liveData?.platformAccounts, liveData?.platforms]);
+
   // Keep module-level aliases in sync so all components see the current list
   useEffect(() => {
     PLATFORMS         = customPlatforms;
