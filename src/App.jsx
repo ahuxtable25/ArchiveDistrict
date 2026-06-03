@@ -26,31 +26,66 @@ const saveState = async (listings, stockData, goals) => {
   }
 };
 
-/* ── Local version history — stores last 10 snapshots in localStorage ── */
-const VERSION_KEY = "ad_versions";
-const MAX_VERSIONS = 10;
+/* ── Local version history ──
+   Rules:
+   1. One snapshot per calendar day (keyed by YYYY-MM-DD) — saved on first change of the day
+   2. One mid-day snapshot if 20+ listings have changed since the day snapshot
+   3. Manual saves (💾 button) always create a new snapshot tagged "Manual save"
+   4. Keep last 14 days of snapshots
+── */
+const VERSION_KEY  = "ad_versions";
+const MAX_VERSIONS = 14;
 
-const saveLocalVersion = (listings, stockData) => {
+const _todayKey = () => new Date().toISOString().split("T")[0];
+
+const saveLocalVersion = (listings, stockData, { manual = false } = {}) => {
   try {
     const existing = JSON.parse(localStorage.getItem(VERSION_KEY) || "[]");
-    const last = existing[0];
-    const now = Date.now();
-    if (last && listings.length === last.listingsCount &&
-        now - new Date(last.ts).getTime() < 30000) return;
+    const todayKey = _todayKey();
+    const now      = Date.now();
 
-    const d = new Date();
-    const today = new Date(); today.setHours(0,0,0,0);
+    if (!manual) {
+      // Rule 1: already have a day snapshot for today?
+      const todaySnap = existing.find(e => e.dayKey === todayKey && !e.manual && !e.midday);
+
+      if (todaySnap) {
+        // Rule 2: mid-day — only if 20+ listings changed AND no mid-day snap today yet
+        const hasMidday   = existing.some(e => e.dayKey === todayKey && e.midday);
+        const countChange = Math.abs(listings.length - todaySnap.listingsCount);
+        if (hasMidday || countChange < 20) return; // nothing to do
+        // Fall through to save a mid-day snapshot
+      }
+      // If no day snap yet — check we're not saving within 5s of the last snap (debounce)
+      const last = existing[0];
+      if (!todaySnap && last && now - new Date(last.ts).getTime() < 5000) return;
+    }
+
+    const d         = new Date();
+    const today     = new Date(); today.setHours(0,0,0,0);
     const yesterday = new Date(today); yesterday.setDate(yesterday.getDate()-1);
-    const ts = d.toISOString();
-
-    const dayLabel = d >= today ? "Today"
+    const ts        = d.toISOString();
+    const dayLabel  = d >= today ? "Today"
       : d >= yesterday ? "Yesterday"
       : d.toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"});
     const timeLabel = d.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});
-    const label = `${dayLabel} at ${timeLabel}`;
 
-    const entry = { ts, label, dayLabel, timeLabel, listingsCount: listings.length, listings, stockData };
-    const updated = [entry, ...existing].slice(0, MAX_VERSIONS);
+    const isMidday  = !manual && existing.some(e => e.dayKey === todayKey && !e.manual && !e.midday);
+    const typeTag   = manual ? " — Manual save" : isMidday ? " — Mid-day" : "";
+    const label     = `${dayLabel} at ${timeLabel}${typeTag}`;
+
+    const entry = {
+      ts, label, dayLabel, timeLabel, dayKey: todayKey,
+      listingsCount: listings.length, listings, stockData,
+      manual: !!manual, midday: isMidday,
+    };
+
+    // Remove any existing mid-day snap for today if we're replacing with a new one
+    const filtered = isMidday
+      ? existing.filter(e => !(e.dayKey === todayKey && e.midday))
+      : existing;
+
+    // Trim to 14 days: keep latest snapshot per day (plus mid-day + manuals)
+    const updated = [entry, ...filtered].slice(0, MAX_VERSIONS);
     localStorage.setItem(VERSION_KEY, JSON.stringify(updated));
   } catch (e) { console.warn("Version save failed:", e); }
 };
@@ -1444,7 +1479,7 @@ function ImportModal({ stockData, onClose }) {
                     {pending.map(s => (
                       <tr key={`${s.bundleSku}-${s.name}`}>
                         <td><span className="bsku">{s.bundleSku}</span></td>
-                        <td style={{fontWeight:600}}>{s.name}</td>
+                        <td style={{fontWeight:600,fontSize:11,whiteSpace:"normal",wordBreak:"break-word",maxWidth:200}}>{s.name}</td>
                         <td style={{textAlign:"center"}}>{s.sellable}</td>
                         <td>{fmt(s.costPer)}</td>
                         <td style={{fontWeight:700}}>{fmt(s.sellable*s.costPer)}</td>
@@ -1472,7 +1507,7 @@ function ImportModal({ stockData, onClose }) {
 ═══════════════════════════════════════════════════════════════ */
 function StockCell({ colId, s }) {
   if (colId==="bundleSku")     return <span className="bsku">{s.bundleSku}</span>;
-  if (colId==="name")          return <span style={{fontWeight:700}}>{s.name}</span>;
+  if (colId==="name")          return <span style={{fontWeight:700,fontSize:11,whiteSpace:"normal",wordBreak:"break-word"}}>{s.name}</span>;
   if (colId==="website")       return <span className="badge b-n">{s.website}</span>;
   if (colId==="seller")        return <span style={{color:"var(--txm)",fontSize:11}}>{s.seller}</span>;
   if (colId==="datePurchased") return <span style={{color:"var(--txm)",fontSize:11}}>{s.datePurchased}</span>;
@@ -3244,7 +3279,7 @@ function MovementTracker({ listings }) {
   const visCols = cols.filter(c => c.visible);
 
   const renderCell = (col, row) => {
-    if (col==="name")     return <span style={{fontWeight:700}}>{row.name}</span>;
+    if (col==="name")     return <span style={{fontWeight:700,fontSize:11,whiteSpace:"normal",wordBreak:"break-word"}}>{row.name}</span>;
     if (col==="type")     return <span className="badge b-0">{row.type}</span>;
     if (col==="brand")    return <span style={{color:"var(--txm)"}}>{row.brand}</span>;
     if (col==="tag")      return <MovTag tag={row.tag} />;
@@ -3411,7 +3446,7 @@ function ListingDataTab({ listings }) {
 
   const renderToListCell = (col, l) => {
     if (col==="sku")      return <span className="sku">{l.sku}</span>;
-    if (col==="name")     return <span style={{fontWeight:600}}>{l.name}</span>;
+    if (col==="name")     return <span style={{fontWeight:600,fontSize:11,whiteSpace:"normal",wordBreak:"break-word"}}>{l.name}</span>;
     if (col==="type")     return <span className="badge b-0">{l.type}</span>;
     if (col==="brand")    return <span style={{color:"var(--txm)"}}>{l.brand}</span>;
     if (col==="colour")   return l.colour;
@@ -3423,7 +3458,7 @@ function ListingDataTab({ listings }) {
 
   const renderActiveCell = (col, l) => {
     if (col==="sku")      return <span className="sku">{l.sku}</span>;
-    if (col==="name")     return <span style={{fontWeight:600}}>{l.name}</span>;
+    if (col==="name")     return <span style={{fontWeight:600,fontSize:11,whiteSpace:"normal",wordBreak:"break-word"}}>{l.name}</span>;
     if (col==="type")     return <span className="badge b-0">{l.type}</span>;
     if (col==="brand")    return <span style={{color:"var(--txm)"}}>{l.brand}</span>;
     if (col==="colour")   return l.colour;
@@ -5952,7 +5987,7 @@ function Analytics({ listings, stockData, customPlatforms: cpArg, liveData }) {
 
   const renderSlowCell = (col,l) => {
     if (col==="sku")      return <span className="sku">{l.sku}</span>;
-    if (col==="name")     return <span style={{fontWeight:600}}>{l.name}</span>;
+    if (col==="name")     return <span style={{fontWeight:600,fontSize:11,whiteSpace:"normal",wordBreak:"break-word"}}>{l.name}</span>;
     if (col==="colour")   return l.colour;
     if (col==="size")     return <span style={{color:"var(--txm)"}}>{l.size}</span>;
     if (col==="tag")      return <MovTag tag={l.tag}/>;
@@ -6007,7 +6042,7 @@ function Analytics({ listings, stockData, customPlatforms: cpArg, liveData }) {
               <tbody>
                 {restockItems.map((r,i)=>(
                   <tr key={i}>
-                    <td style={{fontWeight:700,fontSize:11}}>{r.name}</td>
+<td style={{fontWeight:700,fontSize:11,whiteSpace:"normal",wordBreak:"break-word",maxWidth:160}}>{r.name}</td>
                     <td><span style={{fontWeight:700,color:r.qtyRemaining<=2?"var(--ac)":r.qtyRemaining<=4?"var(--am)":"var(--tx)"}}>{r.qtyRemaining} left</span></td>
                     <td>
                       <div style={{display:"flex",alignItems:"center",gap:6}}>
@@ -6127,7 +6162,7 @@ function Analytics({ listings, stockData, customPlatforms: cpArg, liveData }) {
                 <tbody>
                   {selPlatData.topItems.map((item,i)=>(
                     <tr key={i}>
-                      <td style={{fontWeight:600}}>{item.name}</td>
+<td style={{fontWeight:600,fontSize:11,whiteSpace:"normal",wordBreak:"break-word",maxWidth:160}}>{item.name}</td>
                       <td style={{color:"var(--txm)"}}>{item.type||"—"}</td>
                       <td style={{fontWeight:700}}>{item.sold}</td>
                       <td style={{fontWeight:700,color:"var(--gn)"}}>{fmt(item.avgPrice)}</td>
@@ -6524,8 +6559,7 @@ function VersionHistory({ onRestore }) {
   return (
     <div>
       <div className="info-banner">
-        <strong>Version History</strong> — The last {MAX_VERSIONS} auto-saved snapshots from this device.
-        Each version can be previewed, exported as JSON, or restored.
+        <strong>Version History</strong> — One snapshot per day, a mid-day save if 20+ items change, and any manual 💾 saves. Keeps the last {MAX_VERSIONS} days.
       </div>
 
       {versions.length === 0 ? (
@@ -6533,7 +6567,7 @@ function VersionHistory({ onRestore }) {
           <div style={{fontSize:28,opacity:.15,marginBottom:12}}>🕐</div>
           <div style={{fontSize:13,color:"var(--txd)"}}>No local versions saved yet.</div>
           <div style={{fontSize:11,color:"var(--txd)",marginTop:6}}>
-            Versions save automatically as you use the app, and whenever you click 💾 Save.
+            Versions save once per day automatically, and whenever you click 💾 Save.
           </div>
         </div>
       ) : (
@@ -6555,12 +6589,14 @@ function VersionHistory({ onRestore }) {
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
                   <div style={{minWidth:0}}>
                     <div style={{fontWeight:700,fontSize:12,color:selected?.ts===v.ts?"var(--ac)":"var(--tx)",
-                      display:"flex",alignItems:"center",gap:6}}>
+                      display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
                       {i===0 && <span style={{width:7,height:7,borderRadius:"50%",background:"var(--gn)",display:"inline-block",flexShrink:0}}/>}
                       <span style={{color:v.dayLabel==="Today"?"var(--gn)":v.dayLabel==="Yesterday"?"var(--am)":"var(--tx)"}}>
                         {v.dayLabel||v.label}
                       </span>
                       <span style={{fontSize:10,fontWeight:400,color:"var(--txd)"}}>at {v.timeLabel||""}</span>
+                      {v.manual && <span style={{fontSize:9,fontWeight:700,background:"var(--nvl)",color:"var(--nv)",borderRadius:3,padding:"1px 5px"}}>💾 Manual</span>}
+                      {v.midday && <span style={{fontSize:9,fontWeight:700,background:"var(--aml)",color:"var(--am)",borderRadius:3,padding:"1px 5px"}}>Mid-day</span>}
                     </div>
                     <div style={{fontSize:11,color:"var(--txm)",marginTop:1}}>
                       {v.listingsCount} listings
@@ -7476,11 +7512,6 @@ export default function App() {
     if (isRemoteUpdate.current) return; // don't echo remote updates back to Supabase
     setStorageStatus("loading");
     clearTimeout(saveTimer.current);
-    clearTimeout(versionTimer.current);
-    // Auto-save local version every 60s of changes
-    versionTimer.current = setTimeout(() => {
-      saveLocalVersion(listings, stockData);
-    }, 60000);
     saveTimer.current = setTimeout(async () => {
       isRemoteUpdate.current = true;
       const ts = new Date().toISOString();
@@ -7567,7 +7598,7 @@ export default function App() {
     lastSaveTs.current = ts;
     setTimeout(() => { isRemoteUpdate.current = false; }, 2000);
     const ok = await saveState(listings, stockData, { weekly: weeklyGoal, monthly: monthlyGoal, weeklyRev: weeklyRevGoal, monthlyRev: monthlyRevGoal, liveData });
-    saveLocalVersion(listings, stockData);
+    saveLocalVersion(listings, stockData, { manual: true });
     const time = new Date().toLocaleTimeString("en-GB", { hour:"2-digit", minute:"2-digit" });
     setHardSaveMsg(ok ? `✓ Saved at ${time} — ${listings.length} listings` : "✗ Save failed — check connection");
     setStorageStatus(ok ? "saved" : "error");
