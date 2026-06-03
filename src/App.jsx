@@ -7660,12 +7660,8 @@ export default function App() {
         if (!localTs || !remoteTs || remoteTs > localTs) {
           if (data.listings?.length)    setListingsRaw(data.listings);
           if (data.stock_data?.length)  setStockDataRaw(data.stock_data);
-          if (data.goals) {
-            setWeeklyGoal(data.goals.weekly      || "");
-            setMonthlyGoal(data.goals.monthly    || "");
-            setWeeklyRevGoal(data.goals.weeklyRev   || "");
-            setMonthlyRevGoal(data.goals.monthlyRev || "");
-            if (data.goals.liveData) setLiveData(data.goals.liveData);
+          if (data.goals?.liveData) {
+            setLiveData(prev => ({ ...prev, ...data.goals.liveData }));
           }
           setStorageStatus("saved");
         } else {
