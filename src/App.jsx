@@ -6879,6 +6879,38 @@ function Placeholder({ title, icon, note }) {
 /* ═══════════════════════════════════════════════════════════════
    SETTINGS — Platform management
 ═══════════════════════════════════════════════════════════════ */
+/* ── Settings helper components — must be top-level, not inline ── */
+function SettingsHeader({ title, sub }) {
+  return (
+    <div style={{marginBottom:16}}>
+      <div style={{fontWeight:900,fontSize:12,textTransform:"uppercase",letterSpacing:".5px",color:"var(--txm)",marginBottom:2}}>{title}</div>
+      {sub && <div style={{fontSize:11,color:"var(--txd)",lineHeight:1.5}}>{sub}</div>}
+    </div>
+  );
+}
+function SettingRow({ label, children }) {
+  return (
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 0",borderBottom:"1px solid var(--bd)",gap:12}}>
+      <span style={{fontSize:12,color:"var(--txm)",flex:1}}>{label}</span>
+      <div style={{flexShrink:0}}>{children}</div>
+    </div>
+  );
+}
+function SettingToggle({ value, onChange }) {
+  return (
+    <div onClick={()=>onChange(!value)} style={{width:38,height:22,borderRadius:11,background:value?"var(--gn)":"var(--bdd)",position:"relative",cursor:"pointer",transition:"background .2s",flexShrink:0}}>
+      <div style={{width:16,height:16,borderRadius:"50%",background:"#fff",position:"absolute",top:3,left:value?19:3,transition:"left .2s",boxShadow:"0 1px 3px rgba(0,0,0,.2)"}}/>
+    </div>
+  );
+}
+function SettingNumInput({ value, onChange, min, max, placeholder, width=80 }) {
+  return (
+    <input type="number" min={min} max={max} placeholder={placeholder}
+      value={value||""} onChange={e=>onChange(e.target.value)}
+      style={{width,background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:"var(--r)",padding:"5px 8px",fontFamily:"Arial,sans-serif",fontSize:12,fontWeight:700,outline:"none",textAlign:"right"}}/>
+  );
+}
+
 function Settings({ liveData, setLiveData, customPlatforms, setListings }) {
   // platformAccounts shape: { Vinted: ["Vinted 1","Vinted 2"], Depop: ["Depop"], ... }
   const initAccounts = () => {
@@ -6983,30 +7015,6 @@ function Settings({ liveData, setLiveData, customPlatforms, setListings }) {
   const [settingsTab, setSettingsTab] = useState("platforms");
   const as = getAS(liveData);
   const setAS = (key, val) => setLiveData(p => ({ ...p, appSettings: { ...getAS(p), [key]: val } }));
-
-  /* ── Shared section header ── */
-  const SH = ({ title, sub }) => (
-    <div style={{marginBottom:16}}>
-      <div style={{fontWeight:900,fontSize:12,textTransform:"uppercase",letterSpacing:".5px",color:"var(--txm)",marginBottom:2}}>{title}</div>
-      {sub && <div style={{fontSize:11,color:"var(--txd)",lineHeight:1.5}}>{sub}</div>}
-    </div>
-  );
-  const SettingRow = ({ label, children }) => (
-    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 0",borderBottom:"1px solid var(--bd)",gap:12}}>
-      <span style={{fontSize:12,color:"var(--txm)",flex:1}}>{label}</span>
-      <div style={{flexShrink:0}}>{children}</div>
-    </div>
-  );
-  const Toggle = ({ value, onChange }) => (
-    <div onClick={()=>onChange(!value)} style={{width:38,height:22,borderRadius:11,background:value?"var(--gn)":"var(--bdd)",position:"relative",cursor:"pointer",transition:"background .2s",flexShrink:0}}>
-      <div style={{width:16,height:16,borderRadius:"50%",background:"#fff",position:"absolute",top:3,left:value?19:3,transition:"left .2s",boxShadow:"0 1px 3px rgba(0,0,0,.2)"}}/>
-    </div>
-  );
-  const NumInput = ({ value, onChange, min, max, placeholder, width=80 }) => (
-    <input type="number" min={min} max={max} placeholder={placeholder}
-      value={value||""} onChange={e=>onChange(e.target.value)}
-      style={{width,background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:"var(--r)",padding:"5px 8px",fontFamily:"Arial,sans-serif",fontSize:12,fontWeight:700,outline:"none",textAlign:"right"}}/>
-  );
 
   return (
     <div style={{maxWidth:560,margin:"0 auto",padding:"0 4px"}}>
@@ -7139,18 +7147,18 @@ function Settings({ liveData, setLiveData, customPlatforms, setListings }) {
       {/* ── GOALS TAB ── */}
       {settingsTab==="goals" && (
       <div className="tw" style={{padding:"18px 20px",marginBottom:14}}>
-        <SH title="Weekly & Monthly Goals" sub="Set default targets — shown on the Dashboard. These persist across sessions." />
-        <SettingRow label="Weekly profit target £"><NumInput value={as.weeklyGoal} onChange={v=>setAS("weeklyGoal",v)} placeholder="e.g. 250" /></SettingRow>
-        <SettingRow label="Weekly revenue target £"><NumInput value={as.weeklyRevGoal} onChange={v=>setAS("weeklyRevGoal",v)} placeholder="e.g. 500" /></SettingRow>
-        <SettingRow label="Monthly profit target £"><NumInput value={as.monthlyGoal} onChange={v=>setAS("monthlyGoal",v)} placeholder="e.g. 1000" /></SettingRow>
-        <SettingRow label="Monthly revenue target £"><NumInput value={as.monthlyRevGoal} onChange={v=>setAS("monthlyRevGoal",v)} placeholder="e.g. 2000" /></SettingRow>
+        <SettingsHeader title="Weekly & Monthly Goals" sub="Set default targets — shown on the Dashboard. These persist across sessions." />
+        <SettingRow label="Weekly profit target £"><SettingNumInput value={as.weeklyGoal} onChange={v=>setAS("weeklyGoal",v)} placeholder="e.g. 250" /></SettingRow>
+        <SettingRow label="Weekly revenue target £"><SettingNumInput value={as.weeklyRevGoal} onChange={v=>setAS("weeklyRevGoal",v)} placeholder="e.g. 500" /></SettingRow>
+        <SettingRow label="Monthly profit target £"><SettingNumInput value={as.monthlyGoal} onChange={v=>setAS("monthlyGoal",v)} placeholder="e.g. 1000" /></SettingRow>
+        <SettingRow label="Monthly revenue target £"><SettingNumInput value={as.monthlyRevGoal} onChange={v=>setAS("monthlyRevGoal",v)} placeholder="e.g. 2000" /></SettingRow>
         <div style={{height:10}}/>
-        <SH title="Thresholds" sub="Used throughout the app to flag underperformance." />
+        <SettingsHeader title="Thresholds" sub="Used throughout the app to flag underperformance." />
         <SettingRow label={<span>Sell-through warning % <span style={{fontSize:10,color:"var(--txd)"}}>— restock flags trigger above this</span></span>}>
-          <NumInput value={as.sellThruWarning} onChange={v=>setAS("sellThruWarning",+v)} min={1} max={100} placeholder="60" />
+          <SettingNumInput value={as.sellThruWarning} onChange={v=>setAS("sellThruWarning",+v)} min={1} max={100} placeholder="60" />
         </SettingRow>
         <SettingRow label={<span>Slow mover threshold <span style={{fontSize:10,color:"var(--txd)"}}>days unsold before flagged</span></span>}>
-          <NumInput value={as.slowMoverDays} onChange={v=>setAS("slowMoverDays",+v)} min={1} max={365} placeholder="14" />
+          <SettingNumInput value={as.slowMoverDays} onChange={v=>setAS("slowMoverDays",+v)} min={1} max={365} placeholder="14" />
         </SettingRow>
       </div>
       )}
@@ -7158,7 +7166,7 @@ function Settings({ liveData, setLiveData, customPlatforms, setListings }) {
       {/* ── LISTING DEFAULTS TAB ── */}
       {settingsTab==="listings_" && (
       <div className="tw" style={{padding:"18px 20px",marginBottom:14}}>
-        <SH title="Listing Drafter" sub="Pre-fills fields when you open the Drafter." />
+        <SettingsHeader title="Listing Drafter" sub="Pre-fills fields when you open the Drafter." />
         <SettingRow label="Default condition">
           <select value={as.defaultCondition||"Excellent"} onChange={e=>setAS("defaultCondition",e.target.value)}
             style={{background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:"var(--r)",padding:"5px 9px",fontFamily:"Arial,sans-serif",fontSize:12,outline:"none"}}>
@@ -7166,7 +7174,7 @@ function Settings({ liveData, setLiveData, customPlatforms, setListings }) {
           </select>
         </SettingRow>
         <div style={{height:10}}/>
-        <SH title="Mark as Listed" sub="These accounts will be pre-ticked when you open Mark as Listed." />
+        <SettingsHeader title="Mark as Listed" sub="These accounts will be pre-ticked when you open Mark as Listed." />
         <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:7,marginTop:4}}>
           {(customPlatforms||DEFAULT_PLATFORMS).map(p => {
             const sel = (as.defaultAccounts||[]).includes(p);
@@ -7191,9 +7199,9 @@ function Settings({ liveData, setLiveData, customPlatforms, setListings }) {
       {/* ── STOCK TAB ── */}
       {settingsTab==="stock_" && (
       <div className="tw" style={{padding:"18px 20px",marginBottom:14}}>
-        <SH title="Stock Purchasing" sub="Guides your buying decisions on the Live Data tab." />
+        <SettingsHeader title="Stock Purchasing" sub="Guides your buying decisions on the Live Data tab." />
         <SettingRow label={<span>Cash buffer guideline % <span style={{fontSize:10,color:"var(--txd)"}}>— highlighted in Live Data cash breakdown</span></span>}>
-          <NumInput value={as.cashBuffer} onChange={v=>setAS("cashBuffer",+v)} min={1} max={100} placeholder="85" />
+          <SettingNumInput value={as.cashBuffer} onChange={v=>setAS("cashBuffer",+v)} min={1} max={100} placeholder="85" />
         </SettingRow>
         <div style={{fontSize:11,color:"var(--txd)",marginTop:8,lineHeight:1.6}}>
           Example: at 85%, if your liquid cash is £500 the app highlights £425 as your safe spending limit.
@@ -7204,7 +7212,7 @@ function Settings({ liveData, setLiveData, customPlatforms, setListings }) {
       {/* ── DISPLAY TAB ── */}
       {settingsTab==="display" && (
       <div className="tw" style={{padding:"18px 20px",marginBottom:14}}>
-        <SH title="Currency & Dates" />
+        <SettingsHeader title="Currency & Dates" />
         <SettingRow label="Currency symbol">
           <select value={as.currency||"£"} onChange={e=>setAS("currency",e.target.value)}
             style={{background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:"var(--r)",padding:"5px 9px",fontFamily:"Arial,sans-serif",fontSize:12,outline:"none"}}>
@@ -7219,12 +7227,12 @@ function Settings({ liveData, setLiveData, customPlatforms, setListings }) {
           </select>
         </SettingRow>
         <div style={{height:10}}/>
-        <SH title="Appearance" />
+        <SettingsHeader title="Appearance" />
         <SettingRow label={<span>Compact mode <span style={{fontSize:10,color:"var(--txd)"}}>— smaller table row heights</span></span>}>
-          <Toggle value={!!as.compactMode} onChange={v=>setAS("compactMode",v)} />
+          <SettingToggle value={!!as.compactMode} onChange={v=>setAS("compactMode",v)} />
         </SettingRow>
         <SettingRow label={<span>Sidebar collapsed by default <span style={{fontSize:10,color:"var(--txd)"}}>— on mobile</span></span>}>
-          <Toggle value={!!as.sidebarCollapsed} onChange={v=>setAS("sidebarCollapsed",v)} />
+          <SettingToggle value={!!as.sidebarCollapsed} onChange={v=>setAS("sidebarCollapsed",v)} />
         </SettingRow>
       </div>
       )}
@@ -7232,7 +7240,7 @@ function Settings({ liveData, setLiveData, customPlatforms, setListings }) {
       {/* ── NOTIFICATIONS TAB ── */}
       {settingsTab==="notifs" && (
       <div className="tw" style={{padding:"18px 20px",marginBottom:14}}>
-        <SH title="Push Notifications" sub="Choose which events trigger a push notification on your device." />
+        <SettingsHeader title="Push Notifications" sub="Choose which events trigger a push notification on your device." />
         {[
           {key:"notifSold",        label:"Item sold",                    def:true},
           {key:"notifListed",      label:"Item marked as listed",        def:false},
@@ -7242,7 +7250,7 @@ function Settings({ liveData, setLiveData, customPlatforms, setListings }) {
           {key:"notifNotes",       label:"Global notes updated",         def:false},
         ].map(({key,label,def}) => (
           <SettingRow key={key} label={label}>
-            <Toggle
+            <SettingToggle
               value={as[key]!==undefined ? !!as[key] : def}
               onChange={v=>setAS(key,v)}
             />
