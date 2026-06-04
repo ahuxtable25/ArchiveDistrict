@@ -268,7 +268,7 @@ const DEFAULT_APP_SETTINGS = {
   notifReturn:      true,
   notifShipped:     false,
   notifSundayBackup:true,
-  notifNotes:       false,
+  notifNotes:       true,
 };
 const getAS = (liveData) => ({ ...DEFAULT_APP_SETTINGS, ...(liveData?.appSettings||{}) });
 const copyText = (t) => { try { navigator.clipboard.writeText(t); } catch (_) {} };
@@ -7232,7 +7232,7 @@ function Settings({ liveData, setLiveData, customPlatforms, setListings }) {
           {key:"notifReturn",       label:"Return raised",              def:true },
           {key:"notifShipped",      label:"Item shipped",               def:false},
           {key:"notifSundayBackup", label:"Sunday backup reminder",     def:true },
-          {key:"notifNotes",        label:"Global notes updated",       def:false},
+          {key:"notifNotes",        label:"Global notes updated",       def:true},
         ].map(({key,label,def}) => (
           <SettingRow key={key} label={label}>
             <SettingToggle value={as[key]!==undefined?!!as[key]:def} onChange={v=>setAS(key,v)} />
@@ -7509,18 +7509,21 @@ export default function App() {
   useEffect(() => {
     const onVisible = async () => {
       if (document.visibilityState !== "visible") return;
-      // Always re-fetch on foreground — bypass timestamp guard so changes
-      // from other devices (or a previous session) are always picked up
+      // Always re-fetch when returning to the app (home screen → app, tab switch etc.)
+      // Bypass both guards so stale state never blocks the refresh
       try {
         const { data } = await supabase
           .from("app_state").select("*").eq("id", 1).single();
         if (data) {
-          // Temporarily clear lastSaveTs so applyRemotePayload doesn't skip
-          const savedTs = lastSaveTs.current;
-          lastSaveTs.current = null;
+          // Clear both guards temporarily so applyRemotePayload always applies
+          const savedTs     = lastSaveTs.current;
+          const savedRemote = isRemoteUpdate.current;
+          lastSaveTs.current      = null;
+          isRemoteUpdate.current  = false;
           applyRemotePayload(data);
-          // Restore — don't let the fetch overwrite a pending local save
-          lastSaveTs.current = savedTs;
+          // Restore — don't clobber a save that may have just completed
+          lastSaveTs.current     = savedTs;
+          isRemoteUpdate.current = savedRemote;
         }
       } catch (_) {}
       // Reconnect real-time if channel dropped
