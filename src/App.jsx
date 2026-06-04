@@ -36,7 +36,13 @@ const saveState = async (listings, stockData, goals) => {
 const VERSION_KEY  = "ad_versions";
 const MAX_VERSIONS = 14;
 
-const _todayKey = () => new Date().toISOString().split("T")[0];
+const _todayKey = () => {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,"0");
+  const dy = String(d.getDate()).padStart(2,"0");
+  return `${y}-${m}-${dy}`;
+};
 
 const saveLocalVersion = (listings, stockData, { manual = false } = {}) => {
   try {
@@ -44,19 +50,28 @@ const saveLocalVersion = (listings, stockData, { manual = false } = {}) => {
     const todayKey = _todayKey();
     const now      = Date.now();
 
+    // Migrate old entries that have no dayKey — assign from their ts
+    const migrated = existing.map(e => e.dayKey ? e : {
+      ...e,
+      dayKey: (() => {
+        const d = new Date(e.ts);
+        return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+      })(),
+    });
+
     if (!manual) {
       // Rule 1: already have a day snapshot for today?
-      const todaySnap = existing.find(e => e.dayKey === todayKey && !e.manual && !e.midday);
+      const todaySnap = migrated.find(e => e.dayKey === todayKey && !e.manual && !e.midday);
 
       if (todaySnap) {
         // Rule 2: mid-day — only if 20+ listings changed AND no mid-day snap today yet
-        const hasMidday   = existing.some(e => e.dayKey === todayKey && e.midday);
+        const hasMidday   = migrated.some(e => e.dayKey === todayKey && e.midday);
         const countChange = Math.abs(listings.length - todaySnap.listingsCount);
         if (hasMidday || countChange < 20) return; // nothing to do
         // Fall through to save a mid-day snapshot
       }
       // If no day snap yet — check we're not saving within 5s of the last snap (debounce)
-      const last = existing[0];
+      const last = migrated[0];
       if (!todaySnap && last && now - new Date(last.ts).getTime() < 5000) return;
     }
 
@@ -69,7 +84,7 @@ const saveLocalVersion = (listings, stockData, { manual = false } = {}) => {
       : d.toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"});
     const timeLabel = d.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});
 
-    const isMidday  = !manual && existing.some(e => e.dayKey === todayKey && !e.manual && !e.midday);
+    const isMidday  = !manual && migrated.some(e => e.dayKey === todayKey && !e.manual && !e.midday);
     const typeTag   = manual ? " — Manual save" : isMidday ? " — Mid-day" : "";
     const label     = `${dayLabel} at ${timeLabel}${typeTag}`;
 
@@ -81,8 +96,8 @@ const saveLocalVersion = (listings, stockData, { manual = false } = {}) => {
 
     // Remove any existing mid-day snap for today if we're replacing with a new one
     const filtered = isMidday
-      ? existing.filter(e => !(e.dayKey === todayKey && e.midday))
-      : existing;
+      ? migrated.filter(e => !(e.dayKey === todayKey && e.midday))
+      : migrated;
 
     // Trim to 14 days: keep latest snapshot per day (plus mid-day + manuals)
     const updated = [entry, ...filtered].slice(0, MAX_VERSIONS);
@@ -249,7 +264,7 @@ const DEFAULT_APP_SETTINGS = {
   compactMode:      false,
   sidebarCollapsed: false,
   notifSold:        true,
-  notifListed:      false,
+  notifListed:      true,
   notifReturn:      true,
   notifShipped:     false,
   notifSundayBackup:true,
@@ -5091,7 +5106,8 @@ function ShippingTab({ listings, setListings }) {
   const byPlat = useMemo(() => {
     const m = {};
     toShip.forEach(l => {
-      const k = l.platform ? getPlatFamily(l.platform) : "No Platform";
+      // Group by exact account name (e.g. "Vinted 1", "Vinted 2") not family
+      const k = l.platform || "No Platform";
       if (!m[k]) m[k] = [];
       m[k].push(l);
     });
@@ -5181,10 +5197,21 @@ function ShippingTab({ listings, setListings }) {
           <div style={{fontWeight:900,textTransform:"uppercase",letterSpacing:".4px",marginBottom:5}}>All Clear</div>
           <div style={{fontSize:12,color:"var(--txm)"}}>Everything has been shipped!</div>
         </div>
-      ) : byPlat.map(([plat, items]) => (
+      ) : byPlat.map(([plat, items]) => {
+        const family = getPlatFamily(plat);
+        const col    = getPlatColour(plat);
+        return (
         <div key={plat} className="ship-plat">
           <div className="ship-plat-h">
-            <span>{plat}</span>
+            <span style={{display:"flex",alignItems:"center",gap:7}}>
+              <span style={{width:8,height:8,borderRadius:"50%",background:col,display:"inline-block",flexShrink:0}}/>
+              {plat}
+              {family !== plat && (
+                <span style={{fontSize:9,fontWeight:700,color:"var(--txd)",textTransform:"uppercase",letterSpacing:".4px"}}>
+                  {family}
+                </span>
+              )}
+            </span>
             <span className="badge b-r">{items.length} to ship</span>
           </div>
           {items.map(l => (
@@ -5205,7 +5232,8 @@ function ShippingTab({ listings, setListings }) {
             </div>
           ))}
         </div>
-      ))}
+        );
+      })}
 
       {/* ── Awaiting Returns ── only shown when active returns exist */}
       {awaitingReturn.length > 0 && (
@@ -7200,7 +7228,7 @@ function Settings({ liveData, setLiveData, customPlatforms, setListings }) {
         <SettingsHeader title="Push Notifications" sub="Choose which events trigger a push notification." />
         {[
           {key:"notifSold",         label:"Item sold",                  def:true },
-          {key:"notifListed",       label:"Item marked as listed",      def:false},
+          {key:"notifListed",       label:"Item marked as listed",      def:true},
           {key:"notifReturn",       label:"Return raised",              def:true },
           {key:"notifShipped",      label:"Item shipped",               def:false},
           {key:"notifSundayBackup", label:"Sunday backup reminder",     def:true },
@@ -7481,11 +7509,19 @@ export default function App() {
   useEffect(() => {
     const onVisible = async () => {
       if (document.visibilityState !== "visible") return;
-      // Re-fetch latest from Supabase and merge
+      // Always re-fetch on foreground — bypass timestamp guard so changes
+      // from other devices (or a previous session) are always picked up
       try {
         const { data } = await supabase
           .from("app_state").select("*").eq("id", 1).single();
-        if (data) applyRemotePayload(data);
+        if (data) {
+          // Temporarily clear lastSaveTs so applyRemotePayload doesn't skip
+          const savedTs = lastSaveTs.current;
+          lastSaveTs.current = null;
+          applyRemotePayload(data);
+          // Restore — don't let the fetch overwrite a pending local save
+          lastSaveTs.current = savedTs;
+        }
       } catch (_) {}
       // Reconnect real-time if channel dropped
       const state = channelRef.current?.state;
