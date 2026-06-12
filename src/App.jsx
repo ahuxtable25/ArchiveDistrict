@@ -2147,6 +2147,10 @@ function EditListingDrawer({ listing, stockData, onSave, onDelete, onClose }) {
                     returnReason: reason,
                     returnDate,
                     _returnReasonDraft: undefined,
+                    // Clear sold data immediately — item is being returned
+                    sold: false, soldPrice: null, profit: null,
+                    daySold: null, days: null, shipped: false, shippedDate: null,
+                    listed: false,
                     notes: (prev.notes ? prev.notes + "\n" : "") + `Return raised ${returnDate}${reason ? " — " + reason : ""}`,
                   }));
                   setDirty(true);
@@ -6544,12 +6548,13 @@ function Growth({ listings, stockData }) {
    HISTORY — Command 10
 ═══════════════════════════════════════════════════════════════ */
 const MONTH_HIST_COLS = [
-  {id:"label",      label:"Month",        visible:true },
-  {id:"sold",       label:"Items Sold",   visible:true },
-  {id:"proceeds",   label:"Proceeds",     visible:true },
-  {id:"profit",     label:"Profit Kept",  visible:true },
-  {id:"stockQty",   label:"Stock Items",  visible:true },
-  {id:"stockSpend", label:"Stock Purchased (£)",  visible:true },
+  {id:"label",      label:"Month",           visible:true },
+  {id:"sold",       label:"Items Sold",      visible:true },
+  {id:"listed",     label:"Items Listed",    visible:true },
+  {id:"proceeds",   label:"Proceeds",        visible:true },
+  {id:"profit",     label:"Profit Kept",     visible:true },
+  {id:"stockQty",   label:"Items Purchased", visible:true },
+  {id:"stockSpend", label:"Stock Purchased (£)", visible:true },
 ];
 const WEEK_HIST_COLS = [
   {id:"label",      label:"Week Starting", visible:true },
@@ -6736,12 +6741,14 @@ function History({ listings, stockData, liveData }) {
     const months = monthKeys.map(mk => {
       const [y,mo] = mk.split("-");
       const mListings = listings.filter(l => l.sold && l.daySold?.startsWith(mk));
+      const mListed   = listings.filter(l => l.dayListed?.startsWith(mk));
       const mStock    = stockData.filter(s => s.datePurchased?.startsWith(mk));
       const profitLog = liveData?.profitLog || [];
       const profitKept = profitLog.filter(e => e.date?.startsWith(mk)).reduce((a,e)=>a+e.amount, 0);
       return {
         label: new Date(+y,+mo-1,1).toLocaleDateString("en-GB",{month:"short",year:"numeric"}),
         sold: mListings.length,
+        listed: mListed.length,
         proceeds: mListings.reduce((a,l)=>a+(l.soldPrice||0),0),
         profit:   mListings.reduce((a,l)=>a+(l.profit||0),0),
         profitKept,
@@ -6813,6 +6820,7 @@ function History({ listings, stockData, liveData }) {
   const renderMonthCell = (col, r) => {
     if (col==="label")      return <span style={{fontWeight:700}}>{r.label}</span>;
     if (col==="sold")       return r.sold > 0 ? <span style={{fontWeight:700}}>{r.sold}</span> : <span style={{color:"var(--txd)"}}>—</span>;
+    if (col==="listed")     return r.listed > 0 ? <span style={{fontWeight:700}}>{r.listed}</span> : <span style={{color:"var(--txd)"}}>—</span>;
     if (col==="proceeds")   return renderNum(r.proceeds, "var(--gn)");
     if (col==="profit")     return r.profitKept > 0 ? renderNum(r.profitKept, "var(--gn)") : <span style={{color:"var(--txd)"}}>—</span>;
     if (col==="stockQty")   return r.stockQty > 0 ? r.stockQty : <span style={{color:"var(--txd)"}}>—</span>;
