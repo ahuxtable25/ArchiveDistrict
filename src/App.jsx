@@ -7875,73 +7875,93 @@ export default function App() {
 
   /* JSON backup/restore */
   const exportJSON = () => {
-    // Compute history snapshot at export time
-    const exportNow = new Date(); // fresh date at export time, not stale NOW constant
-    const monthKeys = [];
-    let _d = new Date(2024, 10, 1);
-    while (_d <= exportNow) {
-      monthKeys.push(`${_d.getFullYear()}-${String(_d.getMonth()+1).padStart(2,'0')}`);
-      _d = new Date(_d.getFullYear(), _d.getMonth()+1, 1);
-    }
-    const historyMonths = monthKeys.map(mk => {
-      const [y,mo] = mk.split("-");
-      const mL = listings.filter(l => l.sold && l.daySold?.startsWith(mk));
-      const mS = stockData.filter(s => s.datePurchased?.startsWith(mk));
-      const pLog = liveData?.profitLog || [];
-      return {
-        label: new Date(+y,+mo-1,1).toLocaleDateString("en-GB",{month:"short",year:"numeric"}),
-        month: mk,
-        sold: mL.length,
-        proceeds: mL.reduce((a,l)=>a+(l.soldPrice||0),0),
-        profit:   mL.reduce((a,l)=>a+(l.profit||0),0),
-        profitKept: pLog.filter(e=>e.date?.startsWith(mk)).reduce((a,e)=>a+e.amount,0),
-        stockQty:   mS.reduce((a,s)=>a+(s.sellable||0),0),
-        stockSpend: mS.reduce((a,s)=>a+(s.totalCost||s.sellable*s.costPer||0),0),
-      };
-    }).reverse();
-    const historyWeeks = [];
-    for (let i=15; i>=0; i--) {
-      const ws = new Date(_wsd); ws.setDate(ws.getDate()-i*7);
-      const we = new Date(ws);   we.setDate(we.getDate()+6);
-      const wsStr = localDateStr(ws), weStr = localDateStr(we);
-      const wSold = listings.filter(l=>l.sold&&l.daySold>=wsStr&&l.daySold<=weStr);
-      const wStock = stockData.filter(s=>s.datePurchased>=wsStr&&s.datePurchased<=weStr);
-      const pLog = liveData?.profitLog || [];
-      historyWeeks.push({
-        label: ws.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"2-digit"}),
-        weekStart: wsStr, weekEnd: weStr,
-        listed:     listings.filter(l=>l.dayListed>=wsStr&&l.dayListed<=weStr).length,
-        sold:       wSold.length,
-        revenue:    wSold.reduce((a,l)=>a+(l.soldPrice||0),0),
-        profit:     wSold.reduce((a,l)=>a+(l.profit||0),0),
-        profitKept: pLog.filter(e=>e.week===wsStr).reduce((a,e)=>a+e.amount,0),
-        stockSpend: wStock.reduce((a,s)=>a+(s.totalCost||s.sellable*s.costPer||0),0),
+    // Pure-JS XLSX export — no library or CDN needed
+    const esc=(s)=>String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+    const enc=(s)=>new TextEncoder().encode(s);
+    const crc32=(data)=>{const t=new Uint32Array(256);for(let i=0;i<256;i++){let k=i;for(let j=0;j<8;j++)k=k&1?(0xEDB88320^(k>>>1)):k>>>1;t[i]=k;}let c=0xFFFFFFFF;for(let i=0;i<data.length;i++)c=t[(c^data[i])&0xFF]^(c>>>8);return(c^0xFFFFFFFF)>>>0;};
+    const u32le=(n)=>{const b=new Uint8Array(4);new DataView(b.buffer).setUint32(0,n,true);return b;};
+    const u16le=(n)=>{const b=new Uint8Array(2);new DataView(b.buffer).setUint16(0,n,true);return b;};
+    const cat=(...arrays)=>{const total=arrays.reduce((a,b)=>a+b.length,0);const out=new Uint8Array(total);let off=0;arrays.forEach(a=>{out.set(a,off);off+=a.length;});return out;};
+    const allStrings=[];const allMap={};
+    const si=(val)=>{const k=String(val??"");if(allMap[k]===undefined){allMap[k]=allStrings.length;allStrings.push(k);}return allMap[k];};
+    const toCol=(i)=>{let s="",n=i+1;while(n>0){s=String.fromCharCode(65+(n-1)%26)+s;n=Math.floor((n-1)/26);}return s;};
+    const buildSheet=(rows)=>{
+      if(!rows.length)return enc(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/></worksheet>`);
+      const cols=Object.keys(rows[0]);
+      let xml=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>`;
+      xml+=`<row r="1">`;cols.forEach((c,ci)=>{xml+=`<c r="${toCol(ci)}1" t="s"><v>${si(c)}</v></c>`;});xml+=`</row>`;
+      rows.forEach((row,ri)=>{
+        xml+=`<row r="${ri+2}">`;
+        cols.forEach((c,ci)=>{const val=row[c];const ref=`${toCol(ci)}${ri+2}`;
+          if(val===""||val===null||val===undefined){xml+=`<c r="${ref}"/>`;}
+          else if(typeof val==="number"){xml+=`<c r="${ref}"><v>${val}</v></c>`;}
+          else{xml+=`<c r="${ref}" t="s"><v>${si(String(val))}</v></c>`;}
+        });xml+=`</row>`;
       });
-    }
-    historyWeeks.reverse();
-    let historySnapshot = { months: historyMonths, weeks: historyWeeks };
-    try {
-      // Validate it serialises correctly
-      JSON.stringify(historySnapshot);
-    } catch(e) {
-      console.warn("History snapshot failed:", e);
-      historySnapshot = { months: [], weeks: [], error: String(e) };
-    }
-    // Include derived stock data (with sellThru, profit, etc.) alongside raw
-    const stockDerived = deriveStock(stockData, listings);
-    const payload = JSON.stringify({
-      exportDate: TODAY,
-      listings,
-      stock: stockData,
-      stockDerived,
-      goals: { weekly:weeklyGoal, monthly:monthlyGoal, weeklyRev:weeklyRevGoal, monthlyRev:monthlyRevGoal },
-      liveData,
-      history: historySnapshot,
-    }, null, 2);
-    const a = document.createElement("a");
-    a.href = "data:application/json;charset=utf-8," + encodeURIComponent(payload);
-    a.download = `archivedistrict_${TODAY}.json`;
-    a.click();
+      xml+=`</sheetData></worksheet>`;return enc(xml);
+    };
+    const makeEntry=(name,content)=>{const nb=enc(name);const crc=crc32(content);
+      const local=cat(new Uint8Array([0x50,0x4B,0x03,0x04,0x14,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00]),u32le(crc),u32le(content.length),u32le(content.length),u16le(nb.length),u16le(0),nb,content);
+      return{nb,local,crc,size:content.length};};
+    // Listing rows
+    const listingRows=listings.map(l=>({
+      "SKU":l.sku||"","Bundle SKU":l.bundleSku||"","Stock Name":l.name||"","Brand":l.brand||"",
+      "Type":l.type||"","Colour":l.colour||"","Size":l.size||"","Description":l.desc||"",
+      "Length":l.length||"","Pit to Pit":l.pitToPit||"",
+      "Price":l.price!=null?+Number(l.price).toFixed(2):"",
+      "Listed?":l.listed?"Yes":"No","Day Listed":l.dayListed||"",
+      "Platforms":Array.isArray(l.platforms)?l.platforms.join(", "):(l.platform||""),
+      "Platform Sold":l.platform||"","Sold?":l.sold?"Yes":"No",
+      "Sold Price":l.soldPrice!=null?+Number(l.soldPrice).toFixed(2):"",
+      "Net Profit":l.profit!=null?+Number(l.profit).toFixed(2):"",
+      "Day Sold":l.daySold||"","Days to Sell":l.days!=null?l.days:"",
+      "Shipped?":l.shipped?"Yes":"No","Shipped Date":l.shippedDate||"",
+      "Pending Return?":l.pendingReturn?"Yes":"No","Return Reason":l.returnReason||"","Notes":l.notes||"",
+    }));
+    // Stock rows with derived fields
+    const stockRows=deriveStock(stockData,listings).map(s=>({
+      "Bundle SKU":s.bundleSku||"","Stock Name":s.name||"","Website":s.website||"","Seller":s.seller||"",
+      "Date Ordered":s.datePurchased||"","Date Received":s.dateArrived||"","Contents":s.contentDetails||"",
+      "Received Qty":s.received||0,"Sellable":s.sellable||0,
+      "Cost/pc":s.costPer!=null?+Number(s.costPer).toFixed(4):0,
+      "Total Cost":+Number(s.totalCost||0).toFixed(2),
+      "Qty Sold":s.qtySold||0,"Qty Listed":s.qtyListed||0,
+      "Qty Remaining":s.qtyRemaining||0,"To List":s.qtyToBeListed||0,
+      "Net Proceeds":+Number(s.netProceeds||0).toFixed(2),
+      "Bundle Profit":+Number(s.totalProfit||0).toFixed(2),
+      "Stock Val Left":+Number(s.stockValLeft||0).toFixed(2),
+      "Sell-through %":s.sellThru||0,
+      "Avg Sold Price":s.avgSoldPrice?+Number(s.avgSoldPrice).toFixed(2):"",
+      "Avg Profit":s.avgProfit?+Number(s.avgProfit).toFixed(2):"",
+      "Restock?":s.restock?"Yes":"No","Imported":s.imported?"Yes":"No",
+    }));
+    const s1=buildSheet(listingRows);
+    const s2=buildSheet(stockRows);
+    const ssXml=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="${allStrings.length}" uniqueCount="${allStrings.length}">${allStrings.map(s=>`<si><t xml:space="preserve">${esc(s)}</t></si>`).join("")}</sst>`;
+    const wbXml=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Listings" sheetId="1" r:id="rId1"/><sheet name="Stock" sheetId="2" r:id="rId2"/></sheets></workbook>`;
+    const wbRels=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/></Relationships>`;
+    const ctXml=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/></Types>`;
+    const rootRels=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`;
+    const files=[
+      makeEntry("[Content_Types].xml",enc(ctXml)),
+      makeEntry("_rels/.rels",enc(rootRels)),
+      makeEntry("xl/workbook.xml",enc(wbXml)),
+      makeEntry("xl/_rels/workbook.xml.rels",enc(wbRels)),
+      makeEntry("xl/worksheets/sheet1.xml",s1),
+      makeEntry("xl/worksheets/sheet2.xml",s2),
+      makeEntry("xl/sharedStrings.xml",enc(ssXml)),
+    ];
+    let cdOff=0;const locals=files.map(f=>{cdOff+=f.local.length;return f.local;});
+    const centralDir=files.map((f,i)=>{const off=files.slice(0,i).reduce((a,x)=>a+x.local.length,0);
+      return cat(new Uint8Array([0x50,0x4B,0x01,0x02,0x14,0x00,0x14,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00]),u32le(f.crc),u32le(f.size),u32le(f.size),u16le(f.nb.length),u16le(0),u16le(0),u16le(0),u16le(0),u32le(0),u32le(off),f.nb);});
+    const cdSize=centralDir.reduce((a,b)=>a+b.length,0);
+    const eocd=cat(new Uint8Array([0x50,0x4B,0x05,0x06,0x00,0x00,0x00,0x00]),u16le(files.length),u16le(files.length),u32le(cdSize),u32le(cdOff),u16le(0));
+    const zip=cat(...locals,...centralDir,eocd);
+    const blob=new Blob([zip],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(blob);
+    a.download=`ArchiveDistrict_${TODAY}.xlsx`;
+    a.click();URL.revokeObjectURL(a.href);
   };
   const importJSON = (e) => {
     const file = e.target.files[0]; if (!file) return;
@@ -8060,7 +8080,7 @@ export default function App() {
             <div className="sunday-banner">
               <span>📤 Sunday reminder — export your data to Google Sheets!</span>
               <div style={{display:"flex",gap:8}}>
-                <button className="sunday-btn" onClick={exportJSON}>Export JSON</button>
+                <button className="sunday-btn" onClick={exportJSON}>Export XLSX</button>
                 <button className="sunday-btn" onClick={()=>setSundayDismissed(true)} style={{opacity:.55}}>Dismiss</button>
               </div>
             </div>
@@ -8085,7 +8105,7 @@ export default function App() {
                 {refreshing ? "…" : "↻"}
               </button>
               <button className="btn btn-o btn-sm" onClick={exportJSON}
-                style={{whiteSpace:"nowrap"}}>↓ Backup</button>
+                style={{whiteSpace:"nowrap"}}>↓ Backup XLSX</button>
               {"Notification" in window && Notification.permission !== "granted" && (
                 <button onClick={requestNotifPermission}
                   title="Enable push notifications"
