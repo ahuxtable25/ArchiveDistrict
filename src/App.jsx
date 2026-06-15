@@ -6580,94 +6580,189 @@ function VersionHistory({ onRestore }) {
     if (v.length) setSelected(v[0]);
   }, []);
 
-  const exportVersion = async (v) => {
-    // Dynamically load SheetJS from CDN (only fetched when export is clicked)
-    let XLSX;
-    try {
-      XLSX = await import("https://cdn.sheetjs.com/xlsx-latest/package/xlsx.mjs");
-    } catch (e) {
-      alert("Could not load XLSX library — check your internet connection and try again.");
-      return;
-    }
+  const exportVersion = (v) => {
+    // ── Pure-JS XLSX builder — no library or CDN needed ──
+    const esc = (s) => String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+    const buildSheet = (rows) => {
+      if (!rows.length) return { xml: '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/></worksheet>', rels: [] };
+      const cols = Object.keys(rows[0]);
+      const toCol = (i) => { let s="",n=i+1; while(n>0){s=String.fromCharCode(65+(n-1)%26)+s;n=Math.floor((n-1)/26);} return s; };
+      const sharedStrings = []; const ssMap = {};
+      const si = (val) => { const k=String(val); if(ssMap[k]===undefined){ssMap[k]=sharedStrings.length;sharedStrings.push(k);} return ssMap[k]; };
+      let xml = '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>';
+      // Header row
+      xml += '<row r="1">';
+      cols.forEach((c,ci) => { xml += `<c r="${toCol(ci)}1" t="s"><v>${si(c)}</v></c>`; });
+      xml += '</row>';
+      // Data rows
+      rows.forEach((row, ri) => {
+        xml += `<row r="${ri+2}">`;
+        cols.forEach((c, ci) => {
+          const val = row[c];
+          const ref = `${toCol(ci)}${ri+2}`;
+          if (val === "" || val === null || val === undefined) {
+            xml += `<c r="${ref}"/>`;
+          } else if (typeof val === "number") {
+            xml += `<c r="${ref}"><v>${val}</v></c>`;
+          } else {
+            xml += `<c r="${ref}" t="s"><v>${si(String(val))}</v></c>`;
+          }
+        });
+        xml += '</row>';
+      });
+      xml += '</sheetData></worksheet>';
+      const ssXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="${sharedStrings.length}" uniqueCount="${sharedStrings.length}">${sharedStrings.map(s=>`<si><t xml:space="preserve">${esc(s)}</t></si>`).join("")}</sst>`;
+      return { xml: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>${xml}`, ssXml };
+    };
 
-    // ── Derive computed stock fields (mirrors deriveStock) ──
+    // ── Derive computed stock fields ──
     const stockRows = v.stockData.map(s => {
       const dupeSku  = v.stockData.filter(s2 => s2.bundleSku === s.bundleSku).length > 1;
-      const items    = dupeSku
-        ? v.listings.filter(l => l.bundleSku===s.bundleSku && l.name===s.name)
-        : v.listings.filter(l => l.bundleSku===s.bundleSku);
-      const soldItems    = items.filter(l => l.sold);
-      const listedItems  = items.filter(l => l.listed);
-      const netProceeds  = soldItems.reduce((a,l) => a+(l.soldPrice||0), 0);
-      const totalCost    = s.totalCost || (s.sellable * (s.costPer||0));
-      const costPerItem  = s.sellable > 0 ? totalCost / s.sellable : (s.costPer||0);
-      const totalProfit  = netProceeds - totalCost;
-      const stockValLeft = items.filter(l=>!l.sold).length * costPerItem;
-      const sellThru     = s.sellable ? Math.round(soldItems.length/s.sellable*100) : 0;
-      const avgProfit    = soldItems.length ? (netProceeds - soldItems.length*costPerItem)/soldItems.length : 0;
-      const avgSoldPrice = soldItems.length ? netProceeds/soldItems.length : 0;
+      const items    = dupeSku ? v.listings.filter(l=>l.bundleSku===s.bundleSku&&l.name===s.name) : v.listings.filter(l=>l.bundleSku===s.bundleSku);
+      const soldItems   = items.filter(l=>l.sold);
+      const listedItems = items.filter(l=>l.listed);
+      const netProceeds = soldItems.reduce((a,l)=>a+(l.soldPrice||0),0);
+      const totalCost   = s.totalCost||(s.sellable*(s.costPer||0));
+      const costPerItem = s.sellable>0?totalCost/s.sellable:(s.costPer||0);
+      const totalProfit = netProceeds-totalCost;
+      const stockValLeft= items.filter(l=>!l.sold).length*costPerItem;
+      const sellThru    = s.sellable?Math.round(soldItems.length/s.sellable*100):0;
+      const avgProfit   = soldItems.length?(netProceeds-soldItems.length*costPerItem)/soldItems.length:0;
+      const avgSoldPrice= soldItems.length?netProceeds/soldItems.length:0;
       return {
-        "Bundle SKU":      s.bundleSku      || "",
-        "Stock Name":      s.name           || "",
-        "Website":         s.website        || "",
-        "Seller":          s.seller         || "",
-        "Date Ordered":    s.datePurchased  || "",
-        "Date Received":   s.dateArrived    || "",
-        "Contents":        s.contentDetails || "",
-        "Received Qty":    s.received       || 0,
-        "Sellable":        s.sellable       || 0,
-        "Cost/pc (£)":     costPerItem      != null ? +costPerItem.toFixed(4) : 0,
-        "Total Cost (£)":  +totalCost.toFixed(2),
-        "Qty Sold":        soldItems.length,
-        "Qty Listed":      listedItems.length,
-        "Qty Remaining":   items.filter(l=>!l.sold).length,
-        "To List":         items.filter(l=>!l.listed&&!l.sold).length,
-        "Net Proceeds (£)":+netProceeds.toFixed(2),
-        "Bundle Profit (£)":+totalProfit.toFixed(2),
-        "Stock Val Left (£)":+stockValLeft.toFixed(2),
-        "Sell-through (%)": sellThru,
-        "Avg Sold Price (£)":soldItems.length ? +avgSoldPrice.toFixed(2) : "",
-        "Avg Profit (£)":  soldItems.length ? +avgProfit.toFixed(2) : "",
-        "Restock?":        s.restock ? "Yes" : "No",
-        "Imported":        s.imported ? "Yes" : "No",
+        "Bundle SKU":s.bundleSku||"","Stock Name":s.name||"","Website":s.website||"","Seller":s.seller||"",
+        "Date Ordered":s.datePurchased||"","Date Received":s.dateArrived||"","Contents":s.contentDetails||"",
+        "Received Qty":s.received||0,"Sellable":s.sellable||0,
+        "Cost/pc":costPerItem!=null?+costPerItem.toFixed(4):0,"Total Cost":+totalCost.toFixed(2),
+        "Qty Sold":soldItems.length,"Qty Listed":listedItems.length,
+        "Qty Remaining":items.filter(l=>!l.sold).length,"To List":items.filter(l=>!l.listed&&!l.sold).length,
+        "Net Proceeds":+netProceeds.toFixed(2),"Bundle Profit":+totalProfit.toFixed(2),
+        "Stock Val Left":+stockValLeft.toFixed(2),"Sell-through %":sellThru,
+        "Avg Sold Price":soldItems.length?+avgSoldPrice.toFixed(2):"","Avg Profit":soldItems.length?+avgProfit.toFixed(2):"",
+        "Restock?":s.restock?"Yes":"No","Imported":s.imported?"Yes":"No",
       };
     });
 
     // ── Listings sheet ──
     const listingRows = v.listings.map(l => ({
-      "SKU":              l.sku             || "",
-      "Bundle SKU":       l.bundleSku       || "",
-      "Stock Name":       l.name            || "",
-      "Brand":            l.brand           || "",
-      "Type":             l.type            || "",
-      "Colour":           l.colour          || "",
-      "Size":             l.size            || "",
-      "Description":      l.desc            || "",
-      "Length":           l.length          || "",
-      "Pit to Pit":       l.pitToPit        || "",
-      "Price (£)":        l.price           != null ? +Number(l.price).toFixed(2) : "",
-      "Listed?":          l.listed          ? "Yes" : "No",
-      "Day Listed":       l.dayListed       || "",
-      "Platforms":        Array.isArray(l.platforms) ? l.platforms.join(", ") : (l.platform||""),
-      "Platform Sold":    l.platform        || "",
-      "Sold?":            l.sold            ? "Yes" : "No",
-      "Sold Price (£)":   l.soldPrice       != null ? +Number(l.soldPrice).toFixed(2) : "",
-      "Net Profit (£)":   l.profit          != null ? +Number(l.profit).toFixed(2) : "",
-      "Day Sold":         l.daySold         || "",
-      "Days to Sell":     l.days            != null ? l.days : "",
-      "Shipped?":         l.shipped         ? "Yes" : "No",
-      "Shipped Date":     l.shippedDate     || "",
-      "Pending Return?":  l.pendingReturn   ? "Yes" : "No",
-      "Return Reason":    l.returnReason    || "",
-      "Notes":            l.notes           || "",
+      "SKU":l.sku||"","Bundle SKU":l.bundleSku||"","Stock Name":l.name||"","Brand":l.brand||"",
+      "Type":l.type||"","Colour":l.colour||"","Size":l.size||"","Description":l.desc||"",
+      "Length":l.length||"","Pit to Pit":l.pitToPit||"",
+      "Price":l.price!=null?+Number(l.price).toFixed(2):"",
+      "Listed?":l.listed?"Yes":"No","Day Listed":l.dayListed||"",
+      "Platforms":Array.isArray(l.platforms)?l.platforms.join(", "):(l.platform||""),
+      "Platform Sold":l.platform||"","Sold?":l.sold?"Yes":"No",
+      "Sold Price":l.soldPrice!=null?+Number(l.soldPrice).toFixed(2):"",
+      "Net Profit":l.profit!=null?+Number(l.profit).toFixed(2):"",
+      "Day Sold":l.daySold||"","Days to Sell":l.days!=null?l.days:"",
+      "Shipped?":l.shipped?"Yes":"No","Shipped Date":l.shippedDate||"",
+      "Pending Return?":l.pendingReturn?"Yes":"No","Return Reason":l.returnReason||"","Notes":l.notes||"",
     }));
 
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(listingRows), "Listings");
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(stockRows),   "Stock");
+    // ── Build two separate sheets with their own shared string tables ──
+    const sheet1 = buildSheet(listingRows);
+    const sheet2 = buildSheet(stockRows);
 
-    const safeLabel = v.label.replace(/[^a-zA-Z0-9]/g,"_");
-    XLSX.writeFile(wb, `ArchiveDistrict_${safeLabel}.xlsx`);
+    // ── Assemble XLSX (ZIP) manually using a simple binary builder ──
+    const enc = (s) => new TextEncoder().encode(s);
+    const crc32 = (data) => {
+      let c=0xFFFFFFFF; const t=new Uint32Array(256);
+      for(let i=0;i<256;i++){let k=i;for(let j=0;j<8;j++)k=k&1?(0xEDB88320^(k>>>1)):k>>>1;t[i]=k;}
+      for(let i=0;i<data.length;i++)c=t[(c^data[i])&0xFF]^(c>>>8);
+      return (c^0xFFFFFFFF)>>>0;
+    };
+    const u32le = (n) => { const b=new Uint8Array(4); new DataView(b.buffer).setUint32(0,n,true); return b; };
+    const u16le = (n) => { const b=new Uint8Array(2); new DataView(b.buffer).setUint16(0,n,true); return b; };
+    const cat   = (...arrays) => { const total=arrays.reduce((a,b)=>a+b.length,0); const out=new Uint8Array(total); let off=0; arrays.forEach(a=>{out.set(a,off);off+=a.length;}); return out; };
+
+    const makeEntry = (name, content) => {
+      const nameBytes = enc(name);
+      const crc = crc32(content);
+      const local = cat(
+        new Uint8Array([0x50,0x4B,0x03,0x04,0x14,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00]),
+        u32le(crc), u32le(content.length), u32le(content.length),
+        u16le(nameBytes.length), u16le(0),
+        nameBytes, content
+      );
+      return { name: nameBytes, local, crc, size: content.length };
+    };
+
+    // Minimal XLSX content files
+    const wbXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Listings" sheetId="1" r:id="rId1"/><sheet name="Stock" sheetId="2" r:id="rId2"/></sheets></workbook>`;
+    const wbRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/></Relationships>`;
+    const contentTypes = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/></Types>`;
+    const rootRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`;
+
+    // Merge shared strings from both sheets into one table
+    const allStrings = []; const allMap = {};
+    const reindex = (ssXml) => {
+      const matches = [...ssXml.matchAll(/<t xml:space="preserve">([\s\S]*?)<\/t>/g)];
+      return matches.map(m => { const s=m[1].replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"'); if(allMap[s]===undefined){allMap[s]=allStrings.length;allStrings.push(s);} return allMap[s]; });
+    };
+
+    // Re-run sheet builds pointing at the combined string table
+    const rebuildSheet = (rows) => {
+      if (!rows.length) return enc(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/></worksheet>`);
+      const cols = Object.keys(rows[0]);
+      const toCol = (i) => { let s="",n=i+1; while(n>0){s=String.fromCharCode(65+(n-1)%26)+s;n=Math.floor((n-1)/26);} return s; };
+      const si = (val) => { const k=String(val); if(allMap[k]===undefined){allMap[k]=allStrings.length;allStrings.push(k);} return allMap[k]; };
+      let xml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>`;
+      xml += `<row r="1">`; cols.forEach((c,ci)=>{ xml+=`<c r="${toCol(ci)}1" t="s"><v>${si(c)}</v></c>`; }); xml+=`</row>`;
+      rows.forEach((row,ri)=>{
+        xml+=`<row r="${ri+2}">`;
+        cols.forEach((c,ci)=>{
+          const val=row[c]; const ref=`${toCol(ci)}${ri+2}`;
+          if(val===""||val===null||val===undefined){ xml+=`<c r="${ref}"/>`; }
+          else if(typeof val==="number"){ xml+=`<c r="${ref}"><v>${val}</v></c>`; }
+          else{ xml+=`<c r="${ref}" t="s"><v>${si(String(val))}</v></c>`; }
+        });
+        xml+=`</row>`;
+      });
+      xml+=`</sheetData></worksheet>`;
+      return enc(xml);
+    };
+
+    const s1bytes = rebuildSheet(listingRows);
+    const s2bytes = rebuildSheet(stockRows);
+    const ssXmlFinal = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="${allStrings.length}" uniqueCount="${allStrings.length}">${allStrings.map(s=>`<si><t xml:space="preserve">${esc(s)}</t></si>`).join("")}</sst>`;
+
+    const files = [
+      makeEntry("[Content_Types].xml",       enc(contentTypes)),
+      makeEntry("_rels/.rels",               enc(rootRels)),
+      makeEntry("xl/workbook.xml",           enc(wbXml)),
+      makeEntry("xl/_rels/workbook.xml.rels",enc(wbRels)),
+      makeEntry("xl/worksheets/sheet1.xml",  s1bytes),
+      makeEntry("xl/worksheets/sheet2.xml",  s2bytes),
+      makeEntry("xl/sharedStrings.xml",      enc(ssXmlFinal)),
+    ];
+
+    // Build ZIP central directory
+    let offset = 0;
+    const locals = files.map(f => { const l=f.local; offset+=l.length; return l; });
+    const centralDir = files.map((f, i) => {
+      let off = files.slice(0,i).reduce((a,x)=>a+x.local.length,0);
+      return cat(
+        new Uint8Array([0x50,0x4B,0x01,0x02,0x14,0x00,0x14,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00]),
+        u32le(f.crc), u32le(f.size), u32le(f.size),
+        u16le(f.name.length), u16le(0), u16le(0), u16le(0), u16le(0),
+        u32le(0), u32le(off), f.name
+      );
+    });
+    const cdSize   = centralDir.reduce((a,b)=>a+b.length,0);
+    const cdOffset = locals.reduce((a,b)=>a+b.length,0);
+    const eocd = cat(
+      new Uint8Array([0x50,0x4B,0x05,0x06,0x00,0x00,0x00,0x00]),
+      u16le(files.length), u16le(files.length),
+      u32le(cdSize), u32le(cdOffset), u16le(0)
+    );
+
+    const zip = cat(...locals, ...centralDir, eocd);
+    const blob = new Blob([zip], {type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `ArchiveDistrict_${v.label.replace(/[^a-zA-Z0-9]/g,"_")}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(a.href);
   };
 
   return (
