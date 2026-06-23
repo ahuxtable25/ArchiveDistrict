@@ -269,6 +269,7 @@ const DEFAULT_APP_SETTINGS = {
   notifShipped:     false,
   notifSundayBackup:true,
   notifNotes:       true,
+  crossListPlats:   null, // null = all platform families visible
 };
 const getAS = (liveData) => ({ ...DEFAULT_APP_SETTINGS, ...(liveData?.appSettings||{}) });
 const copyText = (t) => { try { navigator.clipboard.writeText(t); } catch (_) {} };
@@ -3423,13 +3424,263 @@ const ACTIVE_COLS = [
 /* ═══════════════════════════════════════════════════════════════
    LISTING DATA TAB
 ═══════════════════════════════════════════════════════════════ */
-function ListingDataTab({ listings }) {
+/* ═══════════════════════════════════════════════════════════════
+   CROSS-LIST TAB — lives inside Listing Data
+   Shows active listings grouped by bundle for each platform they
+   are NOT yet on. Platform picker driven by Settings.
+═══════════════════════════════════════════════════════════════ */
+function CrossListTab({ listings, visiblePlats }) {
+  const [selPlat,  setSelPlat]  = useState(() => visiblePlats[0] || "");
+  const [search,   setSearch]   = useState("");
+  const [expanded, setExpanded] = useState({}); // true = open, default closed
+  const [copied,   setCopied]   = useState(null);
+
+  const active = listings.filter(l => l.listed && !l.sold);
+
+  // Reset selected platform if it's no longer visible
+  const selPlatSafe = visiblePlats.includes(selPlat) ? selPlat : (visiblePlats[0] || "");
+
+  const platStats = visiblePlats.map(p => ({
+    plat:    p,
+    missing: active.filter(l => !(l.platforms||[]).includes(p) && l.platform !== p).length,
+  }));
+
+  const missing = useMemo(() => {
+    let d = active.filter(l => !(l.platforms||[]).includes(selPlatSafe) && l.platform !== selPlatSafe);
+    if (search.trim()) {
+      const s = search.toLowerCase();
+      d = d.filter(l =>
+        l.sku.toLowerCase().includes(s) ||
+        l.colour.toLowerCase().includes(s) ||
+        (l.name||"").toLowerCase().includes(s) ||
+        l.size.toLowerCase().includes(s)
+      );
+    }
+    return d;
+  }, [selPlatSafe, search, active]);
+
+  const byBundle = useMemo(() => {
+    const out = {};
+    missing.forEach(l => {
+      const key = `${l.bundleSku}||${l.name}`;
+      if (!out[key]) out[key] = { bsku: l.bundleSku, name: l.name, items: [] };
+      out[key].items.push(l);
+    });
+    return Object.values(out).sort((a, b) => b.items.length - a.items.length);
+  }, [missing]);
+
+  const alreadyOn = active.filter(l => (l.platforms||[]).includes(selPlatSafe) || l.platform === selPlatSafe).length;
+  const selCol    = getPlatColour(selPlatSafe);
+
+  const copy = (skus, key) => {
+    copyText(skus.join("\n"));
+    setCopied(key);
+    setTimeout(() => setCopied(null), 2000);
+  };
+
+  const toggleBundle = (key) =>
+    setExpanded(p => ({ ...p, [key]: !p[key] }));
+
+  if (!visiblePlats.length) return (
+    <div style={{background:"var(--sf)",border:"1px solid var(--bd)",borderRadius:"var(--r2)",padding:"28px 24px",textAlign:"center",color:"var(--txd)",fontSize:12}}>
+      No platforms configured. Go to Settings → Listings to set up cross-list platforms.
+    </div>
+  );
+
+  return (
+    <div>
+      {/* Platform picker */}
+      <div style={{display:"grid",gridTemplateColumns:`repeat(${Math.min(visiblePlats.length,5)},1fr)`,gap:8,marginBottom:14}}>
+        {platStats.map(({ plat, missing: n }) => {
+          const col   = getPlatColour(plat);
+          const isSel = plat === selPlatSafe;
+          return (
+            <button key={plat}
+              onClick={() => { setSelPlat(plat); setSearch(""); setCopied(null); setExpanded({}); }}
+              style={{
+                padding:"11px 8px",border:`2px solid ${isSel ? col : "var(--bd)"}`,
+                borderRadius:"var(--r2)",cursor:"pointer",textAlign:"center",
+                background:isSel ? col+"14" : "var(--sf)",
+                boxShadow:isSel ? `0 0 0 3px ${col}22` : "var(--sh)",
+                transition:"all .14s",fontFamily:"Arial,sans-serif",outline:"none",
+              }}>
+              <div style={{width:9,height:9,borderRadius:"50%",background:col,margin:"0 auto 6px"}}/>
+              <div style={{fontSize:11,fontWeight:700,color:isSel?col:"var(--txm)",marginBottom:3}}>{getPlatFamily(plat)}</div>
+              {n === 0
+                ? <div style={{fontSize:10,fontWeight:700,color:"var(--gn)"}}>✓ all done</div>
+                : <div style={{fontSize:10,fontWeight:700,color:isSel?col:"var(--am)"}}>{n} to add</div>
+              }
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Main panel */}
+      <div style={{background:"var(--sf)",border:"1px solid var(--bd)",borderRadius:"var(--r2)",overflow:"hidden",boxShadow:"var(--sh)"}}>
+        {/* Header row 1: platform name + stats + copy all */}
+        <div style={{padding:"12px 16px 0"}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:9}}>
+            <div style={{width:10,height:10,borderRadius:"50%",background:selCol,flexShrink:0}}/>
+            <span style={{fontWeight:900,fontSize:14,color:selCol}}>{getPlatFamily(selPlatSafe)}</span>
+            <span style={{fontSize:12,color:"var(--txm)"}}>
+              {missing.length} to list · {alreadyOn} already on
+            </span>
+            <div style={{flex:1}}/>
+            <button
+              onClick={() => copy(missing.map(l => l.sku), "all")}
+              disabled={missing.length === 0}
+              style={{
+                display:"inline-flex",alignItems:"center",gap:6,padding:"6px 13px",
+                borderRadius:20,cursor:missing.length?"pointer":"default",
+                border:"1px solid var(--bdd)",
+                background:copied==="all"?"var(--gnl)":"var(--sf)",
+                color:copied==="all"?"var(--gn)":"var(--txm)",
+                fontFamily:"Arial,sans-serif",fontSize:11,fontWeight:700,
+                transition:"all .12s",flexShrink:0,opacity:missing.length===0?.4:1,
+              }}>
+              <span style={{fontSize:13}}>{copied==="all"?"✓":"⎘"}</span>
+              {copied==="all" ? "Copied!" : `Copy ${missing.length} SKUs`}
+            </button>
+          </div>
+          {/* Header row 2: search — full width */}
+          <div style={{position:"relative",paddingBottom:12,borderBottom:"1px solid var(--bd)"}}>
+            <span style={{position:"absolute",left:9,top:"50%",transform:"translateY(-60%)",fontSize:13,color:"var(--txd)",pointerEvents:"none"}}>⌕</span>
+            <input
+              value={search} onChange={e => setSearch(e.target.value)}
+              placeholder="Filter SKU, colour…"
+              style={{
+                width:"100%",background:"var(--sf2)",border:"1px solid var(--bdd)",
+                borderRadius:20,padding:"6px 12px 6px 28px",
+                fontFamily:"Arial,sans-serif",fontSize:12,outline:"none",
+                transition:"border-color .12s",boxSizing:"border-box",
+              }}
+              onFocus={e=>e.target.style.borderColor="var(--ac)"}
+              onBlur={e=>e.target.style.borderColor="var(--bdd)"}
+            />
+          </div>
+        </div>
+
+        {/* Bundle list */}
+        {missing.length === 0 ? (
+          <div style={{padding:"32px 24px",textAlign:"center"}}>
+            <div style={{fontSize:22,marginBottom:8}}>✓</div>
+            <div style={{fontWeight:900,color:"var(--gn)",textTransform:"uppercase",letterSpacing:".4px",fontSize:12,marginBottom:4}}>
+              All covered
+            </div>
+            <div style={{fontSize:12,color:"var(--txd)"}}>
+              Every active listing is already on {getPlatFamily(selPlatSafe)}.
+            </div>
+          </div>
+        ) : byBundle.map((bundle, bi) => {
+          const bundleKey  = `${bundle.bsku}||${bundle.name}`;
+          const isOpen     = !!expanded[bundleKey];
+          const bundleSkus = bundle.items.map(l => l.sku);
+          const isBCopied  = copied === bundleKey;
+          return (
+            <div key={bundleKey} style={{borderBottom:bi<byBundle.length-1?"1px solid var(--bd)":"none"}}>
+              {/* Bundle header */}
+              <div onClick={() => toggleBundle(bundleKey)}
+                style={{
+                  display:"flex",alignItems:"center",gap:10,padding:"10px 16px",
+                  background:isOpen?"var(--sf)":"var(--sf2)",
+                  cursor:"pointer",userSelect:"none",
+                  borderBottom:isOpen?"1px solid var(--bd)":"none",
+                }}>
+                <span style={{fontSize:10,color:"var(--txd)",flexShrink:0,width:10}}>{isOpen?"▾":"▸"}</span>
+                <span className="bsku">{bundle.bsku}</span>
+                <span style={{fontWeight:700,fontSize:12,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                  {bundle.name}
+                </span>
+                <span style={{fontSize:11,color:"var(--txd)",flexShrink:0}}>
+                  {bundle.items.length} item{bundle.items.length!==1?"s":""}
+                </span>
+              </div>
+
+              {/* Item rows */}
+              {isOpen && bundle.items.map((l, i) => {
+                const onPlats = [...new Set([...(l.platforms||[]), l.platform].filter(Boolean))];
+                return (
+                  <div key={l.sku} style={{
+                    display:"flex",alignItems:"center",gap:10,
+                    padding:"9px 16px 9px 36px",
+                    borderBottom:i<bundle.items.length-1?"1px solid var(--bd)":"none",
+                    background:"var(--sf)",
+                  }}>
+                    <span className="sku" style={{minWidth:52,flexShrink:0}}>{l.sku}</span>
+                    <div style={{flex:1,minWidth:0}}>
+                      <span style={{fontWeight:700,fontSize:12}}>{l.colour}</span>
+                      <span style={{fontSize:11,color:"var(--txm)",marginLeft:6}}>Size {l.size} · {l.type}</span>
+                    </div>
+                    {/* Platform pills — what it's currently ON */}
+                    <div style={{display:"flex",gap:4,flexWrap:"wrap",justifyContent:"flex-end"}}>
+                      {onPlats.map(p => {
+                        const fam = getPlatFamily(p);
+                        const c   = getPlatColour(p);
+                        return (
+                          <span key={p} style={{
+                            display:"inline-block",padding:"3px 9px",borderRadius:20,
+                            fontSize:11,fontWeight:700,color:c,
+                            background:c+"15",border:`1.5px solid ${c}55`,
+                            whiteSpace:"nowrap",
+                          }}>{fam}</span>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* Bundle footer — SKU strip + copy */}
+              {isOpen && (
+                <div style={{
+                  display:"flex",alignItems:"center",gap:10,padding:"7px 16px",
+                  background:"var(--sf2)",borderTop:"1px solid var(--bd)",
+                }}>
+                  <span style={{fontSize:10,color:"var(--txd)",flexShrink:0}}>SKUs:</span>
+                  <span style={{fontSize:11,color:"var(--txm)",flex:1,fontFamily:"monospace",letterSpacing:".5px"}}>
+                    {bundleSkus.join("  ")}
+                  </span>
+                  <button onClick={() => copy(bundleSkus, bundleKey)}
+                    style={{
+                      display:"inline-flex",alignItems:"center",gap:5,
+                      padding:"4px 12px",borderRadius:20,cursor:"pointer",
+                      border:"1px solid var(--bdd)",
+                      background:isBCopied?"var(--gnl)":"var(--sf)",
+                      color:isBCopied?"var(--gn)":"var(--txm)",
+                      fontFamily:"Arial,sans-serif",fontSize:11,fontWeight:700,
+                      transition:"all .12s",flexShrink:0,
+                    }}>
+                    <span>{isBCopied?"✓":"⎘"}</span>
+                    {isBCopied?"Copied!":"Copy"}
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {missing.length > 0 && (
+        <div style={{marginTop:9,fontSize:11,color:"var(--txd)"}}>
+          Copy SKUs → paste into <strong style={{color:"var(--txm)"}}>Mark as Listed → Bulk mode</strong> to cross-list in one go.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ListingDataTab({ listings, liveData }) {
   const [toListCols, setToListCols]   = useState(TOLIST_COLS);
   const [activeCols, setActiveCols]   = useState(ACTIVE_COLS);
   const [showToListCP,  setShowToListCP]  = useState(false);
   const [showActiveCP,  setShowActiveCP]  = useState(false);
+  const [ldTab,         setLdTab]         = useState("tolist"); // "tolist" | "active" | "crosslist"
   const activeZoom  = useZoom(100);
   const toListZoom  = useZoom(100);
+
+  // Cross-list: platforms from settings (null = all families)
+  const as            = getAS(liveData);
+  const crossListPlats = as.crossListPlats || PLAT_FAMILY_BASES;
 
   const active      = listings.filter(l => l.listed && !l.sold);
   const toBeListed  = listings.filter(l => !l.listed && !l.sold);
@@ -3546,6 +3797,11 @@ function ListingDataTab({ listings }) {
     );
   };
 
+  // Cross-list gap count for tab badge
+  const crossNeedsCount = active.filter(l =>
+    crossListPlats.some(p => !(l.platforms||[]).includes(p) && l.platform !== p)
+  ).length;
+
   return (
     <div>
       {/* KPI Cards */}
@@ -3564,64 +3820,92 @@ function ListingDataTab({ listings }) {
         ))}
       </div>
 
-      {/* Breakdowns — 3 columns desktop, stacked mobile */}
-      <div className="ld-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:11,marginBottom:4}}>
-        <div className="sc">
-          <div className="st" style={{marginBottom:8}}>Active by Mover Tag</div>
-          {[["FAST","mt-f"],["MEDIUM","mt-m"],["SLOW","mt-s"],["NEW","mt-n"],["UNKNOWN","mt-u"],["DEAD","mt-d"]].map(([tag,cls])=>(
-            <div key={tag} className="sr">
-              <span className={`mt ${cls}`}>{tag}</span>
-              <span className="srv">{byTag(active,tag)}</span>
-            </div>
-          ))}
+      {/* Tab bar */}
+      <div className="tab-bar">
+        <div className={`tab ${ldTab==="tolist"?"active":""}`} onClick={()=>setLdTab("tolist")}>
+          To Be Listed <span className="tc">{toBeListed.length}</span>
         </div>
-        <div className="sc">
-          <div className="st" style={{marginBottom:8}}>Active by Bundle</div>
-          {byNameSku(active).length===0
-            ? <div style={{fontSize:12,color:"var(--txd)",padding:"8px 0"}}>No active listings.</div>
-            : byNameSku(active).map(b=>(
-              <div key={`${b.bsku}-${b.name}`} className="sr">
-                <span className="srl"><span className="bsku" style={{marginRight:5}}>{b.bsku}</span>{b.name}</span>
-                <span className="srv">{b.count}</span>
-              </div>
-            ))
-          }
+        <div className={`tab ${ldTab==="active"?"active":""}`} onClick={()=>setLdTab("active")}>
+          Active <span className="tc">{active.length}</span>
         </div>
-        <div className="sc">
-          <div className="st" style={{marginBottom:8}}>To Be Listed by Bundle</div>
-          {byNameSku(toBeListed).length===0
-            ? <div style={{fontSize:12,color:"var(--txd)",padding:"8px 0"}}>All items are listed.</div>
-            : byNameSku(toBeListed).map(b=>(
-              <div key={`${b.bsku}-${b.name}`} className="sr">
-                <span className="srl"><span className="bsku" style={{marginRight:5}}>{b.bsku}</span>{b.name}</span>
-                <span className="srv">{b.count}</span>
-              </div>
-            ))
-          }
+        <div className={`tab ${ldTab==="crosslist"?"active":""}`} onClick={()=>setLdTab("crosslist")}>
+          Cross-List
+          <span className={`tc${ldTab!=="crosslist"&&crossNeedsCount>0?" tc-ret":""}`}>
+            {crossNeedsCount}
+          </span>
         </div>
       </div>
 
-      <TableSection
-        title="To Be Listed"
-        subtitle={`${toListF.filtered.length} items`}
-        fHook={toListF}
-        cols={toListCols} setCols={setToListCols}
-        showCP={showToListCP} setShowCP={setShowToListCP}
-        renderCell={renderToListCell}
-        exportName="to_be_listed"
-        zoom={toListZoom}
-      />
+      {/* To Be Listed tab */}
+      {ldTab === "tolist" && (
+        <>
+          {/* Breakdowns */}
+          <div className="ld-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:11,marginBottom:4}}>
+            <div className="sc">
+              <div className="st" style={{marginBottom:8}}>Active by Mover Tag</div>
+              {[["FAST","mt-f"],["MEDIUM","mt-m"],["SLOW","mt-s"],["NEW","mt-n"],["UNKNOWN","mt-u"],["DEAD","mt-d"]].map(([tag,cls])=>(
+                <div key={tag} className="sr">
+                  <span className={`mt ${cls}`}>{tag}</span>
+                  <span className="srv">{byTag(active,tag)}</span>
+                </div>
+              ))}
+            </div>
+            <div className="sc">
+              <div className="st" style={{marginBottom:8}}>Active by Bundle</div>
+              {byNameSku(active).length===0
+                ? <div style={{fontSize:12,color:"var(--txd)",padding:"8px 0"}}>No active listings.</div>
+                : byNameSku(active).map(b=>(
+                  <div key={`${b.bsku}-${b.name}`} className="sr">
+                    <span className="srl"><span className="bsku" style={{marginRight:5}}>{b.bsku}</span>{b.name}</span>
+                    <span className="srv">{b.count}</span>
+                  </div>
+                ))
+              }
+            </div>
+            <div className="sc">
+              <div className="st" style={{marginBottom:8}}>To Be Listed by Bundle</div>
+              {byNameSku(toBeListed).length===0
+                ? <div style={{fontSize:12,color:"var(--txd)",padding:"8px 0"}}>All items are listed.</div>
+                : byNameSku(toBeListed).map(b=>(
+                  <div key={`${b.bsku}-${b.name}`} className="sr">
+                    <span className="srl"><span className="bsku" style={{marginRight:5}}>{b.bsku}</span>{b.name}</span>
+                    <span className="srv">{b.count}</span>
+                  </div>
+                ))
+              }
+            </div>
+          </div>
+          <TableSection
+            title="To Be Listed"
+            subtitle={`${toListF.filtered.length} items`}
+            fHook={toListF}
+            cols={toListCols} setCols={setToListCols}
+            showCP={showToListCP} setShowCP={setShowToListCP}
+            renderCell={renderToListCell}
+            exportName="to_be_listed"
+            zoom={toListZoom}
+          />
+        </>
+      )}
 
-      <TableSection
-        title="Active Listings"
-        subtitle={`${activeF.filtered.length} items`}
-        fHook={activeF}
-        cols={activeCols} setCols={setActiveCols}
-        showCP={showActiveCP} setShowCP={setShowActiveCP}
-        renderCell={renderActiveCell}
-        exportName="active_listings"
-        zoom={activeZoom}
-      />
+      {/* Active tab */}
+      {ldTab === "active" && (
+        <TableSection
+          title="Active Listings"
+          subtitle={`${activeF.filtered.length} items`}
+          fHook={activeF}
+          cols={activeCols} setCols={setActiveCols}
+          showCP={showActiveCP} setShowCP={setShowActiveCP}
+          renderCell={renderActiveCell}
+          exportName="active_listings"
+          zoom={activeZoom}
+        />
+      )}
+
+      {/* Cross-List tab */}
+      {ldTab === "crosslist" && (
+        <CrossListTab listings={listings} visiblePlats={crossListPlats} />
+      )}
     </div>
   );
 }
@@ -7368,6 +7652,35 @@ function Settings({ liveData, setLiveData, customPlatforms, setListings }) {
             );
           })}
         </div>
+        <div style={{height:10}}/>
+        <SettingsHeader title="Cross-List Tracker — Platforms" sub="Choose which platforms appear in the Cross-List tab in Listing Data. Toggle off any platforms you don't actively sell on." />
+        <div style={{display:"flex",flexDirection:"column",gap:0}}>
+          {PLAT_FAMILY_BASES.map((p, i) => {
+            const col   = getPlatColour(p);
+            const saved = as.crossListPlats || PLAT_FAMILY_BASES;
+            const isOn  = saved.includes(p);
+            const isLast= i === PLAT_FAMILY_BASES.length - 1;
+            return (
+              <div key={p} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"11px 0",borderBottom:isLast?"none":"1px solid var(--bd)",gap:12}}>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <div style={{width:10,height:10,borderRadius:"50%",background:col,flexShrink:0}}/>
+                  <span style={{fontSize:13,color:"var(--tx)",fontWeight:500}}>{p}</span>
+                </div>
+                <div onClick={()=>{
+                    const cur = as.crossListPlats || PLAT_FAMILY_BASES;
+                    const next = isOn ? cur.filter(x=>x!==p) : [...cur, p];
+                    if (next.length > 0) setAS("crossListPlats", next);
+                  }}
+                  style={{width:38,height:22,borderRadius:11,background:isOn?"var(--gn)":"var(--bdd)",position:"relative",cursor:"pointer",transition:"background .2s",flexShrink:0}}>
+                  <div style={{width:16,height:16,borderRadius:"50%",background:"#fff",position:"absolute",top:3,left:isOn?19:3,transition:"left .2s",boxShadow:"0 1px 3px rgba(0,0,0,.2)"}}/>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div style={{marginTop:10,padding:"9px 12px",background:"var(--nvl)",borderRadius:"var(--r)",fontSize:11,color:"var(--nv)"}}>
+          {(as.crossListPlats||PLAT_FAMILY_BASES).length} platform{(as.crossListPlats||PLAT_FAMILY_BASES).length!==1?"s":""} visible in Cross-List tab
+        </div>
       </div>
       )}
 
@@ -8142,7 +8455,7 @@ export default function App() {
             {view==="stock"       && <StockTab stockData={stockData} setStockData={setStockData} listings={listings} setListings={setListings} />}
             {view==="listings"    && <ListingsTab listings={listings} setListings={setListings} stockData={stockData} customPlatforms={customPlatforms} />}
             {view==="movement"    && <MovementTracker listings={listings} />}
-            {view==="listingdata" && <ListingDataTab listings={listings} />}
+            {view==="listingdata" && <ListingDataTab listings={listings} liveData={liveData} />}
             {view==="marklisted"  && <MarkAsListed listings={listings} setListings={setListings} customPlatforms={customPlatforms} liveData={liveData} />}
             {view==="drafter"     && <ListingDrafter listings={listings} setListings={setListings} liveData={liveData} />}
             {view==="marksold"    && <QuickMarkSold listings={listings} setListings={setListings} customPlatforms={customPlatforms} />}
