@@ -3442,11 +3442,11 @@ function CrossListTab({ listings, visiblePlats }) {
 
   const platStats = visiblePlats.map(p => ({
     plat:    p,
-    missing: active.filter(l => !(l.platforms||[]).includes(p) && l.platform !== p).length,
+    missing: active.filter(l => !listingHasFamily(l, p)).length,
   }));
 
   const missing = useMemo(() => {
-    let d = active.filter(l => !(l.platforms||[]).includes(selPlatSafe) && l.platform !== selPlatSafe);
+    let d = active.filter(l => !listingHasFamily(l, selPlatSafe));
     if (search.trim()) {
       const s = search.toLowerCase();
       d = d.filter(l =>
@@ -3469,7 +3469,7 @@ function CrossListTab({ listings, visiblePlats }) {
     return Object.values(out).sort((a, b) => b.items.length - a.items.length);
   }, [missing]);
 
-  const alreadyOn = active.filter(l => (l.platforms||[]).includes(selPlatSafe) || l.platform === selPlatSafe).length;
+  const alreadyOn = active.filter(l => listingHasFamily(l, selPlatSafe)).length;
   const selCol    = getPlatColour(selPlatSafe);
 
   const copy = (skus, key) => {
@@ -3799,7 +3799,7 @@ function ListingDataTab({ listings, liveData }) {
 
   // Cross-list gap count for tab badge
   const crossNeedsCount = active.filter(l =>
-    crossListPlats.some(p => !(l.platforms||[]).includes(p) && l.platform !== p)
+    crossListPlats.some(p => !listingHasFamily(l, p))
   ).length;
 
   return (
