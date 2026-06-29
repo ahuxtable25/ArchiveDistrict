@@ -270,6 +270,9 @@ const DEFAULT_APP_SETTINGS = {
   notifSundayBackup:true,
   notifNotes:       true,
   crossListPlats:   null, // null = all platform families visible
+  customTypes:      [],
+  customColours:    [],
+  customSizes:      [],
 };
 const getAS = (liveData) => ({ ...DEFAULT_APP_SETTINGS, ...(liveData?.appSettings||{}) });
 const copyText = (t) => { try { navigator.clipboard.writeText(t); } catch (_) {} };
@@ -396,10 +399,19 @@ const STOCK_COLS = [
    SHARED UI PRIMITIVES
 ═══════════════════════════════════════════════════════════════ */
 /* ─── ComboSelect — dropdown with "Add new…" option ─── */
-function ComboSelect({ value, onChange, options, placeholder, style }) {
+function ComboSelect({ value, onChange, options, placeholder, style, onAddCustom }) {
   const [adding, setAdding] = useState(false);
   const [newVal, setNewVal] = useState("");
   const allOpts = [...new Set([...options, value].filter(Boolean))].sort();
+
+  const confirmAdd = () => {
+    const v = newVal.trim();
+    if (!v) return;
+    onChange(v);
+    if (onAddCustom) onAddCustom(v);
+    setAdding(false);
+    setNewVal("");
+  };
 
   if (adding) {
     return (
@@ -410,12 +422,12 @@ function ComboSelect({ value, onChange, options, placeholder, style }) {
           value={newVal}
           onChange={e=>setNewVal(e.target.value)}
           onKeyDown={e=>{
-            if (e.key==="Enter" && newVal.trim()) { onChange(newVal.trim()); setAdding(false); setNewVal(""); }
+            if (e.key==="Enter") confirmAdd();
             if (e.key==="Escape") { setAdding(false); setNewVal(""); }
           }}
           style={{flex:1,...(style||{})}}
         />
-        <button className="btn btn-p btn-xs" onClick={()=>{ if(newVal.trim()){ onChange(newVal.trim()); setAdding(false); setNewVal(""); }}}>✓</button>
+        <button className="btn btn-p btn-xs" onClick={confirmAdd}>✓</button>
         <button className="btn btn-o btn-xs" onClick={()=>{ setAdding(false); setNewVal(""); }}>✕</button>
       </div>
     );
@@ -1863,7 +1875,22 @@ function StockTab({ stockData, setStockData, listings, setListings }) {
 /* ═══════════════════════════════════════════════════════════════
    LISTINGS — Edit Drawer (Command 4 — full implementation)
 ═══════════════════════════════════════════════════════════════ */
-function EditListingDrawer({ listing, stockData, onSave, onDelete, onClose }) {
+function EditListingDrawer({ listing, stockData, onSave, onDelete, onClose, liveData, setLiveData }) {
+  const as = getAS(liveData);
+  const typeOpts   = [...new Set([...DEFAULT_TYPES,   ...(as.customTypes   ||[])])].sort();
+  const colourOpts = [...new Set([...DEFAULT_COLOURS, ...(as.customColours ||[])])].sort();
+  const sizeOpts   = [...new Set([...DEFAULT_SIZES,   ...(as.customSizes   ||[])])].sort();
+
+  const addCustomOption = (field, value) => {
+    if (!setLiveData) return;
+    setLiveData(prev => {
+      const prevAS = prev?.appSettings || {};
+      const existing = prevAS[field] || [];
+      if (existing.includes(value)) return prev;
+      return { ...prev, appSettings: { ...prevAS, [field]: [...existing, value] } };
+    });
+  };
+
   const [form, setForm] = useState({ ...listing });
   const [dirty, setDirty] = useState(false);
 
@@ -1940,17 +1967,20 @@ function EditListingDrawer({ listing, stockData, onSave, onDelete, onClose }) {
             </div>
             <div className="fr">
               <label className="fl">Type</label>
-              <ComboSelect value={form.type} onChange={v=>set("type",v)} options={DEFAULT_TYPES} placeholder="type" />
+              <ComboSelect value={form.type} onChange={v=>set("type",v)} options={typeOpts} placeholder="type"
+                onAddCustom={v=>addCustomOption("customTypes",v)} />
             </div>
           </div>
           <div className="fr2">
             <div className="fr">
               <label className="fl">Colour</label>
-              <ComboSelect value={form.colour} onChange={v=>set("colour",v)} options={DEFAULT_COLOURS} placeholder="colour" />
+              <ComboSelect value={form.colour} onChange={v=>set("colour",v)} options={colourOpts} placeholder="colour"
+                onAddCustom={v=>addCustomOption("customColours",v)} />
             </div>
             <div className="fr">
               <label className="fl">Size</label>
-              <ComboSelect value={form.size} onChange={v=>set("size",v)} options={DEFAULT_SIZES} placeholder="size" />
+              <ComboSelect value={form.size} onChange={v=>set("size",v)} options={sizeOpts} placeholder="size"
+                onAddCustom={v=>addCustomOption("customSizes",v)} />
             </div>
           </div>
           <div className="fr">
@@ -2388,7 +2418,22 @@ function ListingCell({ colId, l, onShipToggle, onSelect, selected }) {
 /* ═══════════════════════════════════════════════════════════════
    LISTINGS — Add Listing Modal (Command 4 — full implementation)
 ═══════════════════════════════════════════════════════════════ */
-function AddListingModal({ listings, stockData, onAdd, onClose }) {
+function AddListingModal({ listings, stockData, onAdd, onClose, liveData, setLiveData }) {
+  const as = getAS(liveData);
+  const typeOpts   = [...new Set([...DEFAULT_TYPES,   ...(as.customTypes   ||[])])].sort();
+  const colourOpts = [...new Set([...DEFAULT_COLOURS, ...(as.customColours ||[])])].sort();
+  const sizeOpts   = [...new Set([...DEFAULT_SIZES,   ...(as.customSizes   ||[])])].sort();
+
+  const addCustomOption = (field, value) => {
+    if (!setLiveData) return;
+    setLiveData(prev => {
+      const prevAS = prev?.appSettings || {};
+      const existing = prevAS[field] || [];
+      if (existing.includes(value)) return prev;
+      return { ...prev, appSettings: { ...prevAS, [field]: [...existing, value] } };
+    });
+  };
+
   const nextSku = getNextSku(listings);
   const [form, setForm] = useState({
     bundleSku:  stockData[0]?.bundleSku || "",
@@ -2516,17 +2561,20 @@ function AddListingModal({ listings, stockData, onAdd, onClose }) {
             </div>
             <div className="fr">
               <label className="fl">Type</label>
-              <ComboSelect value={form.type} onChange={v=>set("type",v)} options={DEFAULT_TYPES} placeholder="type" />
+              <ComboSelect value={form.type} onChange={v=>set("type",v)} options={typeOpts} placeholder="type"
+                onAddCustom={v=>addCustomOption("customTypes",v)} />
             </div>
           </div>
           <div className="fr2">
             <div className="fr">
               <label className="fl">Colour {errors.colour && <span style={{color:"var(--ac)"}}>*</span>}</label>
-              <ComboSelect value={form.colour} onChange={v=>set("colour",v)} options={DEFAULT_COLOURS} placeholder="colour" />
+              <ComboSelect value={form.colour} onChange={v=>set("colour",v)} options={colourOpts} placeholder="colour"
+                onAddCustom={v=>addCustomOption("customColours",v)} />
             </div>
             <div className="fr">
               <label className="fl">Size {errors.size && <span style={{color:"var(--ac)"}}>*</span>}</label>
-              <ComboSelect value={form.size} onChange={v=>set("size",v)} options={DEFAULT_SIZES} placeholder="size" />
+              <ComboSelect value={form.size} onChange={v=>set("size",v)} options={sizeOpts} placeholder="size"
+                onAddCustom={v=>addCustomOption("customSizes",v)} />
             </div>
           </div>
           <div className="fr">
@@ -2632,7 +2680,7 @@ function AddListingModal({ listings, stockData, onAdd, onClose }) {
 
 const SORTABLE_LISTING_COLS = new Set(["sku","price","soldPrice","profit","days","dayListed","daySold"]);
 
-function ListingsTab({ listings, setListings, stockData, customPlatforms }) {
+function ListingsTab({ listings, setListings, stockData, customPlatforms, liveData, setLiveData }) {
   const [cols,         setCols]        = useState(DEFAULT_COLS);
   const [showColPanel, setShowColPanel]= useState(false);
   const [showAdd,      setShowAdd]     = useState(false);
@@ -2771,6 +2819,8 @@ function ListingsTab({ listings, setListings, stockData, customPlatforms }) {
         <AddListingModal
           listings={listings}
           stockData={stockData}
+          liveData={liveData}
+          setLiveData={setLiveData}
           onAdd={(newL) => {
             setListings(prev => [...prev, newL]);
             setShowAdd(false);
@@ -2783,6 +2833,8 @@ function ListingsTab({ listings, setListings, stockData, customPlatforms }) {
         <EditListingDrawer
           listing={editListing}
           stockData={stockData}
+          liveData={liveData}
+          setLiveData={setLiveData}
           onSave={(updated) => {
             setListings(prev => prev.map(l => l.sku === updated.sku ? updated : l));
             setEditListing(null);
@@ -8453,7 +8505,7 @@ export default function App() {
           <div className="content">
             {view==="dashboard"   && <Dashboard listings={listings} stockData={stockData} weeklyGoal={weeklyGoal} setWeeklyGoal={setWeeklyGoal} monthlyGoal={monthlyGoal} setMonthlyGoal={setMonthlyGoal} weeklyRevGoal={weeklyRevGoal} setWeeklyRevGoal={setWeeklyRevGoal} monthlyRevGoal={monthlyRevGoal} setMonthlyRevGoal={setMonthlyRevGoal} liveData={liveData} />}
             {view==="stock"       && <StockTab stockData={stockData} setStockData={setStockData} listings={listings} setListings={setListings} />}
-            {view==="listings"    && <ListingsTab listings={listings} setListings={setListings} stockData={stockData} customPlatforms={customPlatforms} />}
+            {view==="listings"    && <ListingsTab listings={listings} setListings={setListings} stockData={stockData} customPlatforms={customPlatforms} liveData={liveData} setLiveData={setLiveData} />}
             {view==="movement"    && <MovementTracker listings={listings} />}
             {view==="listingdata" && <ListingDataTab listings={listings} liveData={liveData} />}
             {view==="marklisted"  && <MarkAsListed listings={listings} setListings={setListings} customPlatforms={customPlatforms} liveData={liveData} />}
