@@ -7733,6 +7733,47 @@ function Settings({ liveData, setLiveData, customPlatforms, setListings }) {
         <div style={{marginTop:10,padding:"9px 12px",background:"var(--nvl)",borderRadius:"var(--r)",fontSize:11,color:"var(--nv)"}}>
           {(as.crossListPlats||PLAT_FAMILY_BASES).length} platform{(as.crossListPlats||PLAT_FAMILY_BASES).length!==1?"s":""} visible in Cross-List tab
         </div>
+        <div style={{height:14}}/>
+        <SettingsHeader title="Custom Dropdown Options" sub="Manage types, colours, and sizes you've added via the dropdowns. Built-in defaults cannot be removed." />
+        {[
+          { field:"customTypes",   label:"Types",   colour:"#1a5276" },
+          { field:"customColours", label:"Colours", colour:"#1a6b3a" },
+          { field:"customSizes",   label:"Sizes",   colour:"#6b3a1a" },
+        ].map(({ field, label, colour }) => {
+          const items = as[field] || [];
+          return (
+            <div key={field} style={{marginBottom:14,border:"1px solid var(--bd)",borderRadius:"var(--r2)",overflow:"hidden"}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"9px 14px",background:"var(--sf2)",borderBottom:items.length?"1px solid var(--bd)":"none"}}>
+                <span style={{fontWeight:700,fontSize:12,color:"var(--tx)"}}>{label}</span>
+                <span style={{fontSize:11,color:"var(--txd)"}}>{items.length} custom</span>
+              </div>
+              {items.length === 0 ? (
+                <div style={{padding:"12px 14px",fontSize:11,color:"var(--txd)"}}>No custom {label.toLowerCase()} added yet.</div>
+              ) : (
+                <div style={{padding:"8px 14px",display:"flex",flexWrap:"wrap",gap:7}}>
+                  {items.map((item, idx) => (
+                    <div key={idx} style={{display:"inline-flex",alignItems:"center",gap:5,background:colour+"12",border:`1px solid ${colour}44`,borderRadius:20,padding:"3px 10px",fontSize:11}}>
+                      <span style={{fontWeight:600,color:colour}}>{item}</span>
+                      <button
+                        onClick={() => {
+                          const next = items.filter((_,i) => i !== idx);
+                          setAS(field, next);
+                        }}
+                        title={`Remove ${item}`}
+                        style={{background:"none",border:"none",cursor:"pointer",color:colour,fontSize:13,lineHeight:1,padding:"0 0 0 2px",fontWeight:700,opacity:.7,transition:"opacity .12s"}}
+                        onMouseEnter={e=>e.target.style.opacity=1}
+                        onMouseLeave={e=>e.target.style.opacity=.7}
+                      >×</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+        <div style={{fontSize:10,color:"var(--txd)",lineHeight:1.6}}>
+          Custom options are removed from the dropdowns immediately. Any listings already using a removed value keep it.
+        </div>
       </div>
       )}
 
