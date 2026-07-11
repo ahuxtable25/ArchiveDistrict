@@ -26,88 +26,26 @@ const saveState = async (listings, stockData, goals) => {
   }
 };
 
-/* ── Local version history ──
-   Rules:
-   1. One snapshot per calendar day (keyed by YYYY-MM-DD) — saved on first change of the day
-   2. One mid-day snapshot if 20+ listings have changed since the day snapshot
-   3. Manual saves (💾 button) always create a new snapshot tagged "Manual save"
-   4. Keep last 14 days of snapshots
-── */
-const VERSION_KEY  = "ad_versions";
-const MAX_VERSIONS = 14;
-
-const _todayKey = () => {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth()+1).padStart(2,"0");
-  const dy = String(d.getDate()).padStart(2,"0");
-  return `${y}-${m}-${dy}`;
-};
-
-const saveLocalVersion = (listings, stockData, { manual = false } = {}) => {
+/* ── Version history now lives server-side in app_state_snapshots ──
+   Auto-filled once a day at 6am UK time by a Supabase pg_cron job (see
+   supabase_schema.sql). The manual Save button upserts today's row on
+   demand. See the VersionHistory component below for reads. ── */
+const saveManualSnapshot = async (listings, stockData, goals) => {
   try {
-    const existing = JSON.parse(localStorage.getItem(VERSION_KEY) || "[]");
-    const todayKey = _todayKey();
-    const now      = Date.now();
-
-    // Migrate old entries that have no dayKey — assign from their ts
-    const migrated = existing.map(e => e.dayKey ? e : {
-      ...e,
-      dayKey: (() => {
-        const d = new Date(e.ts);
-        return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-      })(),
-    });
-
-    if (!manual) {
-      // Rule 1: already have a day snapshot for today?
-      const todaySnap = migrated.find(e => e.dayKey === todayKey && !e.manual && !e.midday);
-
-      if (todaySnap) {
-        // Rule 2: mid-day — only if 20+ listings changed AND no mid-day snap today yet
-        const hasMidday   = migrated.some(e => e.dayKey === todayKey && e.midday);
-        const countChange = Math.abs(listings.length - todaySnap.listingsCount);
-        if (hasMidday || countChange < 20) return; // nothing to do
-        // Fall through to save a mid-day snapshot
-      }
-      // If no day snap yet — check we're not saving within 5s of the last snap (debounce)
-      const last = migrated[0];
-      if (!todaySnap && last && now - new Date(last.ts).getTime() < 5000) return;
-    }
-
-    const d         = new Date();
-    const today     = new Date(); today.setHours(0,0,0,0);
-    const yesterday = new Date(today); yesterday.setDate(yesterday.getDate()-1);
-    const ts        = d.toISOString();
-    const dayLabel  = d >= today ? "Today"
-      : d >= yesterday ? "Yesterday"
-      : d.toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"});
-    const timeLabel = d.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});
-
-    const isMidday  = !manual && migrated.some(e => e.dayKey === todayKey && !e.manual && !e.midday);
-    const typeTag   = manual ? " — Manual save" : isMidday ? " — Mid-day" : "";
-    const label     = `${dayLabel} at ${timeLabel}${typeTag}`;
-
-    const entry = {
-      ts, label, dayLabel, timeLabel, dayKey: todayKey,
-      listingsCount: listings.length, listings, stockData,
-      manual: !!manual, midday: isMidday,
-    };
-
-    // Remove any existing mid-day snap for today if we're replacing with a new one
-    const filtered = isMidday
-      ? migrated.filter(e => !(e.dayKey === todayKey && e.midday))
-      : migrated;
-
-    // Trim to 14 days: keep latest snapshot per day (plus mid-day + manuals)
-    const updated = [entry, ...filtered].slice(0, MAX_VERSIONS);
-    localStorage.setItem(VERSION_KEY, JSON.stringify(updated));
-  } catch (e) { console.warn("Version save failed:", e); }
-};
-
-const loadLocalVersions = () => {
-  try { return JSON.parse(localStorage.getItem(VERSION_KEY) || "[]"); }
-  catch { return []; }
+    const today = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/London" }); // YYYY-MM-DD
+    const { error } = await supabase.from("app_state_snapshots").upsert({
+      snapshot_date: today,
+      listings,
+      stock_data: stockData,
+      goals,
+      manual: true,
+    }, { onConflict: "snapshot_date" });
+    if (error) { console.warn("Manual snapshot save failed:", error.message); return false; }
+    return true;
+  } catch (e) {
+    console.warn("Manual snapshot save exception:", e);
+    return false;
+  }
 };
 
 
@@ -7129,11 +7067,42 @@ function VersionHistory({ onRestore }) {
   const [versions, setVersions]     = useState([]);
   const [selected, setSelected]     = useState(null);
   const [confirming, setConfirming] = useState(false);
+  const [loading, setLoading]       = useState(true);
 
   useEffect(() => {
-    const v = loadLocalVersions();
-    setVersions(v);
-    if (v.length) setSelected(v[0]);
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from("app_state_snapshots")
+        .select("snapshot_date, listings, stock_data, manual, created_at")
+        .order("snapshot_date", { ascending: false });
+      if (cancelled) return;
+      if (error) { console.error("Failed to load version history:", error.message); setLoading(false); return; }
+
+      const today     = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+      const yesterday = new Date(Date.now() - 86400000).toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+      const v = (data || []).map(row => {
+        const d = new Date(row.snapshot_date + "T00:00:00");
+        const dayLabel = row.snapshot_date === today ? "Today"
+          : row.snapshot_date === yesterday ? "Yesterday"
+          : d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
+        const timeLabel = new Date(row.created_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+        return {
+          ts: row.created_at,
+          dayLabel, timeLabel,
+          label: `${dayLabel} at ${timeLabel}${row.manual ? " — Manual save" : ""}`,
+          listingsCount: row.listings?.length || 0,
+          listings: row.listings || [],
+          stockData: row.stock_data || [],
+          manual: !!row.manual,
+        };
+      });
+      setVersions(v);
+      if (v.length) setSelected(v[0]);
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   const exportVersion = (v) => {
@@ -7324,15 +7293,19 @@ function VersionHistory({ onRestore }) {
   return (
     <div>
       <div className="info-banner">
-        <strong>Version History</strong> — One snapshot per day, a mid-day save if 20+ items change, and any manual 💾 saves. Keeps the last {MAX_VERSIONS} days.
+        <strong>Version History</strong> — One automatic snapshot every day at 6am (UK time), plus any manual 💾 saves. Keeps a rolling 14 days, synced to your account so it's the same on every device.
       </div>
 
-      {versions.length === 0 ? (
+      {loading ? (
+        <div className="tw" style={{padding:"32px 24px",textAlign:"center",color:"var(--txd)",fontSize:12}}>
+          Loading…
+        </div>
+      ) : versions.length === 0 ? (
         <div className="tw" style={{padding:"32px 24px",textAlign:"center"}}>
           <div style={{fontSize:28,opacity:.15,marginBottom:12}}>🕐</div>
-          <div style={{fontSize:13,color:"var(--txd)"}}>No local versions saved yet.</div>
+          <div style={{fontSize:13,color:"var(--txd)"}}>No snapshots yet.</div>
           <div style={{fontSize:11,color:"var(--txd)",marginTop:6}}>
-            Versions save once per day automatically, and whenever you click 💾 Save.
+            The first automatic snapshot runs at 6am UK time. Click 💾 Save in the top bar to create one right now.
           </div>
         </div>
       ) : (
@@ -7361,7 +7334,6 @@ function VersionHistory({ onRestore }) {
                       </span>
                       <span style={{fontSize:10,fontWeight:400,color:"var(--txd)"}}>at {v.timeLabel||""}</span>
                       {v.manual && <span style={{fontSize:9,fontWeight:700,background:"var(--nvl)",color:"var(--nv)",borderRadius:3,padding:"1px 5px"}}>💾 Manual</span>}
-                      {v.midday && <span style={{fontSize:9,fontWeight:700,background:"var(--aml)",color:"var(--am)",borderRadius:3,padding:"1px 5px"}}>Mid-day</span>}
                     </div>
                     <div style={{fontSize:11,color:"var(--txm)",marginTop:1}}>
                       {v.listingsCount} listings
@@ -8415,7 +8387,6 @@ export default function App() {
       setTimeout(() => { isRemoteUpdate.current = false; }, 2000);
       const ok = await saveState(listings, stockData, goals);
       setStorageStatus(ok ? "saved" : "error");
-      if (ok) saveLocalVersion(listings, stockData);
     }, 800);
   }, []);
 
@@ -8424,14 +8395,7 @@ export default function App() {
     debouncedSave(listings, stockData, { weekly: weeklyGoal, monthly: monthlyGoal, weeklyRev: weeklyRevGoal, monthlyRev: monthlyRevGoal, liveData });
   }, [listings, stockData, weeklyGoal, monthlyGoal, weeklyRevGoal, monthlyRevGoal, liveData, debouncedSave]);
 
-  /* ── beforeunload — always save to localStorage on tab close ── */
-  useEffect(() => {
-    const handler = () => saveLocalVersion(listings, stockData);
-    window.addEventListener("beforeunload", handler);
-    return () => window.removeEventListener("beforeunload", handler);
-  }, [listings, stockData]);
-
-  /* ── Hard Save — immediate force-save to Supabase + local version ── */
+  /* ── Hard Save — immediate force-save to Supabase + a manual snapshot ── */
   const [hardSaving, setHardSaving] = useState(false);
   const [hardSaveMsg, setHardSaveMsg] = useState("");
 
@@ -8494,7 +8458,7 @@ export default function App() {
     lastSaveTs.current = ts;
     setTimeout(() => { isRemoteUpdate.current = false; }, 2000);
     const ok = await saveState(listings, stockData, { weekly: weeklyGoal, monthly: monthlyGoal, weeklyRev: weeklyRevGoal, monthlyRev: monthlyRevGoal, liveData });
-    saveLocalVersion(listings, stockData, { manual: true });
+    if (ok) saveManualSnapshot(listings, stockData, { weekly: weeklyGoal, monthly: monthlyGoal, weeklyRev: weeklyRevGoal, monthlyRev: monthlyRevGoal, liveData });
     const time = new Date().toLocaleTimeString("en-GB", { hour:"2-digit", minute:"2-digit" });
     setHardSaveMsg(ok ? `✓ Saved at ${time} — ${listings.length} listings` : "✗ Save failed — check connection");
     setStorageStatus(ok ? "saved" : "error");
