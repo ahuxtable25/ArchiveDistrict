@@ -269,8 +269,10 @@ const DEFAULT_APP_SETTINGS = {
   notifShipped:     false,
   notifSundayBackup:true,
   notifNotes:       true,
-  crossListPlats:   null, // null = all platform families visible
-  customTypes:      [],
+  crossListPlats:     null, // null = all platform families visible
+  hiddenListedPlats:  [],   // platforms hidden from Mark as Listed
+  hiddenSoldPlats:    [],   // platforms hidden from Mark as Sold
+  customTypes:        [],
   customColours:    [],
   customSizes:      [],
 };
@@ -1167,7 +1169,8 @@ function EditStockDrawer({ stock, derived, onSave, onDelete, onClose, onAddListi
             <div className="fr">
               <label className="fl">Pieces Received</label>
               <input className="finp" type="number" value={form.received}
-                onChange={e => set("received", parseInt(e.target.value)||0)} />
+                onChange={e => set("received", e.target.value === "" ? "" : parseInt(e.target.value)||0)}
+                onBlur={e => { if (e.target.value === "" || isNaN(parseInt(e.target.value))) set("received", 0); }} />
             </div>
             <div className="fr">
               <label className="fl">Pieces Sellable</label>
@@ -2678,6 +2681,199 @@ function AddListingModal({ listings, stockData, onAdd, onClose, liveData, setLiv
 }
 
 
+
+/* ═══════════════════════════════════════════════════════════════
+   LISTINGS — Bulk Edit Drawer
+═══════════════════════════════════════════════════════════════ */
+function BulkEditDrawer({ selectedSkus, listings, setListings, customPlatforms, liveData, setLiveData, initialMode, onClose }) {
+  const as       = getAS(liveData);
+  const typeOpts   = [...new Set([...DEFAULT_TYPES,   ...(as.customTypes   ||[])])].sort();
+  const colourOpts = [...new Set([...DEFAULT_COLOURS, ...(as.customColours ||[])])].sort();
+  const sizeOpts   = [...new Set([...DEFAULT_SIZES,   ...(as.customSizes   ||[])])].sort();
+  const _platforms = customPlatforms || DEFAULT_PLATFORMS;
+
+  const addCustomOption = (field, value) => {
+    if (!setLiveData) return;
+    setLiveData(prev => {
+      const prevAS = prev?.appSettings || {};
+      const existing = prevAS[field] || [];
+      if (existing.includes(value)) return prev;
+      return { ...prev, appSettings: { ...prevAS, [field]: [...existing, value] } };
+    });
+  };
+
+  // Mode: "listed" | "edit"
+  const [mode, setMode] = useState(initialMode || "edit");
+
+  // Mark as Listed state
+  const [platSel,  setPlatSel]  = useState(new Set());
+  const [dateL,    setDateL]    = useState(getToday());
+  const [listedDone, setListedDone] = useState(false);
+
+  // Full edit state — blank = don't overwrite
+  const [form, setForm] = useState({
+    brand: "", type: "", colour: "", size: "", condition: "",
+    price: "", notes: "", platform: "",
+  });
+
+  const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+  const togglePlat = (p) => setPlatSel(prev => { const n=new Set(prev); n.has(p)?n.delete(p):n.add(p); return n; });
+
+  const applyListed = () => {
+    if (platSel.size === 0) return;
+    const arr = [...platSel];
+    setListings(prev => prev.map(l => {
+      if (!selectedSkus.has(l.sku) || l.sold) return l;
+      return {
+        ...l,
+        listed: true,
+        dayListed: l.dayListed || dateL,
+        platform: l.platform || arr[0],
+        platforms: [...new Set([...(l.platforms||[]), ...arr])],
+        platformDates: { ...(l.platformDates||{}), ...Object.fromEntries(arr.map(p=>[p, dateL])) },
+      };
+    }));
+    setListedDone(true);
+  };
+
+  const applyEdit = () => {
+    setListings(prev => prev.map(l => {
+      if (!selectedSkus.has(l.sku)) return l;
+      const updates = {};
+      if (form.brand.trim())     updates.brand     = form.brand.trim();
+      if (form.type.trim())      updates.type      = form.type.trim();
+      if (form.colour.trim())    updates.colour    = form.colour.trim();
+      if (form.size.trim())      updates.size      = form.size.trim();
+      if (form.condition.trim()) updates.condition = form.condition.trim();
+      if (form.price !== "")     updates.price     = parseFloat(form.price) || l.price;
+      if (form.notes.trim())     updates.notes     = form.notes.trim();
+      return { ...l, ...updates };
+    }));
+    onClose();
+  };
+
+  const count = selectedSkus.size;
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-box" style={{maxWidth:520,maxHeight:"90vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+        <div className="mh">
+          <div style={{fontWeight:700,fontSize:15}}>Bulk Edit — {count} item{count!==1?"s":""}</div>
+          <button className="cls" onClick={onClose}>✕</button>
+        </div>
+
+        {/* Mode tabs */}
+        <div style={{display:"flex",gap:6,padding:"12px 18px 0",borderBottom:"1px solid var(--bd)"}}>
+          {[["edit","✏ Full Edit"],["listed","📌 Mark as Listed"]].map(([id,label])=>(
+            <button key={id} onClick={()=>setMode(id)} style={{
+              padding:"6px 14px",fontSize:12,fontWeight:700,borderRadius:"var(--r) var(--r) 0 0",cursor:"pointer",
+              border:"1.5px solid var(--bd)",borderBottom:"none",
+              background:mode===id?"var(--sf)":"var(--sf2)",
+              color:mode===id?"var(--tx)":"var(--txm)",
+              marginBottom:-1,
+            }}>{label}</button>
+          ))}
+        </div>
+
+        <div style={{padding:"16px 18px"}}>
+
+          {/* ── MARK AS LISTED mode ── */}
+          {mode==="listed" && (
+            listedDone ? (
+              <div style={{padding:"14px",background:"var(--gnl)",border:"1px solid rgba(31,92,53,.2)",borderRadius:"var(--r)",fontSize:13,color:"var(--gn)",fontWeight:700,textAlign:"center"}}>
+                ✓ {count} item{count!==1?"s":""} marked as listed on {[...platSel].join(", ")}
+              </div>
+            ) : (
+              <>
+                <div style={{fontSize:12,color:"var(--txm)",marginBottom:14}}>
+                  Select the platform(s) and date. Only items not yet marked as listed will be updated.
+                </div>
+                <div style={{fontWeight:700,fontSize:11,textTransform:"uppercase",letterSpacing:".5px",color:"var(--txm)",marginBottom:8}}>Platforms</div>
+                <div className="plat-grid-4" style={{marginBottom:14}}>
+                  {_platforms.filter(p=>!(as.hiddenListedPlats||[]).includes(p)).map(p=>(
+                    <button key={p} onClick={()=>togglePlat(p)} style={{
+                      padding:"7px 4px",fontSize:11,fontWeight:700,textAlign:"center",
+                      border:`1.5px solid ${platSel.has(p)?"var(--ac)":"var(--bd)"}`,
+                      borderRadius:"var(--r)",cursor:"pointer",
+                      background:platSel.has(p)?"var(--acl)":"var(--sf2)",
+                      color:platSel.has(p)?"var(--ac)":"var(--txm)",transition:"all .12s",
+                    }}>{p}{platSel.has(p)&&" ✓"}</button>
+                  ))}
+                </div>
+                <div className="fr" style={{marginBottom:14}}>
+                  <label className="fl">Date Listed</label>
+                  <input className="finp" type="date" value={dateL} onChange={e=>setDateL(e.target.value)} style={{width:"100%"}} />
+                </div>
+                {platSel.size===0 && <div style={{fontSize:11,color:"var(--ac)",fontWeight:700,marginBottom:8}}>● Select at least one platform</div>}
+                <button className="btn btn-p" disabled={platSel.size===0} style={{width:"100%",justifyContent:"center"}} onClick={applyListed}>
+                  📌 Mark {count} item{count!==1?"s":""} as Listed
+                </button>
+              </>
+            )
+          )}
+
+          {/* ── FULL EDIT mode ── */}
+          {mode==="edit" && (
+            <>
+              <div style={{fontSize:12,color:"var(--txm)",marginBottom:14}}>
+                Only filled fields will be updated. Leave blank to keep each item's existing value.
+              </div>
+              <div className="fr2">
+                <div className="fr">
+                  <label className="fl">Brand</label>
+                  <input className="finp" placeholder="Leave blank to keep" value={form.brand} onChange={e=>set("brand",e.target.value)} />
+                </div>
+                <div className="fr">
+                  <label className="fl">Type</label>
+                  <ComboSelect value={form.type} onChange={v=>set("type",v)} options={typeOpts} placeholder="type"
+                    onAddCustom={v=>addCustomOption("customTypes",v)} />
+                </div>
+              </div>
+              <div className="fr2">
+                <div className="fr">
+                  <label className="fl">Colour</label>
+                  <ComboSelect value={form.colour} onChange={v=>set("colour",v)} options={colourOpts} placeholder="colour"
+                    onAddCustom={v=>addCustomOption("customColours",v)} />
+                </div>
+                <div className="fr">
+                  <label className="fl">Size</label>
+                  <ComboSelect value={form.size} onChange={v=>set("size",v)} options={sizeOpts} placeholder="size"
+                    onAddCustom={v=>addCustomOption("customSizes",v)} />
+                </div>
+              </div>
+              <div className="fr2">
+                <div className="fr">
+                  <label className="fl">Condition</label>
+                  <select className="fsel" value={form.condition} onChange={e=>set("condition",e.target.value)}>
+                    <option value="">— keep existing —</option>
+                    {["New with tags","New without tags","Excellent","Good","Fair"].map(c=><option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+                <div className="fr">
+                  <label className="fl">Price £</label>
+                  <input className="finp" type="text" inputMode="decimal" placeholder="Leave blank to keep"
+                    value={form.price} onChange={e=>{ if(/^\d*\.?\d*$/.test(e.target.value)) set("price",e.target.value); }} />
+                </div>
+              </div>
+              <div className="fr">
+                <label className="fl">Notes</label>
+                <textarea className="fta" style={{minHeight:48}} placeholder="Leave blank to keep"
+                  value={form.notes} onChange={e=>set("notes",e.target.value)} />
+              </div>
+              <div style={{display:"flex",gap:8,marginTop:6}}>
+                <button className="btn btn-o btn-sm" style={{flex:1,justifyContent:"center"}} onClick={onClose}>Cancel</button>
+                <button className="btn btn-p" style={{flex:2,justifyContent:"center"}} onClick={applyEdit}>
+                  ✓ Apply to {count} item{count!==1?"s":""}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const SORTABLE_LISTING_COLS = new Set(["sku","price","soldPrice","profit","days","dayListed","daySold"]);
 
 function ListingsTab({ listings, setListings, stockData, customPlatforms, liveData, setLiveData }) {
@@ -2694,6 +2890,8 @@ function ListingsTab({ listings, setListings, stockData, customPlatforms, liveDa
   const [sortCol,      setSortCol]     = useState(null);
   const [sortDir,      setSortDir]     = useState("asc");
   const [selected,     setSelected]    = useState(new Set());
+  const [showBulkEdit, setShowBulkEdit]= useState(false);
+  const [bulkEditMode, setBulkEditMode]= useState("edit");
 
   /* Column filter hook — runs on the full listings array */
   const {
@@ -2844,6 +3042,19 @@ function ListingsTab({ listings, setListings, stockData, customPlatforms, liveDa
             setEditListing(null);
           }}
           onClose={() => setEditListing(null)}
+        />
+      )}
+
+      {showBulkEdit && (
+        <BulkEditDrawer
+          selectedSkus={selected}
+          listings={listings}
+          setListings={setListings}
+          customPlatforms={customPlatforms}
+          liveData={liveData}
+          setLiveData={setLiveData}
+          initialMode={bulkEditMode}
+          onClose={() => setShowBulkEdit(false)}
         />
       )}
 
@@ -3037,8 +3248,11 @@ function ListingsTab({ listings, setListings, stockData, customPlatforms, liveDa
       {selected.size > 0 && (
         <div className="float-bar">
           <span className="fb-count">{selected.size} selected</span>
+          <button className="fb-btn" onClick={()=>{ setBulkEditMode("listed"); setShowBulkEdit(true); }}>📌 Mark as Listed</button>
           <button className="fb-btn" onClick={bulkMarkSold}>✓ Mark Sold</button>
           <button className="fb-btn" onClick={bulkMarkShipped}>📦 Mark Shipped</button>
+          <button className="fb-btn" style={{background:"var(--acl)",color:"var(--ac)",border:"1.5px solid var(--ac)"}}
+            onClick={()=>{ setBulkEditMode("edit"); setShowBulkEdit(true); }}>✏ Full Edit</button>
           <button
             className="fb-btn fb-clear"
             onClick={() => setSelected(new Set())}
@@ -4090,7 +4304,9 @@ function ListingRecap({ listings, platFilt, setPlatFilt }) {
 function MarkAsListed({ listings, setListings, customPlatforms, liveData }) {
   // Search all non-sold items — allows adding platforms to already-listed items
   const unlisted   = useMemo(() => listings.filter(l => !l.sold), [listings]);
-  const _platforms = customPlatforms || DEFAULT_PLATFORMS;
+  const _as        = getAS(liveData);
+  const _hidden    = _as.hiddenListedPlats || [];
+  const _platforms = (customPlatforms || DEFAULT_PLATFORMS).filter(p => !_hidden.includes(p));
 
   // ── Single-item mode ──
   const [skuInput,    setSkuInput]    = useState("");
@@ -5035,14 +5251,17 @@ Return exactly this JSON shape:
 
       {/* ── Mark as Listed — inline at bottom of Drafter ── */}
       {item && (
-        <DrafterMarkListed item={item} setListings={setListings} />
+        <DrafterMarkListed item={item} setListings={setListings} liveData={liveData} />
       )}
     </div>
   );
 }
 
 /* ── Drafter inline mark-as-listed panel ── */
-function DrafterMarkListed({ item, setListings }) {
+function DrafterMarkListed({ item, setListings, liveData }) {
+  const _as        = getAS(liveData);
+  const _hidden    = _as.hiddenListedPlats || [];
+  const _platforms = MARK_LISTED_PLATS.filter(p => !_hidden.includes(p));
   const [open,      setOpen]     = useState(false);
   const [platSel,   setPlatSel]  = useState(new Set());
   const [dateL,     setDateL]    = useState(getToday());
@@ -5115,7 +5334,7 @@ function DrafterMarkListed({ item, setListings }) {
             Select platforms
           </div>
           <div className="plat-grid-4" style={{marginBottom:14}}>
-            {MARK_LISTED_PLATS.map(p => (
+            {_platforms.map(p => (
               <button key={p} onClick={() => toggle(p)} style={{
                 padding:"7px 4px",fontSize:11,fontWeight:700,
                 border:`1.5px solid ${platSel.has(p)?"var(--ac)":"var(--bd)"}`,
@@ -5162,9 +5381,11 @@ function DrafterMarkListed({ item, setListings }) {
 /* ═══════════════════════════════════════════════════════════════
    MARK AS SOLD — Command 8
 ═══════════════════════════════════════════════════════════════ */
-function QuickMarkSold({ listings, setListings, customPlatforms }) {
+function QuickMarkSold({ listings, setListings, customPlatforms, liveData }) {
   const unsold = useMemo(() => listings.filter(l => l.listed && !l.sold), [listings]);
-  const _platforms = customPlatforms || DEFAULT_PLATFORMS;
+  const _as        = getAS(liveData);
+  const _hidden    = _as.hiddenSoldPlats || [];
+  const _platforms = (customPlatforms || DEFAULT_PLATFORMS).filter(p => !_hidden.includes(p));
 
   // Single mode
   const [selSku,    setSelSku]    = useState("");
@@ -7734,6 +7955,47 @@ function Settings({ liveData, setLiveData, customPlatforms, setListings }) {
           {(as.crossListPlats||PLAT_FAMILY_BASES).length} platform{(as.crossListPlats||PLAT_FAMILY_BASES).length!==1?"s":""} visible in Cross-List tab
         </div>
         <div style={{height:14}}/>
+        <div style={{height:6}}/>
+        <SettingsHeader title="Mark as Listed — Hidden Platforms" sub="These platforms will not appear in the Mark as Listed flow." />
+        <div style={{display:"flex",flexWrap:"wrap",gap:7,marginBottom:4}}>
+          {(customPlatforms||DEFAULT_PLATFORMS).map(p => {
+            const hidden = (as.hiddenListedPlats||[]).includes(p);
+            return (
+              <button key={p} onClick={()=>{
+                const cur = as.hiddenListedPlats||[];
+                setAS("hiddenListedPlats", hidden ? cur.filter(x=>x!==p) : [...cur,p]);
+              }} style={{
+                padding:"5px 12px",fontSize:11,fontWeight:700,borderRadius:20,cursor:"pointer",
+                border:`1.5px solid ${hidden?"var(--ac)":"var(--bd)"}`,
+                background:hidden?"var(--acl)":"var(--sf2)",
+                color:hidden?"var(--ac)":"var(--txm)",transition:"all .12s",
+              }}>{hidden?"🚫 ":""}{p}</button>
+            );
+          })}
+        </div>
+        <div style={{fontSize:10,color:"var(--txd)",marginBottom:14,lineHeight:1.6}}>
+          Highlighted = hidden from Mark as Listed. Tap to toggle.
+        </div>
+        <SettingsHeader title="Mark as Sold — Hidden Platforms" sub="These platforms will not appear in the Mark as Sold flow." />
+        <div style={{display:"flex",flexWrap:"wrap",gap:7,marginBottom:4}}>
+          {(customPlatforms||DEFAULT_PLATFORMS).map(p => {
+            const hidden = (as.hiddenSoldPlats||[]).includes(p);
+            return (
+              <button key={p} onClick={()=>{
+                const cur = as.hiddenSoldPlats||[];
+                setAS("hiddenSoldPlats", hidden ? cur.filter(x=>x!==p) : [...cur,p]);
+              }} style={{
+                padding:"5px 12px",fontSize:11,fontWeight:700,borderRadius:20,cursor:"pointer",
+                border:`1.5px solid ${hidden?"var(--ac)":"var(--bd)"}`,
+                background:hidden?"var(--acl)":"var(--sf2)",
+                color:hidden?"var(--ac)":"var(--txm)",transition:"all .12s",
+              }}>{hidden?"🚫 ":""}{p}</button>
+            );
+          })}
+        </div>
+        <div style={{fontSize:10,color:"var(--txd)",marginBottom:14,lineHeight:1.6}}>
+          Highlighted = hidden from Mark as Sold. Tap to toggle.
+        </div>
         <SettingsHeader title="Custom Dropdown Options" sub="Manage types, colours, and sizes you've added via the dropdowns. Built-in defaults cannot be removed." />
         {[
           { field:"customTypes",   label:"Types",   colour:"#1a5276" },
@@ -8551,7 +8813,7 @@ export default function App() {
             {view==="listingdata" && <ListingDataTab listings={listings} liveData={liveData} />}
             {view==="marklisted"  && <MarkAsListed listings={listings} setListings={setListings} customPlatforms={customPlatforms} liveData={liveData} />}
             {view==="drafter"     && <ListingDrafter listings={listings} setListings={setListings} liveData={liveData} />}
-            {view==="marksold"    && <QuickMarkSold listings={listings} setListings={setListings} customPlatforms={customPlatforms} />}
+            {view==="marksold"    && <QuickMarkSold listings={listings} setListings={setListings} customPlatforms={customPlatforms} liveData={liveData} />}
             {view==="shipping"    && <ShippingTab listings={listings} setListings={setListings} />}
             {view==="livedata"    && <LiveData listings={listings} stockData={stockData} liveData={liveData} setLiveData={setLiveData} customPlatforms={customPlatforms} />}
             {view==="calculator"  && <PriceCalculator listings={listings} />}
