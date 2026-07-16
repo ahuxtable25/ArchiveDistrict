@@ -7652,11 +7652,11 @@ function SettingToggle({ value, onChange }) {
     </div>
   );
 }
-function SettingNumInput({ value, onChange, min, max, placeholder, width=80 }) {
+function SettingNumInput({ value, onChange, min, max, placeholder, width=110 }) {
   return (
     <input type="number" min={min} max={max} placeholder={placeholder}
       value={value||""} onChange={e=>onChange(e.target.value)}
-      style={{width,background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:"var(--r)",padding:"5px 8px",fontFamily:"Arial,sans-serif",fontSize:12,fontWeight:700,outline:"none",textAlign:"right"}}/>
+      style={{width,minWidth:0,background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:"var(--r)",padding:"5px 8px",fontFamily:"Arial,sans-serif",fontSize:12,fontWeight:700,outline:"none",textAlign:"right"}}/>
   );
 }
 
@@ -8305,6 +8305,21 @@ export default function App() {
     };
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  /* Keep the focused field visible above the mobile on-screen keyboard —
+     applies everywhere (search boxes, forms) via one listener rather than
+     scrolling logic in every individual input. */
+  useEffect(() => {
+    const handleFocusIn = (e) => {
+      const tag = e.target?.tagName;
+      if (tag !== "INPUT" && tag !== "TEXTAREA" && tag !== "SELECT") return;
+      setTimeout(() => {
+        e.target.scrollIntoView({ block: "center", behavior: "smooth" });
+      }, 300); // wait for the keyboard's open animation to finish
+    };
+    document.addEventListener("focusin", handleFocusIn);
+    return () => document.removeEventListener("focusin", handleFocusIn);
   }, []);
 
   /* ── Load from Supabase on mount ── */
