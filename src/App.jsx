@@ -7724,8 +7724,6 @@ function SettingsContact() {
   );
 }
 
-const SETTINGS_TABS_ORDER = ["preferences","listings_","stock_","notifs","data","contact"];
-
 function Settings({ liveData, setLiveData, customPlatforms, setListings, onRestoreVersion, exportJSON, initialTab }) {
   // platformAccounts shape: { Vinted: ["Vinted 1","Vinted 2"], Depop: ["Depop"], ... }
   const initAccounts = () => {
@@ -7831,19 +7829,6 @@ function Settings({ liveData, setLiveData, customPlatforms, setListings, onResto
   const as = getAS(liveData);
   const setAS = (key, val) => setLiveData(p => ({ ...p, appSettings: { ...getAS(p), [key]: val } }));
 
-  const touchStartX = useRef(null);
-  const onTouchStart = (e) => { touchStartX.current = e.touches[0].clientX; };
-  const onTouchEnd = (e) => {
-    if (touchStartX.current === null) return;
-    const diff = touchStartX.current - e.changedTouches[0].clientX;
-    if (Math.abs(diff) > 50) {
-      const idx = SETTINGS_TABS_ORDER.indexOf(settingsTab);
-      if (diff > 0 && idx < SETTINGS_TABS_ORDER.length - 1) setSettingsTab(SETTINGS_TABS_ORDER[idx + 1]);
-      if (diff < 0 && idx > 0) setSettingsTab(SETTINGS_TABS_ORDER[idx - 1]);
-    }
-    touchStartX.current = null;
-  };
-
   return (
     <div style={{maxWidth:560,margin:"0 auto",padding:"0 4px"}}>
       <div style={{fontWeight:900,fontSize:16,marginBottom:4}}>Settings</div>
@@ -7863,7 +7848,7 @@ function Settings({ liveData, setLiveData, customPlatforms, setListings, onResto
         ))}
       </div>
 
-      <div onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+      <div>
 
       {/* ── PREFERENCES TAB (Goals + Thresholds + Currency/Dates + Appearance) ── */}
       {settingsTab==="preferences" && (
