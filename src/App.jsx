@@ -7660,7 +7660,73 @@ function SettingNumInput({ value, onChange, min, max, placeholder, width=80 }) {
   );
 }
 
-function Settings({ liveData, setLiveData, customPlatforms, setListings, onRestoreVersion }) {
+function SettingsContact() {
+  const [type,    setType]    = useState("question");
+  const [name,    setName]    = useState("");
+  const [email,   setEmail]   = useState("");
+  const [subject, setSubject] = useState("");
+  const [message, setMessage] = useState("");
+  const [status,  setStatus]  = useState("idle"); // idle | sending | sent | error
+
+  const submit = async () => {
+    if (!subject.trim() || !message.trim()) return;
+    setStatus("sending");
+    const { error } = await supabase.from("contact_submissions").insert({
+      user_name: name.trim() || null,
+      user_email: email.trim() || null,
+      type,
+      subject: subject.trim(),
+      message: message.trim(),
+    });
+    if (error) { setStatus("error"); return; }
+    setStatus("sent");
+    setSubject(""); setMessage("");
+    setTimeout(() => setStatus("idle"), 3000);
+  };
+
+  return (
+    <div className="tw" style={{padding:"18px 20px",marginBottom:14}}>
+      <SettingsHeader title="Contact Us" sub="Send a question, suggestion, or bug report." />
+      <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
+        {[
+          {id:"question",   label:"Question"},
+          {id:"suggestion", label:"Suggestion"},
+          {id:"issue",      label:"Issue"},
+        ].map(t => (
+          <button key={t.id} onClick={()=>setType(t.id)}
+            style={{padding:"6px 14px",fontSize:11,fontWeight:700,borderRadius:20,cursor:"pointer",
+              border:`1.5px solid ${type===t.id?"var(--ac)":"var(--bd)"}`,
+              background:type===t.id?"var(--acl)":"var(--sf2)",
+              color:type===t.id?"var(--ac)":"var(--txm)",transition:"all .12s"}}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+        <input value={name} onChange={e=>setName(e.target.value)} placeholder="Your name (optional)"
+          style={{background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:"var(--r)",padding:"7px 10px",fontFamily:"Arial,sans-serif",fontSize:12,outline:"none"}}/>
+        <input value={email} onChange={e=>setEmail(e.target.value)} placeholder="Your email (optional)"
+          style={{background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:"var(--r)",padding:"7px 10px",fontFamily:"Arial,sans-serif",fontSize:12,outline:"none"}}/>
+      </div>
+      <input value={subject} onChange={e=>setSubject(e.target.value)} placeholder="Subject"
+        style={{width:"100%",background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:"var(--r)",padding:"7px 10px",fontFamily:"Arial,sans-serif",fontSize:12,outline:"none",marginBottom:10,boxSizing:"border-box"}}/>
+      <textarea value={message} onChange={e=>setMessage(e.target.value)} placeholder="Message" rows={5}
+        style={{width:"100%",background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:"var(--r)",padding:"9px 10px",fontFamily:"Arial,sans-serif",fontSize:12,outline:"none",resize:"vertical",boxSizing:"border-box",marginBottom:12}}/>
+      <div style={{display:"flex",justifyContent:"flex-end",alignItems:"center",gap:10}}>
+        {status==="sent"  && <span style={{fontSize:11,color:"var(--gn)",fontWeight:700}}>✓ Sent — thanks!</span>}
+        {status==="error" && <span style={{fontSize:11,color:"var(--ac)",fontWeight:700}}>Couldn't send — try again</span>}
+        <button onClick={submit} disabled={status==="sending"||!subject.trim()||!message.trim()}
+          style={{background:"var(--gn)",color:"#fff",border:"none",borderRadius:"var(--r)",padding:"8px 20px",cursor:"pointer",fontSize:12,fontWeight:700,opacity:(status==="sending"||!subject.trim()||!message.trim())?.55:1}}>
+          {status==="sending"?"Sending…":"Send"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const SETTINGS_TABS_ORDER = ["preferences","listings_","stock_","notifs","data","contact"];
+
+function Settings({ liveData, setLiveData, customPlatforms, setListings, onRestoreVersion, exportJSON, initialTab }) {
   // platformAccounts shape: { Vinted: ["Vinted 1","Vinted 2"], Depop: ["Depop"], ... }
   const initAccounts = () => {
     const pa = liveData?.platformAccounts;
@@ -7761,9 +7827,22 @@ function Settings({ liveData, setLiveData, customPlatforms, setListings, onResto
     pendingRenames.current = {};
   };
 
-  const [settingsTab, setSettingsTab] = useState("platforms");
+  const [settingsTab, setSettingsTab] = useState(initialTab || "preferences");
   const as = getAS(liveData);
   const setAS = (key, val) => setLiveData(p => ({ ...p, appSettings: { ...getAS(p), [key]: val } }));
+
+  const touchStartX = useRef(null);
+  const onTouchStart = (e) => { touchStartX.current = e.touches[0].clientX; };
+  const onTouchEnd = (e) => {
+    if (touchStartX.current === null) return;
+    const diff = touchStartX.current - e.changedTouches[0].clientX;
+    if (Math.abs(diff) > 50) {
+      const idx = SETTINGS_TABS_ORDER.indexOf(settingsTab);
+      if (diff > 0 && idx < SETTINGS_TABS_ORDER.length - 1) setSettingsTab(SETTINGS_TABS_ORDER[idx + 1]);
+      if (diff < 0 && idx > 0) setSettingsTab(SETTINGS_TABS_ORDER[idx - 1]);
+    }
+    touchStartX.current = null;
+  };
 
   return (
     <div style={{maxWidth:560,margin:"0 auto",padding:"0 4px"}}>
@@ -7773,20 +7852,59 @@ function Settings({ liveData, setLiveData, customPlatforms, setListings, onResto
       {/* Tab bar */}
       <div className="tab-bar" style={{marginBottom:18}}>
         {[
-          {id:"platforms", label:"Platforms"},
-          {id:"goals",     label:"Goals"},
-          {id:"listings_", label:"Listings"},
-          {id:"stock_",    label:"Stock"},
-          {id:"display",   label:"Display"},
-          {id:"notifs",    label:"Notifications"},
-          {id:"versions",  label:"Version History"},
+          {id:"preferences", label:"Preferences"},
+          {id:"listings_",   label:"Listings"},
+          {id:"stock_",      label:"Stock"},
+          {id:"notifs",      label:"Notifications"},
+          {id:"data",        label:"Data"},
+          {id:"contact",     label:"Contact Us"},
         ].map(t => (
           <div key={t.id} className={`tab ${settingsTab===t.id?"active":""}`} onClick={()=>setSettingsTab(t.id)}>{t.label}</div>
         ))}
       </div>
 
-      {/* ── PLATFORMS TAB ── */}
-      {settingsTab==="platforms" && (
+      <div onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+
+      {/* ── PREFERENCES TAB (Goals + Thresholds + Currency/Dates + Appearance) ── */}
+      {settingsTab==="preferences" && (
+      <>
+      <div className="tw" style={{padding:"18px 20px",marginBottom:14}}>
+        <SettingsHeader title="Weekly & Monthly Goals" sub="Set default targets — shown on the Dashboard. These persist across sessions." />
+        <SettingRow label="Weekly profit target £"><SettingNumInput value={as.weeklyGoal} onChange={v=>setAS("weeklyGoal",v)} placeholder="e.g. 250" /></SettingRow>
+        <SettingRow label="Weekly revenue target £"><SettingNumInput value={as.weeklyRevGoal} onChange={v=>setAS("weeklyRevGoal",v)} placeholder="e.g. 500" /></SettingRow>
+        <SettingRow label="Monthly profit target £"><SettingNumInput value={as.monthlyGoal} onChange={v=>setAS("monthlyGoal",v)} placeholder="e.g. 1000" /></SettingRow>
+        <SettingRow label="Monthly revenue target £"><SettingNumInput value={as.monthlyRevGoal} onChange={v=>setAS("monthlyRevGoal",v)} placeholder="e.g. 2000" /></SettingRow>
+        <div style={{height:10}}/>
+        <SettingsHeader title="Thresholds" sub="Used throughout the app to flag underperformance." />
+        <SettingRow label="Sell-through warning %"><SettingNumInput value={as.sellThruWarning} onChange={v=>setAS("sellThruWarning",+v)} min={1} max={100} placeholder="60" /></SettingRow>
+        <SettingRow label="Slow mover threshold (days unsold)"><SettingNumInput value={as.slowMoverDays} onChange={v=>setAS("slowMoverDays",+v)} min={1} max={365} placeholder="14" /></SettingRow>
+      </div>
+      <div className="tw" style={{padding:"18px 20px",marginBottom:14}}>
+        <SettingsHeader title="Currency & Dates" />
+        <SettingRow label="Currency symbol">
+          <select value={as.currency||"£"} onChange={e=>setAS("currency",e.target.value)}
+            style={{background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:"var(--r)",padding:"5px 9px",fontFamily:"Arial,sans-serif",fontSize:12,outline:"none"}}>
+            {["£","$","€","¥","₹","A$","C$"].map(c=><option key={c} value={c}>{c}</option>)}
+          </select>
+        </SettingRow>
+        <SettingRow label="Date format">
+          <select value={as.dateFormat||"DD/MM"} onChange={e=>setAS("dateFormat",e.target.value)}
+            style={{background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:"var(--r)",padding:"5px 9px",fontFamily:"Arial,sans-serif",fontSize:12,outline:"none"}}>
+            <option value="DD/MM">DD/MM/YY</option>
+            <option value="MM/DD">MM/DD/YY</option>
+          </select>
+        </SettingRow>
+        <div style={{height:10}}/>
+        <SettingsHeader title="Appearance" />
+        <SettingRow label="Compact mode — smaller table rows"><SettingToggle value={!!as.compactMode} onChange={v=>setAS("compactMode",v)} /></SettingRow>
+        <SettingRow label="Sidebar collapsed by default (mobile)"><SettingToggle value={!!as.sidebarCollapsed} onChange={v=>setAS("sidebarCollapsed",v)} /></SettingRow>
+      </div>
+      </>
+      )}
+
+      {/* ── LISTINGS TAB (Platforms & Accounts + Drafter + Cross-List + Dropdowns) ── */}
+      {settingsTab==="listings_" && (
+      <>
       <div className="tw" style={{padding:"18px 20px",marginBottom:14}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
           <div style={{fontWeight:900,fontSize:12,textTransform:"uppercase",letterSpacing:".5px",color:"var(--txm)"}}>Sales Platforms & Accounts</div>
@@ -7856,25 +7974,7 @@ function Settings({ liveData, setLiveData, customPlatforms, setListings, onResto
           Renaming an account updates all matching listing data on Save. Data always groups by platform globally.
         </div>
       </div>
-      )}
 
-      {/* ── GOALS TAB ── */}
-      {settingsTab==="goals" && (
-      <div className="tw" style={{padding:"18px 20px",marginBottom:14}}>
-        <SettingsHeader title="Weekly & Monthly Goals" sub="Set default targets — shown on the Dashboard. These persist across sessions." />
-        <SettingRow label="Weekly profit target £"><SettingNumInput value={as.weeklyGoal} onChange={v=>setAS("weeklyGoal",v)} placeholder="e.g. 250" /></SettingRow>
-        <SettingRow label="Weekly revenue target £"><SettingNumInput value={as.weeklyRevGoal} onChange={v=>setAS("weeklyRevGoal",v)} placeholder="e.g. 500" /></SettingRow>
-        <SettingRow label="Monthly profit target £"><SettingNumInput value={as.monthlyGoal} onChange={v=>setAS("monthlyGoal",v)} placeholder="e.g. 1000" /></SettingRow>
-        <SettingRow label="Monthly revenue target £"><SettingNumInput value={as.monthlyRevGoal} onChange={v=>setAS("monthlyRevGoal",v)} placeholder="e.g. 2000" /></SettingRow>
-        <div style={{height:10}}/>
-        <SettingsHeader title="Thresholds" sub="Used throughout the app to flag underperformance." />
-        <SettingRow label="Sell-through warning %"><SettingNumInput value={as.sellThruWarning} onChange={v=>setAS("sellThruWarning",+v)} min={1} max={100} placeholder="60" /></SettingRow>
-        <SettingRow label="Slow mover threshold (days unsold)"><SettingNumInput value={as.slowMoverDays} onChange={v=>setAS("slowMoverDays",+v)} min={1} max={365} placeholder="14" /></SettingRow>
-      </div>
-      )}
-
-      {/* ── LISTINGS TAB ── */}
-      {settingsTab==="listings_" && (
       <div className="tw" style={{padding:"18px 20px",marginBottom:14}}>
         <SettingsHeader title="Listing Drafter" sub="Pre-fills the condition field when you open the Drafter." />
         <SettingRow label="Default condition">
@@ -8009,6 +8109,7 @@ function Settings({ liveData, setLiveData, customPlatforms, setListings, onResto
           Custom options are removed from the dropdowns immediately. Any listings already using a removed value keep it.
         </div>
       </div>
+      </>
       )}
 
       {/* ── STOCK TAB ── */}
@@ -8019,30 +8120,6 @@ function Settings({ liveData, setLiveData, customPlatforms, setListings, onResto
         <div style={{fontSize:11,color:"var(--txd)",marginTop:8,lineHeight:1.6}}>
           Example: at 85%, if your liquid cash is £500 the highlighted tile shows £425 as your safe spending limit.
         </div>
-      </div>
-      )}
-
-      {/* ── DISPLAY TAB ── */}
-      {settingsTab==="display" && (
-      <div className="tw" style={{padding:"18px 20px",marginBottom:14}}>
-        <SettingsHeader title="Currency & Dates" />
-        <SettingRow label="Currency symbol">
-          <select value={as.currency||"£"} onChange={e=>setAS("currency",e.target.value)}
-            style={{background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:"var(--r)",padding:"5px 9px",fontFamily:"Arial,sans-serif",fontSize:12,outline:"none"}}>
-            {["£","$","€","¥","₹","A$","C$"].map(c=><option key={c} value={c}>{c}</option>)}
-          </select>
-        </SettingRow>
-        <SettingRow label="Date format">
-          <select value={as.dateFormat||"DD/MM"} onChange={e=>setAS("dateFormat",e.target.value)}
-            style={{background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:"var(--r)",padding:"5px 9px",fontFamily:"Arial,sans-serif",fontSize:12,outline:"none"}}>
-            <option value="DD/MM">DD/MM/YY</option>
-            <option value="MM/DD">MM/DD/YY</option>
-          </select>
-        </SettingRow>
-        <div style={{height:10}}/>
-        <SettingsHeader title="Appearance" />
-        <SettingRow label="Compact mode — smaller table rows"><SettingToggle value={!!as.compactMode} onChange={v=>setAS("compactMode",v)} /></SettingRow>
-        <SettingRow label="Sidebar collapsed by default (mobile)"><SettingToggle value={!!as.sidebarCollapsed} onChange={v=>setAS("sidebarCollapsed",v)} /></SettingRow>
       </div>
       )}
 
@@ -8068,10 +8145,26 @@ function Settings({ liveData, setLiveData, customPlatforms, setListings, onResto
       </div>
       )}
 
-      {/* ── VERSION HISTORY TAB ── */}
-      {settingsTab==="versions" && (
-        <VersionHistory onRestore={onRestoreVersion} />
+      {/* ── DATA TAB (Export + Version History) ── */}
+      {settingsTab==="data" && (
+      <>
+      {exportJSON && (
+        <div className="tw" style={{padding:"18px 20px",marginBottom:14}}>
+          <SettingsHeader title="Export" sub="Download everything as a single XLSX workbook (Listings + Stock)." />
+          <button onClick={exportJSON}
+            style={{background:"var(--gn)",color:"#fff",border:"none",borderRadius:"var(--r)",padding:"8px 20px",cursor:"pointer",fontSize:12,fontWeight:700}}>
+            ↓ Export as XLSX
+          </button>
+        </div>
       )}
+      <VersionHistory onRestore={onRestoreVersion} />
+      </>
+      )}
+
+      {/* ── CONTACT US TAB ── */}
+      {settingsTab==="contact" && <SettingsContact />}
+
+      </div>
 
     </div>
   );
@@ -8789,7 +8882,7 @@ export default function App() {
             {view==="analytics"   && <Analytics listings={listings} stockData={stockData} customPlatforms={customPlatforms} liveData={liveData} />}
             {view==="growth"      && <Growth listings={listings} stockData={stockData} />}
             {view==="history"     && <History listings={listings} stockData={stockData} liveData={liveData} />}
-            {view==="settings"    && <Settings liveData={liveData} setLiveData={setLiveData} customPlatforms={customPlatforms} setListings={setListings} onRestoreVersion={(v)=>{ setListingsRaw(v.listings); setStockDataRaw(v.stockData); setView("dashboard"); }} />}
+            {view==="settings"    && <Settings liveData={liveData} setLiveData={setLiveData} customPlatforms={customPlatforms} setListings={setListings} exportJSON={exportJSON} onRestoreVersion={(v)=>{ setListingsRaw(v.listings); setStockDataRaw(v.stockData); setView("dashboard"); }} />}
           </div>
         </div>
       </div>
