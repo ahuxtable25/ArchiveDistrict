@@ -1029,13 +1029,19 @@ function ColPanel({ cols, setCols, onClose }) {
 /* ═══════════════════════════════════════════════════════════════
    STOCK — Edit Stock Drawer (click any row)
 ═══════════════════════════════════════════════════════════════ */
-function EditStockDrawer({ stock, derived, onSave, onDelete, onClose, onAddListings }) {
+function EditStockDrawer({ stock, derived, onSave, onDelete, onClose, onAddListings, listings, stockData }) {
   const [form, setForm] = useState({ ...stock });
   const [totalPaid, setTotalPaid] = useState(
     stock.costPer && stock.sellable
       ? (stock.costPer * stock.sellable).toFixed(2)
       : ""
   );
+  // Delete flow — when this bundle has related listings, ask what should
+  // happen to them instead of silently orphaning them.
+  const [deleteChoice, setDeleteChoice] = useState(null); // null | "picking" | "reassign"
+  const [reassignTo, setReassignTo] = useState("");
+  const relatedListings = (listings||[]).filter(l => l.bundleSku === stock.bundleSku);
+  const otherBundles = (stockData||[]).filter(s => s.bundleSku !== stock.bundleSku);
 
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
@@ -1221,11 +1227,64 @@ function EditStockDrawer({ stock, derived, onSave, onDelete, onClose, onAddListi
           );
         })()}
 
+        {deleteChoice && (
+          <div style={{margin:"0 18px 14px",padding:"14px",background:"var(--acl)",border:"1px solid var(--ac2)",borderRadius:"var(--r)"}}>
+            <div style={{fontSize:12,fontWeight:700,color:"var(--ac)",marginBottom:8}}>
+              ⚠ {relatedListings.length} SKU{relatedListings.length!==1?"s":""} reference{relatedListings.length===1?"s":""} this bundle
+            </div>
+            <div style={{fontSize:11,color:"var(--txm)",marginBottom:12,lineHeight:1.5}}>
+              Deleting {stock.bundleSku} won't delete those SKUs automatically. Choose what happens to them:
+            </div>
+
+            {deleteChoice === "reassign" ? (
+              <>
+                <select className="fsel" style={{width:"100%",marginBottom:10}} value={reassignTo} onChange={e=>setReassignTo(e.target.value)}>
+                  <option value="">— Select a bundle —</option>
+                  {otherBundles.map(b => (
+                    <option key={b.bundleSku} value={b.bundleSku}>{b.bundleSku} — {b.name}</option>
+                  ))}
+                </select>
+                <div style={{display:"flex",gap:8}}>
+                  <button className="btn btn-o btn-sm" onClick={()=>setDeleteChoice("picking")}>Back</button>
+                  <button className="btn btn-p btn-sm" style={{flex:1,justifyContent:"center"}} disabled={!reassignTo}
+                    onClick={() => onDelete(stock.bundleSku, stock.name, "reassign", reassignTo)}>
+                    Reassign {relatedListings.length} SKU{relatedListings.length!==1?"s":""} & Delete Bundle
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                <button className="btn btn-o btn-sm" style={{justifyContent:"flex-start"}}
+                  disabled={!otherBundles.length}
+                  onClick={()=>setDeleteChoice("reassign")}>
+                  ↪ Reassign SKUs to another bundle
+                </button>
+                <button className="btn btn-del btn-sm" style={{justifyContent:"flex-start"}}
+                  onClick={() => {
+                    if (window.confirm(`Delete bundle ${stock.bundleSku} AND all ${relatedListings.length} of its SKUs? This cannot be undone.`))
+                      onDelete(stock.bundleSku, stock.name, "cascade");
+                  }}>
+                  🗑 Delete bundle + all {relatedListings.length} SKUs
+                </button>
+                <button className="btn btn-o btn-sm" style={{justifyContent:"flex-start"}}
+                  onClick={() => {
+                    if (window.confirm(`Delete bundle ${stock.bundleSku} only? Its ${relatedListings.length} SKUs will stay, flagged as unassigned.`))
+                      onDelete(stock.bundleSku, stock.name, "orphan");
+                  }}>
+                  ⚠ Delete bundle only — flag SKUs as unassigned
+                </button>
+                <button className="btn btn-o btn-sm" onClick={()=>setDeleteChoice(null)}>Cancel</button>
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="drw-f">
           <button className="btn btn-o btn-sm" onClick={onClose}>Cancel</button>
           <button className="btn btn-del btn-sm" onClick={() => {
+            if (relatedListings.length > 0) { setDeleteChoice("picking"); return; }
             if (window.confirm(`Delete bundle ${stock.bundleSku} — ${stock.name}? This cannot be undone.`))
-              onDelete(stock.bundleSku, stock.name);
+              onDelete(stock.bundleSku, stock.name, "simple");
           }}>🗑 Delete</button>
           <button className="btn btn-p btn-sm" onClick={() => { onSave({ ...form, sellable: parseInt(form.sellable)||0, received: parseInt(form.received)||0, _originalName: stock.name }); onClose(); }}>
             Save Changes
@@ -1551,7 +1610,7 @@ function exportStockForSheets(stockData) {
   a.click();
 }
 
-function StockTab({ stockData, setStockData, listings, setListings }) {
+function StockTab({ stockData, setStockData, listings, setListings, hardSave }) {
   const [cols,         setCols]        = useState(STOCK_COLS);
   const [showColPanel, setShowColPanel]= useState(false);
   const [showAdd,      setShowAdd]     = useState(false);
@@ -1614,9 +1673,27 @@ function StockTab({ stockData, setStockData, listings, setListings }) {
     const safeSku = hasDupe ? getNextBundleSku([...stockData, {bundleSku: ns.bundleSku}]) : ns.bundleSku;
     setStockData(p => [...p, { ...ns, bundleSku: safeSku }]);
   };
-  const handleDeleteStock = (bsku, originalName) => {
-    setStockData(prev => prev.filter(s => !(s.bundleSku === bsku && s.name === originalName)));
+  const handleDeleteStock = (bsku, originalName, mode="simple", reassignToBundleSku=null) => {
+    let newListings = listings;
+    if (mode === "cascade") {
+      newListings = listings.filter(l => l.bundleSku !== bsku);
+    } else if (mode === "reassign" && reassignToBundleSku) {
+      const target = stockData.find(s => s.bundleSku === reassignToBundleSku);
+      newListings = listings.map(l =>
+        l.bundleSku === bsku ? { ...l, bundleSku: reassignToBundleSku, name: target?.name ?? l.name } : l
+      );
+    }
+    // mode "orphan" (or "simple" with no related listings) leaves listings
+    // untouched — they're flagged wherever bundleSku no longer matches any
+    // stock row (see the Listings tab's "isOrphaned" check).
+    const newStockData = stockData.filter(s => !(s.bundleSku === bsku && s.name === originalName));
+    if (newListings !== listings) setListings(newListings);
+    setStockData(newStockData);
     setEditStock(null);
+    // Force-save immediately instead of waiting on the normal debounce —
+    // otherwise a reload right after deleting/reassigning could pull the
+    // pre-delete data straight back from Supabase.
+    hardSave?.({ listings: newListings, stockData: newStockData });
   };
   const handleSaveStock = (updated) => {
     const oldName = updated._originalName;
@@ -1690,7 +1767,7 @@ function StockTab({ stockData, setStockData, listings, setListings }) {
         stock={editStock}
         derived={filtered.find(s=>s.bundleSku===editStock.bundleSku&&s.name===editStock.name)||editStock}
         onSave={handleSaveStock} onDelete={handleDeleteStock} onClose={()=>setEditStock(null)}
-        onAddListings={handleAutoImport} />}
+        onAddListings={handleAutoImport} listings={listings} stockData={stockData} />}
 
       {/* Summary KPIs */}
       <div className="kg kg4" style={{marginBottom:14}}>
@@ -2231,7 +2308,7 @@ function EditListingDrawer({ listing, stockData, onSave, onDelete, onClose, live
 /* ═══════════════════════════════════════════════════════════════
    LISTINGS — render one table cell by column id
 ═══════════════════════════════════════════════════════════════ */
-function ListingCell({ colId, l, onShipToggle, onSelect, selected }) {
+function ListingCell({ colId, l, onShipToggle, onSelect, selected, stockBundleSkus }) {
   if (colId === "sel") return (
     <input
       type="checkbox"
@@ -2252,7 +2329,15 @@ function ListingCell({ colId, l, onShipToggle, onSelect, selected }) {
     );
     return <span className="thumb-ph">—</span>;
   }
-  if (colId === "bundleSku") return <span className="bsku">{l.bundleSku}</span>;
+  if (colId === "bundleSku") {
+    const orphaned = l.bundleSku && stockBundleSkus && !stockBundleSkus.has(l.bundleSku);
+    return (
+      <span className="bsku" title={orphaned ? "This bundle no longer exists — reassign or the SKU will stay unlinked" : undefined}
+        style={orphaned ? {background:"var(--acl)",color:"var(--ac)",border:"1px solid var(--ac2)"} : undefined}>
+        {orphaned ? "⚠ " : ""}{l.bundleSku}
+      </span>
+    );
+  }
   if (colId === "name")      return (
     <span style={{fontWeight:600}}>
       {l.name}
@@ -2813,7 +2898,8 @@ function BulkEditDrawer({ selectedSkus, listings, setListings, customPlatforms, 
 
 const SORTABLE_LISTING_COLS = new Set(["sku","price","soldPrice","profit","days","dayListed","daySold"]);
 
-function ListingsTab({ listings, setListings, stockData, customPlatforms, liveData, setLiveData }) {
+function ListingsTab({ listings, setListings, stockData, customPlatforms, liveData, setLiveData, hardSave }) {
+  const stockBundleSkus = useMemo(() => new Set(stockData.map(s => s.bundleSku)), [stockData]);
   const [cols,         setCols]        = useState(DEFAULT_COLS);
   const [showColPanel, setShowColPanel]= useState(false);
   const [showAdd,      setShowAdd]     = useState(false);
@@ -2975,8 +3061,13 @@ function ListingsTab({ listings, setListings, stockData, customPlatforms, liveDa
             setEditListing(null);
           }}
           onDelete={(sku) => {
-            setListings(prev => prev.filter(l => l.sku !== sku));
+            const newListings = listings.filter(l => l.sku !== sku);
+            setListings(newListings);
             setEditListing(null);
+            // Force-save immediately — otherwise a reload right after
+            // deleting could pull the pre-delete listing straight back
+            // from Supabase before the normal debounce fires.
+            hardSave?.({ listings: newListings });
           }}
           onClose={() => setEditListing(null)}
         />
@@ -3169,6 +3260,7 @@ function ListingsTab({ listings, setListings, stockData, customPlatforms, liveDa
                           onShipToggle={toggleShip}
                           onSelect={()=>toggleOne(l.sku)}
                           selected={isSel}
+                          stockBundleSkus={stockBundleSkus}
                         />
                       </td>
                     ))}
@@ -8344,8 +8436,10 @@ export default function App() {
           console.error("Supabase load error:", error);
           setStorageStatus("error");
         } else if (data) {
-          if (data.listings?.length)    setListingsRaw(data.listings);
-          if (data.stock_data?.length)  setStockDataRaw(data.stock_data);
+          // Apply whenever the field is present — an empty array is valid
+          // data (e.g. after deleting everything), not "nothing to load".
+          if (data.listings)    setListingsRaw(data.listings);
+          if (data.stock_data)  setStockDataRaw(data.stock_data);
           if (data.goals) {
             setWeeklyGoal(data.goals.weekly      || "");
             setMonthlyGoal(data.goals.monthly    || "");
@@ -8394,13 +8488,18 @@ export default function App() {
     if (localTs && remoteTs && remoteTs <= localTs) return;
     isRemoteUpdate.current = true;
     setTimeout(() => { isRemoteUpdate.current = false; }, 2000);
-    if (data.listings?.length > 0) {
-      const merged = mergeListings(listingsRef.current, data.listings);
-      setListingsRaw(merged);
+    if (data.listings) {
+      // Empty means an intentional delete-everything on another device (we
+      // already know this payload is newer than our last save, above) —
+      // apply it outright rather than merging, since merging an empty
+      // remote against local items would just silently keep every local item.
+      if (data.listings.length === 0) setListingsRaw([]);
+      else setListingsRaw(mergeListings(listingsRef.current, data.listings));
     }
-    if (data.stock_data?.length > 0 &&
-        data.stock_data.length >= stockDataRef.current.length)
-      setStockDataRaw(data.stock_data);
+    if (data.stock_data) {
+      if (data.stock_data.length === 0) setStockDataRaw([]);
+      else if (data.stock_data.length >= stockDataRef.current.length) setStockDataRaw(data.stock_data);
+    }
     if (data.goals) {
       setWeeklyGoal(data.goals.weekly   || "");
       setMonthlyGoal(data.goals.monthly || "");
@@ -8542,7 +8641,13 @@ export default function App() {
   };
 
 
-  const hardSave = useCallback(async () => {
+  const hardSave = useCallback(async (overrides = {}) => {
+    // Accept explicit overrides so callers (e.g. bundle delete) can force-save
+    // a value that was *just* set — React state/closures wouldn't reflect it
+    // yet on this same tick, which otherwise left a race window where a
+    // reload right after deleting could pull the pre-delete data back.
+    const saveListings  = overrides.listings  ?? listings;
+    const saveStockData = overrides.stockData ?? stockData;
     setHardSaving(true);
     setHardSaveMsg("");
     clearTimeout(saveTimer.current);
@@ -8550,12 +8655,13 @@ export default function App() {
     const ts = new Date().toISOString();
     lastSaveTs.current = ts;
     setTimeout(() => { isRemoteUpdate.current = false; }, 2000);
-    const ok = await saveState(listings, stockData, { weekly: weeklyGoal, monthly: monthlyGoal, weeklyRev: weeklyRevGoal, monthlyRev: monthlyRevGoal, liveData });
-    if (ok) saveManualSnapshot(listings, stockData, { weekly: weeklyGoal, monthly: monthlyGoal, weeklyRev: weeklyRevGoal, monthlyRev: monthlyRevGoal, liveData });
+    const ok = await saveState(saveListings, saveStockData, { weekly: weeklyGoal, monthly: monthlyGoal, weeklyRev: weeklyRevGoal, monthlyRev: monthlyRevGoal, liveData });
+    if (ok) saveManualSnapshot(saveListings, saveStockData, { weekly: weeklyGoal, monthly: monthlyGoal, weeklyRev: weeklyRevGoal, monthlyRev: monthlyRevGoal, liveData });
     const time = new Date().toLocaleTimeString("en-GB", { hour:"2-digit", minute:"2-digit" });
-    setHardSaveMsg(ok ? `✓ Saved at ${time} — ${listings.length} listings` : "✗ Save failed — check connection");
+    setHardSaveMsg(ok ? `✓ Saved at ${time} — ${saveListings.length} listings` : "✗ Save failed — check connection");
     setStorageStatus(ok ? "saved" : "error");
     setHardSaving(false);
+    return ok;
   }, [listings, stockData, weeklyGoal, monthlyGoal, liveData]);
 
   /* ── Manual refresh — SAFE: only replaces if remote is newer ── */
@@ -8570,8 +8676,10 @@ export default function App() {
         const localTs  = lastSaveTs.current;
         // Only apply if remote is newer OR we have no local timestamp
         if (!localTs || !remoteTs || remoteTs > localTs) {
-          if (data.listings?.length)    setListingsRaw(data.listings);
-          if (data.stock_data?.length)  setStockDataRaw(data.stock_data);
+          // Apply whenever the field is present — an empty array is valid
+          // data (e.g. after deleting everything), not "nothing to load".
+          if (data.listings)    setListingsRaw(data.listings);
+          if (data.stock_data)  setStockDataRaw(data.stock_data);
           if (data.goals) {
             setWeeklyGoal(data.goals.weekly      || "");
             setMonthlyGoal(data.goals.monthly    || "");
@@ -8869,8 +8977,8 @@ export default function App() {
 
           <div className="content">
             {view==="dashboard"   && <Dashboard listings={listings} stockData={stockData} weeklyGoal={weeklyGoal} setWeeklyGoal={setWeeklyGoal} monthlyGoal={monthlyGoal} setMonthlyGoal={setMonthlyGoal} weeklyRevGoal={weeklyRevGoal} setWeeklyRevGoal={setWeeklyRevGoal} monthlyRevGoal={monthlyRevGoal} setMonthlyRevGoal={setMonthlyRevGoal} liveData={liveData} />}
-            {view==="stock"       && <StockTab stockData={stockData} setStockData={setStockData} listings={listings} setListings={setListings} />}
-            {view==="listings"    && <ListingsTab listings={listings} setListings={setListings} stockData={stockData} customPlatforms={customPlatforms} liveData={liveData} setLiveData={setLiveData} />}
+            {view==="stock"       && <StockTab stockData={stockData} setStockData={setStockData} listings={listings} setListings={setListings} hardSave={hardSave} />}
+            {view==="listings"    && <ListingsTab listings={listings} setListings={setListings} stockData={stockData} customPlatforms={customPlatforms} liveData={liveData} setLiveData={setLiveData} hardSave={hardSave} />}
             {view==="movement"    && <MovementTracker listings={listings} />}
             {view==="listingdata" && <ListingDataTab listings={listings} liveData={liveData} />}
             {view==="marklisted"  && <MarkAsListed listings={listings} setListings={setListings} customPlatforms={customPlatforms} liveData={liveData} />}
