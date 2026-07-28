@@ -1686,7 +1686,10 @@ function StockTab({ stockData, setStockData, listings, setListings, hardSave }) 
     // mode "orphan" (or "simple" with no related listings) leaves listings
     // untouched — they're flagged wherever bundleSku no longer matches any
     // stock row (see the Listings tab's "isOrphaned" check).
-    const newStockData = stockData.filter(s => !(s.bundleSku === bsku && s.name === originalName));
+    // Match on bundleSku alone (the canonical unique key used everywhere
+    // else) — matching on name too made deletion silently no-op whenever
+    // the drawer's snapshot name had drifted from the live stockData row.
+    const newStockData = stockData.filter(s => s.bundleSku !== bsku);
     if (newListings !== listings) setListings(newListings);
     setStockData(newStockData);
     setEditStock(null);
@@ -3691,16 +3694,6 @@ function MovementTracker({ listings }) {
 /* ═══════════════════════════════════════════════════════════════
    LISTING DATA COLS
 ═══════════════════════════════════════════════════════════════ */
-const TOLIST_COLS = [
-  {id:"sku",     label:"SKU",        visible:true },
-  {id:"name",    label:"Stock Name", visible:true },
-  {id:"type",    label:"Type",       visible:true },
-  {id:"brand",   label:"Brand",      visible:true },
-  {id:"colour",  label:"Colour",     visible:true },
-  {id:"size",    label:"Size",       visible:true },
-  {id:"tag",     label:"Mover",      visible:true },
-  {id:"bundleSku",label:"Bundle",    visible:false},
-];
 
 const ACTIVE_COLS = [
   {id:"sku",      label:"SKU",       visible:true },
@@ -3965,7 +3958,7 @@ function CrossListTab({ listings, visiblePlats }) {
 }
 
 function ListingDataTab({ listings, liveData }) {
-  const [toListCols, setToListCols]   = useState(TOLIST_COLS);
+  const [toListCols, setToListCols]   = useState(ACTIVE_COLS);
   const [activeCols, setActiveCols]   = useState(ACTIVE_COLS);
   const [showToListCP,  setShowToListCP]  = useState(false);
   const [showActiveCP,  setShowActiveCP]  = useState(false);
@@ -4007,18 +4000,6 @@ function ListingDataTab({ listings, liveData }) {
       m[k].count++;
     });
     return Object.values(m).sort((a,b)=>b.count-a.count);
-  };
-
-  const renderToListCell = (col, l) => {
-    if (col==="sku")      return <span className="sku">{l.sku}</span>;
-    if (col==="name")     return <span style={{fontWeight:600,fontSize:11,whiteSpace:"normal",wordBreak:"break-word"}}>{l.name}</span>;
-    if (col==="type")     return <span className="badge b-0">{l.type}</span>;
-    if (col==="brand")    return <span style={{color:"var(--txm)"}}>{l.brand}</span>;
-    if (col==="colour")   return l.colour;
-    if (col==="size")     return <span style={{color:"var(--txm)"}}>{l.size}</span>;
-    if (col==="tag")      return <MovTag tag={l.tag} />;
-    if (col==="bundleSku")return <span className="bsku">{l.bundleSku}</span>;
-    return "—";
   };
 
   const renderActiveCell = (col, l) => {
@@ -4135,7 +4116,47 @@ function ListingDataTab({ listings, liveData }) {
       {ldTab === "tolist" && (
         <>
           {/* Breakdowns */}
-          <div className="ld-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:11,marginBottom:4}}>
+          <div className="ld-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:11,marginBottom:4}}>
+            <div className="sc">
+              <div className="st" style={{marginBottom:8}}>To Be Listed by Mover Tag</div>
+              {[["FAST","mt-f"],["MEDIUM","mt-m"],["SLOW","mt-s"],["NEW","mt-n"],["UNKNOWN","mt-u"],["DEAD","mt-d"]].map(([tag,cls])=>(
+                <div key={tag} className="sr">
+                  <span className={`mt ${cls}`}>{tag}</span>
+                  <span className="srv">{byTag(toBeListed,tag)}</span>
+                </div>
+              ))}
+            </div>
+            <div className="sc">
+              <div className="st" style={{marginBottom:8}}>To Be Listed by Bundle</div>
+              {byNameSku(toBeListed).length===0
+                ? <div style={{fontSize:12,color:"var(--txd)",padding:"8px 0"}}>All items are listed.</div>
+                : byNameSku(toBeListed).map(b=>(
+                  <div key={`${b.bsku}-${b.name}`} className="sr">
+                    <span className="srl"><span className="bsku" style={{marginRight:5}}>{b.bsku}</span>{b.name}</span>
+                    <span className="srv">{b.count}</span>
+                  </div>
+                ))
+              }
+            </div>
+          </div>
+          <TableSection
+            title="To Be Listed"
+            subtitle={`${toListF.filtered.length} items`}
+            fHook={toListF}
+            cols={toListCols} setCols={setToListCols}
+            showCP={showToListCP} setShowCP={setShowToListCP}
+            renderCell={renderActiveCell}
+            exportName="to_be_listed"
+            zoom={toListZoom}
+          />
+        </>
+      )}
+
+      {/* Active tab */}
+      {ldTab === "active" && (
+        <>
+          {/* Breakdowns */}
+          <div className="ld-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:11,marginBottom:4}}>
             <div className="sc">
               <div className="st" style={{marginBottom:8}}>Active by Mover Tag</div>
               {[["FAST","mt-f"],["MEDIUM","mt-m"],["SLOW","mt-s"],["NEW","mt-n"],["UNKNOWN","mt-u"],["DEAD","mt-d"]].map(([tag,cls])=>(
@@ -4157,44 +4178,18 @@ function ListingDataTab({ listings, liveData }) {
                 ))
               }
             </div>
-            <div className="sc">
-              <div className="st" style={{marginBottom:8}}>To Be Listed by Bundle</div>
-              {byNameSku(toBeListed).length===0
-                ? <div style={{fontSize:12,color:"var(--txd)",padding:"8px 0"}}>All items are listed.</div>
-                : byNameSku(toBeListed).map(b=>(
-                  <div key={`${b.bsku}-${b.name}`} className="sr">
-                    <span className="srl"><span className="bsku" style={{marginRight:5}}>{b.bsku}</span>{b.name}</span>
-                    <span className="srv">{b.count}</span>
-                  </div>
-                ))
-              }
-            </div>
           </div>
           <TableSection
-            title="To Be Listed"
-            subtitle={`${toListF.filtered.length} items`}
-            fHook={toListF}
-            cols={toListCols} setCols={setToListCols}
-            showCP={showToListCP} setShowCP={setShowToListCP}
-            renderCell={renderToListCell}
-            exportName="to_be_listed"
-            zoom={toListZoom}
+            title="Active Listings"
+            subtitle={`${activeF.filtered.length} items`}
+            fHook={activeF}
+            cols={activeCols} setCols={setActiveCols}
+            showCP={showActiveCP} setShowCP={setShowActiveCP}
+            renderCell={renderActiveCell}
+            exportName="active_listings"
+            zoom={activeZoom}
           />
         </>
-      )}
-
-      {/* Active tab */}
-      {ldTab === "active" && (
-        <TableSection
-          title="Active Listings"
-          subtitle={`${activeF.filtered.length} items`}
-          fHook={activeF}
-          cols={activeCols} setCols={setActiveCols}
-          showCP={showActiveCP} setShowCP={setShowActiveCP}
-          renderCell={renderActiveCell}
-          exportName="active_listings"
-          zoom={activeZoom}
-        />
       )}
 
       {/* Cross-List tab */}
@@ -7522,7 +7517,7 @@ function History({ listings, stockData, liveData }) {
   const [weekCols,  setWeekCols]  = useState(WEEK_HIST_COLS);
   const [showMonthCP, setShowMonthCP] = useState(false);
   const [showWeekCP,  setShowWeekCP]  = useState(false);
-  const [weekRange,   setWeekRange]   = useState("all");
+  const [weekRange,   setWeekRange]   = useState("16");
   const [monthRange,  setMonthRange]  = useState("all");
 
   const { months, weeks } = useMemo(() => {
@@ -7553,9 +7548,14 @@ function History({ listings, stockData, liveData }) {
       };
     }).reverse(); // newest first
 
-    // Build last 16 weeks
+    // Build every week from Nov 2024 (matching the monthly history start) to
+    // now — range filtering (e.g. "Last 16 weeks") happens afterwards on
+    // this full set, so "All time" actually has all data to show.
     const weeks = [];
-    for (let i=15; i>=0; i--) {
+    const firstWeekStart = new Date(2024, 10, 1);
+    firstWeekStart.setDate(firstWeekStart.getDate() - (firstWeekStart.getDay()===0?6:firstWeekStart.getDay()-1));
+    const totalWeeks = Math.round((_wsd - firstWeekStart) / (7*24*60*60*1000));
+    for (let i=totalWeeks; i>=0; i--) {
       const ws = new Date(_wsd); ws.setDate(ws.getDate()-i*7);
       const we = new Date(ws);   we.setDate(we.getDate()+6);
       const wsStr = localDateStr(ws);
