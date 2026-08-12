@@ -6562,6 +6562,45 @@ function PricingTab({ listings=[] }) {
     });
   }, [listings, rules]);
 
+  // Brand options (all inventory brands) and a brand→types co-occurrence
+  // map, so the Type dropdown narrows to types actually seen with the
+  // selected brand rather than showing every type in the whole inventory.
+  const brandOptions = useMemo(() => {
+    return [...new Set(listings.map(l => (l.brand||"").trim()).filter(Boolean))].sort();
+  }, [listings]);
+
+  const brandTypeMap = useMemo(() => {
+    const map = {};
+    listings.forEach(l => {
+      const b = (l.brand||"").trim(), t = (l.type||"").trim();
+      if (!b || !t) return;
+      if (!map[b]) map[b] = new Set();
+      map[b].add(t);
+    });
+    return map;
+  }, [listings]);
+
+  const typeOptions = useMemo(() => {
+    if (newBrand && brandTypeMap[newBrand]) return [...brandTypeMap[newBrand]].sort();
+    return [...new Set(listings.map(l => (l.type||"").trim()).filter(Boolean))].sort();
+  }, [newBrand, brandTypeMap, listings]);
+
+  // Suggestions: the most common Brand+Type combos among uncovered items —
+  // one click fills the form so closing a coverage gap doesn't need typing.
+  const uncoveredSuggestions = useMemo(() => {
+    const counts = {};
+    uncovered.forEach(item => {
+      const brand = (item.brand||"").trim(), type = (item.type||"").trim();
+      if (!brand && !type) return;
+      const key = brand + "|||" + type;
+      counts[key] = (counts[key]||0) + 1;
+    });
+    return Object.entries(counts)
+      .map(([key, count]) => { const [brand, type] = key.split("|||"); return { brand, type, count }; })
+      .sort((a,b) => b.count - a.count)
+      .slice(0, 8);
+  }, [uncovered]);
+
   const priceCell = (rule, field) => (
     <input type="number" step="0.01" className="finp" style={{width:78,opacity:rule.locked?0.6:1}}
       value={rule[field] ?? ""} disabled={rule.locked}
@@ -6589,10 +6628,31 @@ function PricingTab({ listings=[] }) {
       <div className="tw" style={{padding:"14px 18px",marginBottom:14}}>
         <div style={{fontWeight:700,fontSize:12,textTransform:"uppercase",letterSpacing:".5px",color:"var(--txm)",marginBottom:10}}>Add rule</div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
-          <input className="finp" placeholder="Brand (blank = any)" value={newBrand} onChange={e=>setNewBrand(e.target.value)} style={{width:180}} />
-          <input className="finp" placeholder="Type (blank = any)" value={newType} onChange={e=>setNewType(e.target.value)} style={{width:180}} />
-          <button onClick={addRule} style={{background:"var(--gn)",color:"#fff",border:"none",borderRadius:"var(--r)",padding:"7px 16px",cursor:"pointer",fontSize:12,fontWeight:700}}>+ Add rule</button>
+          <div style={{display:"flex",flexDirection:"column",gap:3}}>
+            <span style={{fontSize:10,color:"var(--txd)"}}>Brand (blank = any)</span>
+            <ComboSelect value={newBrand} onChange={v=>{ setNewBrand(v); setNewType(""); }} options={brandOptions} placeholder="brand" style={{width:180}} />
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:3}}>
+            <span style={{fontSize:10,color:"var(--txd)"}}>Type (blank = any) {newBrand?`— seen with ${newBrand}`:""}</span>
+            <ComboSelect value={newType} onChange={setNewType} options={typeOptions} placeholder="type" style={{width:180}} />
+          </div>
+          <button onClick={addRule} style={{background:"var(--gn)",color:"#fff",border:"none",borderRadius:"var(--r)",padding:"7px 16px",cursor:"pointer",fontSize:12,fontWeight:700,alignSelf:"flex-end"}}>+ Add rule</button>
         </div>
+
+        {uncoveredSuggestions.length > 0 && (
+          <div style={{marginTop:14,paddingTop:12,borderTop:"1px solid var(--bd)"}}>
+            <div style={{fontSize:10,color:"var(--txd)",marginBottom:7}}>Suggested — most common uncovered combos in active inventory:</div>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+              {uncoveredSuggestions.map((s,i) => (
+                <button key={i} onClick={()=>{ setNewBrand(s.brand); setNewType(s.type); }}
+                  title={`${s.count} item${s.count!==1?"s":""} would match this rule`}
+                  style={{background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:20,padding:"4px 11px",cursor:"pointer",fontSize:11,color:"var(--txm)"}}>
+                  {s.brand || <i>any brand</i>} {s.type || <i>any type</i>} <span style={{color:"var(--txd)"}}>×{s.count}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="tw" style={{padding:0,overflow:"hidden"}}>
