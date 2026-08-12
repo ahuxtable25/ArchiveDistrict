@@ -489,6 +489,7 @@ const NAV = [
   {id:"shipping",    label:"Shipping",       icon:"📦",group:"Tools"    },
   {id:"livedata",    label:"Live Data",      icon:"💰",group:"Tools"    },
   {id:"calculator",  label:"Price Calc",     icon:"🧮",group:"Tools"    },
+  {id:"pricing",     label:"Price Guide",    icon:"💷",group:"Tools"    },
   {id:"analytics",   label:"Analytics",      icon:"↗", group:"Reports"  },
   {id:"growth",      label:"Growth",         icon:"📈",group:"Reports"  },
   {id:"history",     label:"History",        icon:"🗂", group:"Reports"  },
@@ -498,7 +499,7 @@ const TITLES = {
   dashboard:"Dashboard",stock:"Stock Inventory",listings:"Listings",
   movement:"Movement Tracker",listingdata:"Listing Data",marklisted:"Mark as Listed",drafter:"Listing Drafter",
   marksold:"Mark as Sold",shipping:"Shipping",livedata:"Live Data",
-  calculator:"Price Calculator",analytics:"Analytics",growth:"Growth",history:"History",
+  calculator:"Price Calculator",pricing:"Price Guide",analytics:"Analytics",growth:"Growth",history:"History",
   settings:"Settings",
 };
 
@@ -6451,6 +6452,200 @@ function PriceCalculator({ listings=[] }) {
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   PRICE GUIDE — Optimisation Plan Phase 3
+   Brand+Type pricing matrix against the `pricing_rules` table (created in
+   Walter's Phase 1 SQL). Walter reads this via get_price_for_item() before
+   each listing session for any item with no manual price set. Resolution
+   priority mirrored here for the coverage tracker: exact Brand+Type >
+   Type-only > Brand-only.
+═══════════════════════════════════════════════════════════════ */
+function PricingTab({ listings=[] }) {
+  const [rules,      setRules]      = useState([]);
+  const [loading,    setLoading]    = useState(true);
+  const [loadError,  setLoadError]  = useState("");
+  const [newBrand,   setNewBrand]   = useState("");
+  const [newType,    setNewType]    = useState("");
+  const [saveMsg,    setSaveMsg]    = useState("");
+  const saveTimers = useRef({});
+
+  const loadRules = async () => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase.from("pricing_rules").select("*").order("brand", { ascending: true, nullsFirst: true });
+      if (error) throw error;
+      setRules(data || []);
+      setLoadError("");
+    } catch (e) {
+      setLoadError(e.message || "Failed to load pricing rules");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { loadRules(); }, []);
+
+  // Debounced write-through per cell — update local state immediately so
+  // typing feels instant, persist to Supabase after a short pause so rapid
+  // keystrokes don't fire a request per character.
+  const updateRule = (id, field, value) => {
+    setRules(prev => prev.map(r => r.id === id ? { ...r, [field]: value } : r));
+    const key = id + field;
+    clearTimeout(saveTimers.current[key]);
+    saveTimers.current[key] = setTimeout(async () => {
+      try {
+        const { error } = await supabase.from("pricing_rules")
+          .update({ [field]: value, updated_at: new Date().toISOString() }).eq("id", id);
+        if (error) throw error;
+        setSaveMsg("✓ Saved");
+        setTimeout(() => setSaveMsg(""), 1200);
+      } catch (e) {
+        setSaveMsg("Error: " + (e.message || "save failed"));
+      }
+    }, 600);
+  };
+
+  const toggleLock = async (rule) => {
+    const next = !rule.locked;
+    setRules(prev => prev.map(r => r.id === rule.id ? { ...r, locked: next } : r));
+    try {
+      const { error } = await supabase.from("pricing_rules").update({ locked: next }).eq("id", rule.id);
+      if (error) throw error;
+    } catch (e) {
+      setSaveMsg("Error: " + (e.message || "lock toggle failed"));
+    }
+  };
+
+  const deleteRule = async (rule) => {
+    if (rule.locked) return;
+    if (!window.confirm(`Delete pricing rule for ${rule.brand||"(any brand)"} / ${rule.item_type||"(any type)"}?`)) return;
+    setRules(prev => prev.filter(r => r.id !== rule.id));
+    try {
+      const { error } = await supabase.from("pricing_rules").delete().eq("id", rule.id);
+      if (error) throw error;
+    } catch (e) {
+      setSaveMsg("Error: " + (e.message || "delete failed"));
+      loadRules(); // resync — the optimistic removal above was wrong
+    }
+  };
+
+  const addRule = async () => {
+    const brand     = newBrand.trim() || null;
+    const item_type = newType.trim()  || null;
+    if (!brand && !item_type) { setSaveMsg("Enter a brand and/or type first"); return; }
+    try {
+      const { data, error } = await supabase.from("pricing_rules").insert({ brand, item_type }).select().single();
+      if (error) throw error;
+      setRules(prev => [...prev, data]);
+      setNewBrand(""); setNewType("");
+      setSaveMsg("✓ Row added");
+      setTimeout(() => setSaveMsg(""), 1500);
+    } catch (e) {
+      setSaveMsg("Error: " + (e.message || "add failed — a rule for this brand+type combo may already exist"));
+    }
+  };
+
+  // Coverage: active (unsold) inventory items with no matching rule, using
+  // the same exact > type-only > brand-only priority Walter's
+  // get_price_for_item() applies.
+  const uncovered = useMemo(() => {
+    const active = listings.filter(l => !l.sold);
+    const norm = s => (s||"").trim().toLowerCase();
+    return active.filter(item => {
+      const b = norm(item.brand), t = norm(item.type);
+      return !rules.some(r => {
+        const rb = norm(r.brand), rt = norm(r.item_type);
+        if (rb && rt) return rb === b && rt === t;
+        if (!rb && rt) return rt === t;
+        if (rb && !rt) return rb === b;
+        return false;
+      });
+    });
+  }, [listings, rules]);
+
+  const priceCell = (rule, field) => (
+    <input type="number" step="0.01" className="finp" style={{width:78,opacity:rule.locked?0.6:1}}
+      value={rule[field] ?? ""} disabled={rule.locked}
+      onChange={e => updateRule(rule.id, field, e.target.value === "" ? null : parseFloat(e.target.value))}
+      placeholder="—" />
+  );
+
+  return (
+    <div>
+      <div className="tw" style={{padding:"18px 20px",marginBottom:14}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+          <div style={{fontWeight:900,fontSize:16}}>Price Guide</div>
+          {saveMsg && <span style={{fontSize:11,fontWeight:700,color:saveMsg.startsWith("✓")?"var(--gn)":"var(--ac)"}}>{saveMsg}</span>}
+        </div>
+        <div style={{fontSize:12,color:"var(--txd)",marginBottom:4}}>
+          Default asking prices by Brand + Type. Walter reads these before each listing session for any item with no manual price set.
+        </div>
+        <div style={{fontSize:11,color:uncovered.length?"var(--ac)":"var(--gn)",fontWeight:700,marginTop:8}}>
+          {uncovered.length
+            ? `⚠ ${uncovered.length} active item${uncovered.length!==1?"s":""} have no matching pricing rule`
+            : "✓ All active inventory items have a matching rule"}
+        </div>
+      </div>
+
+      <div className="tw" style={{padding:"14px 18px",marginBottom:14}}>
+        <div style={{fontWeight:700,fontSize:12,textTransform:"uppercase",letterSpacing:".5px",color:"var(--txm)",marginBottom:10}}>Add rule</div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+          <input className="finp" placeholder="Brand (blank = any)" value={newBrand} onChange={e=>setNewBrand(e.target.value)} style={{width:180}} />
+          <input className="finp" placeholder="Type (blank = any)" value={newType} onChange={e=>setNewType(e.target.value)} style={{width:180}} />
+          <button onClick={addRule} style={{background:"var(--gn)",color:"#fff",border:"none",borderRadius:"var(--r)",padding:"7px 16px",cursor:"pointer",fontSize:12,fontWeight:700}}>+ Add rule</button>
+        </div>
+      </div>
+
+      <div className="tw" style={{padding:0,overflow:"hidden"}}>
+        {loading ? (
+          <div style={{padding:20,fontSize:12,color:"var(--txd)"}}>Loading…</div>
+        ) : loadError ? (
+          <div style={{padding:20,fontSize:12,color:"var(--ac)"}}>Error loading pricing rules: {loadError}</div>
+        ) : rules.length === 0 ? (
+          <div style={{padding:20,fontSize:12,color:"var(--txd)"}}>No pricing rules yet — add one above.</div>
+        ) : (
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+            <thead>
+              <tr style={{background:"var(--sf2)",textAlign:"left"}}>
+                <th style={{padding:"9px 12px"}}>Brand</th>
+                <th style={{padding:"9px 12px"}}>Type</th>
+                <th style={{padding:"9px 12px"}}>Depop £</th>
+                <th style={{padding:"9px 12px"}}>eBay £</th>
+                <th style={{padding:"9px 12px"}}>Vinted £</th>
+                <th style={{padding:"9px 12px"}}>Lock</th>
+                <th style={{padding:"9px 12px"}}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {rules.map(rule => (
+                <tr key={rule.id} style={{borderTop:"1px solid var(--bd)",background:rule.locked?"var(--sf2)":"transparent"}}>
+                  <td style={{padding:"7px 12px",fontWeight:600}}>{rule.brand || <span style={{color:"var(--txd)"}}>(any)</span>}</td>
+                  <td style={{padding:"7px 12px"}}>{rule.item_type || <span style={{color:"var(--txd)"}}>(any)</span>}</td>
+                  <td style={{padding:"7px 12px"}}>{priceCell(rule, "depop_price")}</td>
+                  <td style={{padding:"7px 12px"}}>{priceCell(rule, "ebay_price")}</td>
+                  <td style={{padding:"7px 12px"}}>{priceCell(rule, "vinted_price")}</td>
+                  <td style={{padding:"7px 12px"}}>
+                    <button onClick={()=>toggleLock(rule)} title={rule.locked?"Unlock to edit":"Lock this row"}
+                      style={{background:rule.locked?"var(--gn)"+"18":"var(--sf2)",border:`1px solid ${rule.locked?"var(--gn)":"var(--bdd)"}`,borderRadius:"var(--r)",padding:"3px 9px",cursor:"pointer",fontSize:12,color:rule.locked?"var(--gn)":"var(--txm)"}}>
+                      {rule.locked ? "🔒" : "🔓"}
+                    </button>
+                  </td>
+                  <td style={{padding:"7px 12px"}}>
+                    <button onClick={()=>deleteRule(rule)} disabled={rule.locked} title={rule.locked?"Unlock first to delete":"Delete rule"}
+                      style={{background:"var(--acl)",border:"1px solid var(--ac2)",borderRadius:"var(--r)",padding:"3px 8px",cursor:rule.locked?"default":"pointer",fontSize:11,color:"var(--ac)",fontWeight:700,opacity:rule.locked?0.4:1}}>
+                      ✕
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
    ANALYTICS — Command 10
 ═══════════════════════════════════════════════════════════════ */
 const SLOW_COLS = [
@@ -9062,6 +9257,7 @@ export default function App() {
             {view==="shipping"    && <ShippingTab listings={listings} setListings={setListings} />}
             {view==="livedata"    && <LiveData listings={listings} stockData={stockData} liveData={liveData} setLiveData={setLiveData} customPlatforms={customPlatforms} />}
             {view==="calculator"  && <PriceCalculator listings={listings} />}
+            {view==="pricing"     && <PricingTab listings={listings} />}
             {view==="analytics"   && <Analytics listings={listings} stockData={stockData} customPlatforms={customPlatforms} liveData={liveData} />}
             {view==="growth"      && <Growth listings={listings} stockData={stockData} />}
             {view==="history"     && <History listings={listings} stockData={stockData} liveData={liveData} />}
