@@ -6663,42 +6663,44 @@ function PricingTab({ listings=[] }) {
         ) : rules.length === 0 ? (
           <div style={{padding:20,fontSize:12,color:"var(--txd)"}}>No pricing rules yet — add one above.</div>
         ) : (
-          <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
-            <thead>
-              <tr style={{background:"var(--sf2)",textAlign:"left"}}>
-                <th style={{padding:"9px 12px"}}>Brand</th>
-                <th style={{padding:"9px 12px"}}>Type</th>
-                <th style={{padding:"9px 12px"}}>Depop £</th>
-                <th style={{padding:"9px 12px"}}>eBay £</th>
-                <th style={{padding:"9px 12px"}}>Vinted £</th>
-                <th style={{padding:"9px 12px"}}>Lock</th>
-                <th style={{padding:"9px 12px"}}></th>
-              </tr>
-            </thead>
-            <tbody>
-              {rules.map(rule => (
-                <tr key={rule.id} style={{borderTop:"1px solid var(--bd)",background:rule.locked?"var(--sf2)":"transparent"}}>
-                  <td style={{padding:"7px 12px",fontWeight:600}}>{rule.brand || <span style={{color:"var(--txd)"}}>(any)</span>}</td>
-                  <td style={{padding:"7px 12px"}}>{rule.item_type || <span style={{color:"var(--txd)"}}>(any)</span>}</td>
-                  <td style={{padding:"7px 12px"}}>{priceCell(rule, "depop_price")}</td>
-                  <td style={{padding:"7px 12px"}}>{priceCell(rule, "ebay_price")}</td>
-                  <td style={{padding:"7px 12px"}}>{priceCell(rule, "vinted_price")}</td>
-                  <td style={{padding:"7px 12px"}}>
-                    <button onClick={()=>toggleLock(rule)} title={rule.locked?"Unlock to edit":"Lock this row"}
-                      style={{background:rule.locked?"var(--gn)"+"18":"var(--sf2)",border:`1px solid ${rule.locked?"var(--gn)":"var(--bdd)"}`,borderRadius:"var(--r)",padding:"3px 9px",cursor:"pointer",fontSize:12,color:rule.locked?"var(--gn)":"var(--txm)"}}>
-                      {rule.locked ? "🔒" : "🔓"}
-                    </button>
-                  </td>
-                  <td style={{padding:"7px 12px"}}>
-                    <button onClick={()=>deleteRule(rule)} disabled={rule.locked} title={rule.locked?"Unlock first to delete":"Delete rule"}
-                      style={{background:"var(--acl)",border:"1px solid var(--ac2)",borderRadius:"var(--r)",padding:"3px 8px",cursor:rule.locked?"default":"pointer",fontSize:11,color:"var(--ac)",fontWeight:700,opacity:rule.locked?0.4:1}}>
-                      ✕
-                    </button>
-                  </td>
+          <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
+            <table className="tbl" style={{minWidth:620}}>
+              <thead>
+                <tr>
+                  <th className="no-sort">Brand</th>
+                  <th className="no-sort">Type</th>
+                  <th className="no-sort">Depop £</th>
+                  <th className="no-sort">eBay £</th>
+                  <th className="no-sort">Vinted £</th>
+                  <th className="no-sort">Lock</th>
+                  <th className="no-sort"></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {rules.map(rule => (
+                  <tr key={rule.id} style={{background:rule.locked?"var(--sf2)":"transparent"}}>
+                    <td style={{fontWeight:600}}>{rule.brand || <span style={{color:"var(--txd)"}}>(any)</span>}</td>
+                    <td>{rule.item_type || <span style={{color:"var(--txd)"}}>(any)</span>}</td>
+                    <td>{priceCell(rule, "depop_price")}</td>
+                    <td>{priceCell(rule, "ebay_price")}</td>
+                    <td>{priceCell(rule, "vinted_price")}</td>
+                    <td>
+                      <button onClick={()=>toggleLock(rule)} title={rule.locked?"Unlock to edit":"Lock this row"}
+                        style={{background:rule.locked?"var(--gn)"+"18":"var(--sf2)",border:`1px solid ${rule.locked?"var(--gn)":"var(--bdd)"}`,borderRadius:"var(--r)",padding:"3px 9px",cursor:"pointer",fontSize:12,color:rule.locked?"var(--gn)":"var(--txm)"}}>
+                        {rule.locked ? "🔒" : "🔓"}
+                      </button>
+                    </td>
+                    <td>
+                      <button onClick={()=>deleteRule(rule)} disabled={rule.locked} title={rule.locked?"Unlock first to delete":"Delete rule"}
+                        style={{background:"var(--acl)",border:"1px solid var(--ac2)",borderRadius:"var(--r)",padding:"3px 8px",cursor:rule.locked?"default":"pointer",fontSize:11,color:"var(--ac)",fontWeight:700,opacity:rule.locked?0.4:1}}>
+                        ✕
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>
