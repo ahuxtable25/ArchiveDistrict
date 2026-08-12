@@ -6468,6 +6468,17 @@ function PricingTab({ listings=[] }) {
   const [saveMsg,    setSaveMsg]    = useState("");
   const saveTimers = useRef({});
 
+  // Same breakpoint/pattern the main app shell uses for its own isMobile
+  // check — below it, 7 table columns can't fit the screen no matter how
+  // much padding gets trimmed, so we switch to stacked cards instead of
+  // relying on horizontal scroll.
+  const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth <= 768);
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth <= 768);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
   const loadRules = async () => {
     setLoading(true);
     try {
@@ -6602,7 +6613,7 @@ function PricingTab({ listings=[] }) {
   }, [uncovered]);
 
   const priceCell = (rule, field) => (
-    <input type="number" step="0.01" className="finp" style={{width:78,opacity:rule.locked?0.6:1}}
+    <input type="number" step="0.01" className="finp" style={{width:"100%",maxWidth:90,opacity:rule.locked?0.6:1}}
       value={rule[field] ?? ""} disabled={rule.locked}
       onChange={e => updateRule(rule.id, field, e.target.value === "" ? null : parseFloat(e.target.value))}
       placeholder="—" />
@@ -6662,6 +6673,43 @@ function PricingTab({ listings=[] }) {
           <div style={{padding:20,fontSize:12,color:"var(--ac)"}}>Error loading pricing rules: {loadError}</div>
         ) : rules.length === 0 ? (
           <div style={{padding:20,fontSize:12,color:"var(--txd)"}}>No pricing rules yet — add one above.</div>
+        ) : isMobile ? (
+          <div style={{display:"flex",flexDirection:"column",gap:1}}>
+            {rules.map(rule => (
+              <div key={rule.id} style={{padding:"12px 14px",background:rule.locked?"var(--sf2)":"transparent",borderBottom:"1px solid var(--bd)"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:9}}>
+                  <div>
+                    <div style={{fontWeight:700,fontSize:13}}>{rule.brand || <span style={{color:"var(--txd)",fontWeight:400}}>(any brand)</span>}</div>
+                    <div style={{fontSize:11,color:"var(--txd)"}}>{rule.item_type || "(any type)"}</div>
+                  </div>
+                  <div style={{display:"flex",gap:6,flexShrink:0}}>
+                    <button onClick={()=>toggleLock(rule)} title={rule.locked?"Unlock to edit":"Lock this row"}
+                      style={{background:rule.locked?"var(--gn)"+"18":"var(--sf2)",border:`1px solid ${rule.locked?"var(--gn)":"var(--bdd)"}`,borderRadius:"var(--r)",padding:"4px 8px",cursor:"pointer",fontSize:13,color:rule.locked?"var(--gn)":"var(--txm)"}}>
+                      {rule.locked ? "🔒" : "🔓"}
+                    </button>
+                    <button onClick={()=>deleteRule(rule)} disabled={rule.locked} title={rule.locked?"Unlock first to delete":"Delete rule"}
+                      style={{background:"var(--acl)",border:"1px solid var(--ac2)",borderRadius:"var(--r)",padding:"4px 9px",cursor:rule.locked?"default":"pointer",fontSize:12,color:"var(--ac)",fontWeight:700,opacity:rule.locked?0.4:1}}>
+                      ✕
+                    </button>
+                  </div>
+                </div>
+                <div style={{display:"flex",gap:7}}>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:9,color:"var(--txd)",textTransform:"uppercase",letterSpacing:".4px",marginBottom:3}}>Depop £</div>
+                    {priceCell(rule, "depop_price")}
+                  </div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:9,color:"var(--txd)",textTransform:"uppercase",letterSpacing:".4px",marginBottom:3}}>eBay £</div>
+                    {priceCell(rule, "ebay_price")}
+                  </div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:9,color:"var(--txd)",textTransform:"uppercase",letterSpacing:".4px",marginBottom:3}}>Vinted £</div>
+                    {priceCell(rule, "vinted_price")}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
         ) : (
           <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
             <table className="tbl" style={{minWidth:620}}>
