@@ -7921,6 +7921,56 @@ function Settings({ liveData, setLiveData, customPlatforms, setListings, onResto
   const as = getAS(liveData);
   const setAS = (key, val) => setLiveData(p => ({ ...p, appSettings: { ...getAS(p), [key]: val } }));
 
+  // ── Account links (username + profile URL per account) ──────────────
+  // Stored separately in the `vinted_accounts` table (name is historical —
+  // it covers all platforms, not just Vinted), keyed by the exact account
+  // string already used everywhere else (e.g. "Vinted_AD", "Depop", "eBay").
+  // Deliberately NOT folded into platformAccounts above — that structure is
+  // consumed as a flat string array all over the app (customPlatforms,
+  // listing.platform/platforms[], and Walter's Python side too), so adding
+  // object fields there would break every one of those call sites.
+  const [accountLinks,   setAccountLinks]   = useState({});   // { accountKey: {username, profile_url} }
+  const [linkOpenFor,    setLinkOpenFor]    = useState(null); // accountKey currently expanded
+  const [linkDraft,      setLinkDraft]      = useState({ username:"", profile_url:"" });
+  const [linkSaveMsg,    setLinkSaveMsg]    = useState("");
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data, error } = await supabase.from("vinted_accounts").select("ad_code,username,profile_url");
+        if (error) throw error;
+        const map = {};
+        (data||[]).forEach(row => { map[row.ad_code] = { username: row.username||"", profile_url: row.profile_url||"" }; });
+        setAccountLinks(map);
+      } catch (e) {
+        console.warn("Failed to load account links:", e);
+      }
+    })();
+  }, []);
+
+  const openLinkPanel = (accountKey) => {
+    if (linkOpenFor === accountKey) { setLinkOpenFor(null); return; }
+    setLinkOpenFor(accountKey);
+    setLinkDraft(accountLinks[accountKey] || { username:"", profile_url:"" });
+    setLinkSaveMsg("");
+  };
+
+  const saveAccountLink = async (accountKey) => {
+    try {
+      const { error } = await supabase.from("vinted_accounts").upsert({
+        ad_code: accountKey,
+        username: linkDraft.username.trim() || null,
+        profile_url: linkDraft.profile_url.trim() || null,
+      }, { onConflict: "ad_code" });
+      if (error) throw error;
+      setAccountLinks(prev => ({ ...prev, [accountKey]: { ...linkDraft } }));
+      setLinkSaveMsg("✓ Saved");
+      setTimeout(() => setLinkSaveMsg(""), 1800);
+    } catch (e) {
+      setLinkSaveMsg("Error: " + (e.message||"save failed"));
+    }
+  };
+
   return (
     <div style={{maxWidth:560,margin:"0 auto",padding:"0 4px"}}>
       <div style={{fontWeight:900,fontSize:16,marginBottom:4}}>Settings</div>
@@ -8010,22 +8060,47 @@ function Settings({ liveData, setLiveData, customPlatforms, setListings, onResto
                 <div style={{padding:"10px 14px",background:"var(--sf)"}}>
                   {accs.map((acc, idx) => {
                     const isEditing = editKey?.plat === plat && editKey?.idx === idx;
+                    const linkInfo  = accountLinks[acc];
+                    const hasLink   = !!(linkInfo?.username || linkInfo?.profile_url);
+                    const linkOpen  = linkOpenFor === acc;
                     return (
-                      <div key={idx} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0",borderBottom:"1px solid var(--bd)"}}>
-                        {isEditing ? (
-                          <>
-                            <input value={editVal} onChange={e=>setEditVal(e.target.value)}
-                              onKeyDown={e=>{if(e.key==="Enter")saveEdit();if(e.key==="Escape"){setEditKey(null);setEditVal("");}}}
-                              autoFocus style={{flex:1,background:"var(--sf2)",border:"1px solid var(--ac)",borderRadius:"var(--r)",padding:"4px 8px",fontFamily:"Arial,sans-serif",fontSize:12,outline:"none"}}/>
-                            <button onClick={saveEdit} style={{background:"var(--gn)",color:"#fff",border:"none",borderRadius:"var(--r)",padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700}}>Save</button>
-                            <button onClick={()=>{setEditKey(null);setEditVal("");}} style={{background:"var(--sf2)",color:"var(--txm)",border:"1px solid var(--bdd)",borderRadius:"var(--r)",padding:"4px 8px",cursor:"pointer",fontSize:11}}>✕</button>
-                          </>
-                        ) : (
-                          <>
-                            <span style={{flex:1,fontSize:12,fontWeight:500,padding:"2px 8px",borderRadius:20,background:col+"15",color:col,border:`1px solid ${col}44`,display:"inline-block"}}>{acc}</span>
-                            <button onClick={()=>startEdit(plat,idx)} style={{background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:"var(--r)",padding:"3px 10px",cursor:"pointer",fontSize:11,color:"var(--txm)",flexShrink:0}}>Rename</button>
-                            {accs.length>1 && <button onClick={()=>deleteAccount(plat,idx)} style={{background:"var(--acl)",border:"1px solid var(--ac2)",borderRadius:"var(--r)",padding:"3px 8px",cursor:"pointer",fontSize:11,color:"var(--ac)",fontWeight:700,flexShrink:0}}>✕</button>}
-                          </>
+                      <div key={idx}>
+                        <div style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0",borderBottom:linkOpen?"none":"1px solid var(--bd)"}}>
+                          {isEditing ? (
+                            <>
+                              <input value={editVal} onChange={e=>setEditVal(e.target.value)}
+                                onKeyDown={e=>{if(e.key==="Enter")saveEdit();if(e.key==="Escape"){setEditKey(null);setEditVal("");}}}
+                                autoFocus style={{flex:1,background:"var(--sf2)",border:"1px solid var(--ac)",borderRadius:"var(--r)",padding:"4px 8px",fontFamily:"Arial,sans-serif",fontSize:12,outline:"none"}}/>
+                              <button onClick={saveEdit} style={{background:"var(--gn)",color:"#fff",border:"none",borderRadius:"var(--r)",padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700}}>Save</button>
+                              <button onClick={()=>{setEditKey(null);setEditVal("");}} style={{background:"var(--sf2)",color:"var(--txm)",border:"1px solid var(--bdd)",borderRadius:"var(--r)",padding:"4px 8px",cursor:"pointer",fontSize:11}}>✕</button>
+                            </>
+                          ) : (
+                            <>
+                              <span style={{flex:1,fontSize:12,fontWeight:500,padding:"2px 8px",borderRadius:20,background:col+"15",color:col,border:`1px solid ${col}44`,display:"inline-block"}}>{acc}</span>
+                              <button onClick={()=>openLinkPanel(acc)} title="Link real username + profile URL"
+                                style={{background:hasLink?"var(--gn)"+"18":"var(--sf2)",border:`1px solid ${hasLink?"var(--gn)":"var(--bdd)"}`,borderRadius:"var(--r)",padding:"3px 10px",cursor:"pointer",fontSize:11,color:hasLink?"var(--gn)":"var(--txm)",flexShrink:0}}>
+                                🔗{hasLink?" Linked":""}
+                              </button>
+                              <button onClick={()=>startEdit(plat,idx)} style={{background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:"var(--r)",padding:"3px 10px",cursor:"pointer",fontSize:11,color:"var(--txm)",flexShrink:0}}>Rename</button>
+                              {accs.length>1 && <button onClick={()=>deleteAccount(plat,idx)} style={{background:"var(--acl)",border:"1px solid var(--ac2)",borderRadius:"var(--r)",padding:"3px 8px",cursor:"pointer",fontSize:11,color:"var(--ac)",fontWeight:700,flexShrink:0}}>✕</button>}
+                            </>
+                          )}
+                        </div>
+                        {linkOpen && (
+                          <div style={{display:"flex",flexDirection:"column",gap:6,padding:"8px 10px 12px",marginBottom:6,background:"var(--sf2)",borderRadius:"var(--r2)",borderBottom:"1px solid var(--bd)"}}>
+                            <div style={{fontSize:10,color:"var(--txd)"}}>Real username + profile page for <b>{acc}</b> — used by Walter's Vinted monitor and the Morning Brief/Mark as Sold tabs to resolve who a listing belongs to. Optional.</div>
+                            <input value={linkDraft.username} onChange={e=>setLinkDraft(p=>({...p,username:e.target.value}))}
+                              placeholder="Username on this platform"
+                              style={{background:"var(--sf)",border:"1px solid var(--bdd)",borderRadius:"var(--r)",padding:"5px 9px",fontFamily:"Arial,sans-serif",fontSize:12,outline:"none"}}/>
+                            <input value={linkDraft.profile_url} onChange={e=>setLinkDraft(p=>({...p,profile_url:e.target.value}))}
+                              placeholder="Profile / seller page URL"
+                              style={{background:"var(--sf)",border:"1px solid var(--bdd)",borderRadius:"var(--r)",padding:"5px 9px",fontFamily:"Arial,sans-serif",fontSize:12,outline:"none"}}/>
+                            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                              <button onClick={()=>saveAccountLink(acc)} style={{background:"var(--gn)",color:"#fff",border:"none",borderRadius:"var(--r)",padding:"5px 14px",cursor:"pointer",fontSize:11,fontWeight:700}}>Save link</button>
+                              <button onClick={()=>setLinkOpenFor(null)} style={{background:"var(--sf)",color:"var(--txm)",border:"1px solid var(--bdd)",borderRadius:"var(--r)",padding:"5px 10px",cursor:"pointer",fontSize:11}}>Close</button>
+                              {linkSaveMsg && <span style={{fontSize:10,fontWeight:700,color:linkSaveMsg.startsWith("✓")?"var(--gn)":"var(--ac)"}}>{linkSaveMsg}</span>}
+                            </div>
+                          </div>
                         )}
                       </div>
                     );
