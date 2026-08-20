@@ -492,6 +492,7 @@ const NAV = [
   {id:"pricing",     label:"Price Guide",    icon:"💷",group:"Tools"    },
   {id:"analytics",   label:"Analytics",      icon:"↗", group:"Reports"  },
   {id:"growth",      label:"Growth",         icon:"📈",group:"Reports"  },
+  {id:"predictions", label:"Predictions",    icon:"🔮",group:"Reports"  },
   {id:"history",     label:"History",        icon:"🗂", group:"Reports"  },
   {id:"settings",    label:"Settings",        icon:"⚙️", group:"Settings"  },
 ];
@@ -499,7 +500,7 @@ const TITLES = {
   dashboard:"Dashboard",stock:"Stock Inventory",listings:"Listings",
   movement:"Movement Tracker",listingdata:"Listing Data",marklisted:"Mark as Listed",drafter:"Listing Drafter",
   marksold:"Mark as Sold",shipping:"Shipping",livedata:"Live Data",
-  calculator:"Price Calculator",pricing:"Price Guide",analytics:"Analytics",growth:"Growth",history:"History",
+  calculator:"Price Calculator",pricing:"Price Guide",analytics:"Analytics",growth:"Growth",predictions:"Predictions",history:"History",
   settings:"Settings",
 };
 
@@ -1611,7 +1612,7 @@ function exportStockForSheets(stockData) {
   a.click();
 }
 
-function StockTab({ stockData, setStockData, listings, setListings, hardSave }) {
+function StockTab({ stockData, setStockData, listings, setListings, hardSave, liveData, setLiveData }) {
   const [cols,         setCols]        = useState(STOCK_COLS);
   const [showColPanel, setShowColPanel]= useState(false);
   const [showAdd,      setShowAdd]     = useState(false);
@@ -1676,7 +1677,10 @@ function StockTab({ stockData, setStockData, listings, setListings, hardSave }) 
   };
   const handleDeleteStock = (bsku, originalName, mode="simple", reassignToBundleSku=null) => {
     let newListings = listings;
+    let deletedListingSkus = [];
     if (mode === "cascade") {
+      const toDelete = listings.filter(l => l.bundleSku === bsku);
+      deletedListingSkus = toDelete.map(l => l.sku);
       newListings = listings.filter(l => l.bundleSku !== bsku);
     } else if (mode === "reassign" && reassignToBundleSku) {
       const target = stockData.find(s => s.bundleSku === reassignToBundleSku);
@@ -1691,13 +1695,28 @@ function StockTab({ stockData, setStockData, listings, setListings, hardSave }) 
     // else) — matching on name too made deletion silently no-op whenever
     // the drawer's snapshot name had drifted from the live stockData row.
     const newStockData = stockData.filter(s => s.bundleSku !== bsku);
+
+    // Tombstone any cascade-deleted listing SKUs so a stale full-array save
+    // from another tab can't resurrect them via the realtime merge — see
+    // mergeListings in the top-level app component.
+    let newLiveData = liveData;
+    if (deletedListingSkus.length) {
+      const now = Date.now();
+      const cutoff = now - 30*24*60*60*1000;
+      const pruned = {};
+      Object.entries(liveData?.deletedSkus || {}).forEach(([s,ts]) => { if (ts >= cutoff) pruned[s] = ts; });
+      deletedListingSkus.forEach(s => { pruned[s] = now; });
+      newLiveData = { ...liveData, deletedSkus: pruned };
+      setLiveData?.(newLiveData);
+    }
+
     if (newListings !== listings) setListings(newListings);
     setStockData(newStockData);
     setEditStock(null);
     // Force-save immediately instead of waiting on the normal debounce —
     // otherwise a reload right after deleting/reassigning could pull the
     // pre-delete data straight back from Supabase.
-    hardSave?.({ listings: newListings, stockData: newStockData });
+    hardSave?.({ listings: newListings, stockData: newStockData, liveData: newLiveData });
   };
   const handleSaveStock = (updated) => {
     const oldName = updated._originalName;
@@ -1746,13 +1765,19 @@ function StockTab({ stockData, setStockData, listings, setListings, hardSave }) 
       platformDates: {},
       notes:      "",
     }));
-    setListings(prev => [...prev, ...stubs]);
-    setStockData(prev => prev.map(s =>
+    const newListings  = [...listings, ...stubs];
+    const newStockData = stockData.map(s =>
       s.bundleSku === stock.bundleSku && s.name === stock.name
         ? { ...s, imported: true }
         : s
-    ));
+    );
+    setListings(newListings);
+    setStockData(newStockData);
     setEditStock(null);
+    // Force-save immediately — otherwise the "imported" tick (and the new
+    // stub SKUs) only go through the normal debounce, leaving the same
+    // overwrite window as sold/shipped/listed status changes.
+    hardSave?.({ listings: newListings, stockData: newStockData });
     alert(`✓ Created ${count} listing stub${count!==1?"s":""} for ${stock.bundleSku}. Go to Listings tab to fill in colour/size/description.`);
   };
 
@@ -2317,8 +2342,9 @@ function ListingCell({ colId, l, onShipToggle, onSelect, selected, stockBundleSk
     <input
       type="checkbox"
       checked={selected}
-      onChange={onSelect}
-      onClick={e => e.stopPropagation()}
+      onChange={()=>{}}
+      onClick={e => { e.stopPropagation(); onSelect(e); }}
+      title="Shift+click to select a range"
       style={{cursor:"pointer",accentColor:"var(--ac)"}}
     />
   );
@@ -2711,7 +2737,7 @@ function AddListingModal({ listings, stockData, onAdd, onClose, liveData, setLiv
 /* ═══════════════════════════════════════════════════════════════
    LISTINGS — Bulk Edit Drawer
 ═══════════════════════════════════════════════════════════════ */
-function BulkEditDrawer({ selectedSkus, listings, setListings, customPlatforms, liveData, setLiveData, initialMode, onClose }) {
+function BulkEditDrawer({ selectedSkus, listings, setListings, customPlatforms, liveData, setLiveData, initialMode, onClose, hardSave }) {
   const as       = getAS(liveData);
   const typeOpts   = [...new Set([...DEFAULT_TYPES,   ...(as.customTypes   ||[])])].sort();
   const colourOpts = [...new Set([...DEFAULT_COLOURS, ...(as.customColours ||[])])].sort();
@@ -2739,7 +2765,7 @@ function BulkEditDrawer({ selectedSkus, listings, setListings, customPlatforms, 
   // Full edit state — blank = don't overwrite
   const [form, setForm] = useState({
     brand: "", type: "", colour: "", size: "", condition: "",
-    price: "", notes: "", platform: "",
+    price: "", desc: "", notes: "", platform: "",
   });
 
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
@@ -2763,7 +2789,7 @@ function BulkEditDrawer({ selectedSkus, listings, setListings, customPlatforms, 
   };
 
   const applyEdit = () => {
-    setListings(prev => prev.map(l => {
+    const newListings = listings.map(l => {
       if (!selectedSkus.has(l.sku)) return l;
       const updates = {};
       if (form.brand.trim())     updates.brand     = form.brand.trim();
@@ -2772,9 +2798,16 @@ function BulkEditDrawer({ selectedSkus, listings, setListings, customPlatforms, 
       if (form.size.trim())      updates.size      = form.size.trim();
       if (form.condition.trim()) updates.condition = form.condition.trim();
       if (form.price !== "")     updates.price     = parseFloat(form.price) || l.price;
+      if (form.desc.trim())      updates.desc      = form.desc.trim();
       if (form.notes.trim())     updates.notes     = form.notes.trim();
-      return { ...l, ...updates };
-    }));
+      if (Object.keys(updates).length === 0) return l;
+      return { ...l, ...updates, updatedAt: new Date().toISOString() };
+    });
+    setListings(newListings);
+    // Force-save immediately — with multiple people using the app, a
+    // concurrent stale save from another tab could otherwise overwrite
+    // a bulk edit before the normal debounce fires.
+    hardSave?.({ listings: newListings });
     onClose();
   };
 
@@ -2880,6 +2913,11 @@ function BulkEditDrawer({ selectedSkus, listings, setListings, customPlatforms, 
                   <input className="finp" type="text" inputMode="decimal" placeholder="Leave blank to keep"
                     value={form.price} onChange={e=>{ if(/^\d*\.?\d*$/.test(e.target.value)) set("price",e.target.value); }} />
                 </div>
+              </div>
+              <div className="fr">
+                <label className="fl">Description</label>
+                <textarea className="fta" style={{minHeight:48}} placeholder="Leave blank to keep"
+                  value={form.desc} onChange={e=>set("desc",e.target.value)} />
               </div>
               <div className="fr">
                 <label className="fl">Notes</label>
@@ -2995,11 +3033,24 @@ function ListingsTab({ listings, setListings, stockData, customPlatforms, liveDa
   /* Selection helpers */
   const allSelected = rows.length > 0 && rows.every(l => selected.has(l.sku));
   const toggleAll   = () => setSelected(allSelected ? new Set() : new Set(rows.map(l => l.sku)));
-  const toggleOne   = (sku) => setSelected(prev => {
-    const next = new Set(prev);
-    next.has(sku) ? next.delete(sku) : next.add(sku);
-    return next;
-  });
+  // Shift-click range select: holding Shift while clicking a row's checkbox
+  // selects every row between it and the last row you clicked (in current
+  // sort/filter order) — same convention as file managers/spreadsheets.
+  const lastClickedIdx = useRef(null);
+  const toggleOne = (sku, idx, shiftKey) => {
+    if (shiftKey && lastClickedIdx.current != null && idx != null) {
+      const [lo, hi] = [lastClickedIdx.current, idx].sort((a,b)=>a-b);
+      const rangeSkus = rows.slice(lo, hi+1).map(l => l.sku);
+      setSelected(prev => new Set([...prev, ...rangeSkus]));
+    } else {
+      setSelected(prev => {
+        const next = new Set(prev);
+        next.has(sku) ? next.delete(sku) : next.add(sku);
+        return next;
+      });
+    }
+    if (idx != null) lastClickedIdx.current = idx;
+  };
 
   /* Bulk actions */
   const bulkMarkSold = () => {
@@ -3014,20 +3065,28 @@ function ListingsTab({ listings, setListings, stockData, customPlatforms, liveDa
   };
 
   const bulkMarkShipped = () => {
-    setListings(prev => prev.map(l => {
+    const newListings = listings.map(l => {
       if (!selected.has(l.sku) || !l.sold || l.shipped) return l;
-      return { ...l, shipped:true, shippedDate:TODAY };
-    }));
+      return { ...l, shipped:true, shippedDate:TODAY, updatedAt:new Date().toISOString() };
+    });
+    setListings(newListings);
     setSelected(new Set());
+    // Force-save immediately — see toggleShip below for why.
+    hardSave?.({ listings: newListings });
   };
 
   /* Inline ship toggle */
   const toggleShip = (sku) => {
-    setListings(prev => prev.map(l =>
+    const newListings = listings.map(l =>
       l.sku === sku
-        ? { ...l, shipped:!l.shipped, shippedDate:!l.shipped ? TODAY : null }
+        ? { ...l, shipped:!l.shipped, shippedDate:!l.shipped ? TODAY : null, updatedAt:new Date().toISOString() }
         : l
-    ));
+    );
+    setListings(newListings);
+    // Force-save immediately rather than waiting on the normal debounce —
+    // with multiple people using the app, a concurrent stale save from
+    // another tab could otherwise overwrite this status change.
+    hardSave?.({ listings: newListings });
   };
 
   /* Unique values for filter dropdowns */
@@ -3066,12 +3125,22 @@ function ListingsTab({ listings, setListings, stockData, customPlatforms, liveDa
           }}
           onDelete={(sku) => {
             const newListings = listings.filter(l => l.sku !== sku);
+            // Tombstone the SKU so a stale full-array save from another tab
+            // (one that hadn't seen this delete yet) can't resurrect it via
+            // the realtime merge — see mergeListings/withDeletedSkus.
+            const now = Date.now();
+            const cutoff = now - 30*24*60*60*1000;
+            const pruned = {};
+            Object.entries(liveData?.deletedSkus || {}).forEach(([s,ts]) => { if (ts >= cutoff) pruned[s] = ts; });
+            pruned[sku] = now;
+            const newLiveData = { ...liveData, deletedSkus: pruned };
             setListings(newListings);
+            setLiveData(newLiveData);
             setEditListing(null);
             // Force-save immediately — otherwise a reload right after
             // deleting could pull the pre-delete listing straight back
             // from Supabase before the normal debounce fires.
-            hardSave?.({ listings: newListings });
+            hardSave?.({ listings: newListings, liveData: newLiveData });
           }}
           onClose={() => setEditListing(null)}
         />
@@ -3087,6 +3156,7 @@ function ListingsTab({ listings, setListings, stockData, customPlatforms, liveDa
           setLiveData={setLiveData}
           initialMode={bulkEditMode}
           onClose={() => setShowBulkEdit(false)}
+          hardSave={hardSave}
         />
       )}
 
@@ -3231,7 +3301,7 @@ function ListingsTab({ listings, setListings, stockData, customPlatforms, liveDa
                     No listings match your filters.
                   </td>
                 </tr>
-              ) : rows.map(l => {
+              ) : rows.map((l, idx) => {
                 const isSel  = selected.has(l.sku);
                 const rowCls = [
                   "clickable",
@@ -3252,7 +3322,9 @@ function ListingsTab({ listings, setListings, stockData, customPlatforms, liveDa
                       <input
                         type="checkbox"
                         checked={isSel}
-                        onChange={()=>toggleOne(l.sku)}
+                        onChange={()=>{}}
+                        onClick={e=>toggleOne(l.sku, idx, e.shiftKey)}
+                        title="Shift+click to select a range"
                         style={{cursor:"pointer",accentColor:"var(--ac)"}}
                       />
                     </td>
@@ -3262,7 +3334,7 @@ function ListingsTab({ listings, setListings, stockData, customPlatforms, liveDa
                           colId={c.id}
                           l={l}
                           onShipToggle={toggleShip}
-                          onSelect={()=>toggleOne(l.sku)}
+                          onSelect={(e)=>toggleOne(l.sku, idx, e?.shiftKey)}
                           selected={isSel}
                           stockBundleSkus={stockBundleSkus}
                         />
@@ -4326,7 +4398,7 @@ function ListingRecap({ listings, platFilt, setPlatFilt }) {
   );
 }
 
-function MarkAsListed({ listings, setListings, customPlatforms, liveData }) {
+function MarkAsListed({ listings, setListings, customPlatforms, liveData, hardSave }) {
   // Search all non-sold items — allows adding platforms to already-listed items
   const unlisted   = useMemo(() => listings.filter(l => !l.sold), [listings]);
   const _as        = getAS(liveData);
@@ -4408,11 +4480,16 @@ function MarkAsListed({ listings, setListings, customPlatforms, liveData }) {
   const confirmSingle = () => {
     if (!singlePrev || platSel.size === 0) return;
     const platsArr = [...platSel];
-    setListings(prev => prev.map(l =>
+    const newListings = listings.map(l =>
       l.sku === singlePrev.sku
-        ? { ...l, listed:true, dayListed:l.dayListed||singleDate, platform:l.platform||platsArr[0], platforms:[...new Set([...(l.platforms||[]),...platsArr])], platformDates:{...(l.platformDates||{}), ...Object.fromEntries(platsArr.map(p=>[p,singleDate]))} }
+        ? { ...l, listed:true, dayListed:l.dayListed||singleDate, platform:l.platform||platsArr[0], platforms:[...new Set([...(l.platforms||[]),...platsArr])], platformDates:{...(l.platformDates||{}), ...Object.fromEntries(platsArr.map(p=>[p,singleDate]))}, updatedAt:new Date().toISOString() }
         : l
-    ));
+    );
+    setListings(newListings);
+    // Force-save immediately — with multiple people using the app, a
+    // concurrent stale save from another tab could otherwise overwrite
+    // this status change before the normal debounce fires.
+    hardSave?.({ listings: newListings });
     setHistory(prev => [{
       time: new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"}),
       items: [{
@@ -4457,7 +4534,7 @@ function MarkAsListed({ listings, setListings, customPlatforms, liveData }) {
     const valid = bulkParsed.filter(p => p.found);
     if (!valid.length || bulkPlats.size === 0) return;
     const platsArr = [...bulkPlats];
-    setListings(prev => prev.map(l => {
+    const newListings = listings.map(l => {
       const u = valid.find(v => v.sku === l.sku);
       if (!u) return l;
       return {
@@ -4466,8 +4543,11 @@ function MarkAsListed({ listings, setListings, customPlatforms, liveData }) {
         platform: l.platform || platsArr[0],
         platforms: [...new Set([...(l.platforms||[]),...platsArr])],
         platformDates: {...(l.platformDates||{}), ...Object.fromEntries(platsArr.map(p=>[p,bulkDate]))},
+        updatedAt: new Date().toISOString(),
       };
-    }));
+    });
+    setListings(newListings);
+    hardSave?.({ listings: newListings });
     setHistory(prev => [{
       time: new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"}),
       items: valid.map(v => ({
@@ -4774,7 +4854,7 @@ function MarkAsListed({ listings, setListings, customPlatforms, liveData }) {
 /* ═══════════════════════════════════════════════════════════════
    LISTING DRAFTER — Command 7 (AI-powered)
 ═══════════════════════════════════════════════════════════════ */
-function ListingDrafter({ listings, setListings, liveData }) {
+function ListingDrafter({ listings, setListings, liveData, hardSave }) {
   const unlisted = useMemo(() => listings.filter(l => !l.sold), [listings]);
 
   const [selSku,      setSelSku]      = useState("");
@@ -5276,14 +5356,14 @@ Return exactly this JSON shape:
 
       {/* ── Mark as Listed — inline at bottom of Drafter ── */}
       {item && (
-        <DrafterMarkListed item={item} setListings={setListings} liveData={liveData} />
+        <DrafterMarkListed item={item} listings={listings} setListings={setListings} liveData={liveData} hardSave={hardSave} />
       )}
     </div>
   );
 }
 
 /* ── Drafter inline mark-as-listed panel ── */
-function DrafterMarkListed({ item, setListings, liveData }) {
+function DrafterMarkListed({ item, listings, setListings, liveData, hardSave }) {
   const _as        = getAS(liveData);
   const _hidden    = _as.hiddenListedPlats || [];
   const _platforms = MARK_LISTED_PLATS.filter(p => !_hidden.includes(p));
@@ -5314,11 +5394,16 @@ function DrafterMarkListed({ item, setListings, liveData }) {
   const confirm = () => {
     if (platSel.size === 0) return;
     const arr = [...platSel];
-    setListings(prev => prev.map(l =>
+    const newListings = listings.map(l =>
       l.sku === item.sku
-        ? { ...l, listed:true, dayListed:dateL, platform:l.platform||arr[0], platforms:[...new Set([...(l.platforms||[]),...arr])], platformDates:{...(l.platformDates||{}), ...Object.fromEntries(arr.map(p=>[p,dateL]))} }
+        ? { ...l, listed:true, dayListed:dateL, platform:l.platform||arr[0], platforms:[...new Set([...(l.platforms||[]),...arr])], platformDates:{...(l.platformDates||{}), ...Object.fromEntries(arr.map(p=>[p,dateL]))}, updatedAt:new Date().toISOString() }
         : l
-    ));
+    );
+    setListings(newListings);
+    // Force-save immediately — with multiple people using the app, a
+    // concurrent stale save from another tab could otherwise overwrite
+    // this status change before the normal debounce fires.
+    hardSave?.({ listings: newListings });
     // Push notification
     sendPushNotification({
       title: "ArchiveDistrict",
@@ -5406,7 +5491,7 @@ function DrafterMarkListed({ item, setListings, liveData }) {
 /* ═══════════════════════════════════════════════════════════════
    MARK AS SOLD — Command 8
 ═══════════════════════════════════════════════════════════════ */
-function QuickMarkSold({ listings, setListings, customPlatforms, liveData }) {
+function QuickMarkSold({ listings, setListings, customPlatforms, liveData, hardSave }) {
   const unsold = useMemo(() => listings.filter(l => l.listed && !l.sold), [listings]);
   const _as        = getAS(liveData);
   const _hidden    = _as.hiddenSoldPlats || [];
@@ -5447,12 +5532,19 @@ function QuickMarkSold({ listings, setListings, customPlatforms, liveData }) {
     const days  = item.dayListed
       ? Math.max(0, Math.floor((new Date(soldDate) - new Date(item.dayListed)) / 86400000))
       : 0;
-    setListings(prev => prev.map(l => l.sku === item.sku
+    const newListings = listings.map(l => l.sku === item.sku
       ? { ...l, sold:true, soldPrice:price,
           profit: parseFloat((price - l.price).toFixed(2)),
-          platform: platSel, daySold: soldDate, days, shipped:false }
+          platform: platSel, daySold: soldDate, days, shipped:false,
+          updatedAt: new Date().toISOString() }
       : l
-    ));
+    );
+    setListings(newListings);
+    // Force-save immediately rather than waiting on the normal debounce —
+    // with multiple people using the app, a concurrent stale save from
+    // another tab could otherwise overwrite this sold-mark before the
+    // debounce fires.
+    hardSave?.({ listings: newListings });
     setHistory(prev => [{
       time: new Date().toLocaleTimeString(),
       sku: item.sku, name: item.name, price: fmt(price), plat: platSel,
@@ -5472,9 +5564,23 @@ function QuickMarkSold({ listings, setListings, customPlatforms, liveData }) {
   };
 
   const canConfirm = item && soldPrice && platSel;
+  const [soldTab, setSoldTab] = useState("mark");
 
   return (
     <div>
+      <div className="tab-bar" style={{marginBottom:16}}>
+        {[
+          {id:"mark",    label:"Mark as Sold"},
+          {id:"history", label:"Sales History"},
+        ].map(t => (
+          <div key={t.id} className={`tab ${soldTab===t.id?"active":""}`} onClick={()=>setSoldTab(t.id)}>{t.label}</div>
+        ))}
+      </div>
+
+      {soldTab==="history" ? (
+        <SalesHistoryTab listings={listings} setListings={setListings} />
+      ) : (
+      <>
       <div className="info-banner">
         <strong>Mark as Sold</strong> — search for the item, enter the sold price,
         tap the platform it sold on, then confirm. One item at a time.
@@ -5653,6 +5759,90 @@ function QuickMarkSold({ listings, setListings, customPlatforms, liveData }) {
           ))}
         </div>
       )}
+      </>
+      )}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   SALES HISTORY — inner tab of Mark as Sold (Optimisation Plan Phase 3)
+   Built entirely from listings already in memory (sold items already carry
+   soldPrice/platform/daySold) — no new Supabase table needed.
+═══════════════════════════════════════════════════════════════ */
+function SalesHistoryTab({ listings=[], setListings }) {
+  const sold = useMemo(() => {
+    return listings
+      .filter(l => l.sold)
+      .slice()
+      .sort((a,b) => new Date(b.daySold||0) - new Date(a.daySold||0));
+  }, [listings]);
+
+  const now = new Date();
+  const startOfWeek = (() => {
+    const d = new Date(now); const day = d.getDay(); const diff = (day===0?6:day-1); // Monday start
+    d.setDate(d.getDate()-diff); d.setHours(0,0,0,0); return d;
+  })();
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  const statsFor = (since) => {
+    const inRange = sold.filter(l => l.daySold && new Date(l.daySold) >= since);
+    const revenue = inRange.reduce((sum,l) => sum + (l.soldPrice||0), 0);
+    return { count: inRange.length, revenue };
+  };
+  const weekStats  = statsFor(startOfWeek);
+  const monthStats = statsFor(startOfMonth);
+
+  const toggleReviewPending = (sku) => {
+    setListings(prev => prev.map(l => l.sku===sku ? { ...l, reviewPending: !l.reviewPending } : l));
+  };
+
+  return (
+    <div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10,marginBottom:16}}>
+        <div className="tw" style={{padding:"14px 16px"}}>
+          <div style={{fontSize:10,color:"var(--txd)",textTransform:"uppercase",letterSpacing:".5px",marginBottom:4}}>This Week</div>
+          <div style={{fontWeight:900,fontSize:20}}>{fmt(weekStats.revenue)}</div>
+          <div style={{fontSize:11,color:"var(--txm)"}}>{weekStats.count} sale{weekStats.count!==1?"s":""}</div>
+        </div>
+        <div className="tw" style={{padding:"14px 16px"}}>
+          <div style={{fontSize:10,color:"var(--txd)",textTransform:"uppercase",letterSpacing:".5px",marginBottom:4}}>This Month</div>
+          <div style={{fontWeight:900,fontSize:20}}>{fmt(monthStats.revenue)}</div>
+          <div style={{fontSize:11,color:"var(--txm)"}}>{monthStats.count} sale{monthStats.count!==1?"s":""}</div>
+        </div>
+      </div>
+
+      <div style={{maxHeight:520,overflowY:"auto",display:"flex",flexDirection:"column",gap:1}}>
+        {sold.length===0 ? (
+          <div style={{padding:20,fontSize:12,color:"var(--txd)",textAlign:"center"}}>No sales recorded yet.</div>
+        ) : sold.map(l => {
+          const needsDelist = (l.platforms||[]).filter(p => p !== l.platform);
+          return (
+            <div key={l.sku} className="tw" style={{padding:"10px 14px",marginBottom:6}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10}}>
+                <div style={{minWidth:0,flex:1}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                    <span className="sku">{l.sku}</span>
+                    <span style={{fontWeight:700,fontSize:12}}>{l.name}</span>
+                    {l.reviewPending && <span className="badge" style={{background:"#fff8f0",color:"#7a4e0e",border:"1px solid #f0c040",fontSize:10,padding:"1px 7px",borderRadius:20}}>⭐ Review pending</span>}
+                  </div>
+                  <div style={{fontSize:11,color:"var(--txm)",marginTop:3}}>
+                    Sold on <strong>{l.platform||"—"}</strong> for <strong>{fmt(l.soldPrice)}</strong> · {l.daySold||"—"}
+                  </div>
+                  {needsDelist.length > 0 && (
+                    <div style={{fontSize:10,color:"#7a4e0e",marginTop:4}}>📋 Still needs delisting from: {needsDelist.join(", ")}</div>
+                  )}
+                </div>
+                <button onClick={()=>toggleReviewPending(l.sku)}
+                  title={l.reviewPending ? "Clear review-pending flag" : "Flag as awaiting buyer review"}
+                  style={{flexShrink:0,background:l.reviewPending?"#fff8f0":"var(--sf2)",border:`1px solid ${l.reviewPending?"#f0c040":"var(--bdd)"}`,borderRadius:"var(--r)",padding:"4px 9px",cursor:"pointer",fontSize:12}}>
+                  ⭐
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -5671,7 +5861,7 @@ const SHIPPING_COLS = [
   {id:"bundleSku",  label:"Bundle",     visible:false},
 ];
 
-function ShippingTab({ listings, setListings }) {
+function ShippingTab({ listings, setListings, hardSave }) {
   const [cols,         setCols]        = useState(SHIPPING_COLS);
   const [showColPanel, setShowColPanel]= useState(false);
   const [showFilterP,  setShowFilterP] = useState(false);
@@ -5681,12 +5871,23 @@ function ShippingTab({ listings, setListings }) {
   const awaitingReturn = listings.filter(l => l.pendingReturn);
   const shippedToday = listings.filter(l => l.shipped && l.shippedDate === getToday());
 
-  const markShipped = (sku) => setListings(prev =>
-    prev.map(l => l.sku === sku ? { ...l, shipped:true, shippedDate:TODAY } : l)
-  );
-  const markAllShipped = () => setListings(prev =>
-    prev.map(l => (l.sold && !l.shipped) ? { ...l, shipped:true, shippedDate:TODAY } : l)
-  );
+  // Force-save immediately rather than waiting on the normal debounce —
+  // with multiple people using the app, a concurrent stale save from
+  // another tab could otherwise overwrite this status change.
+  const markShipped = (sku) => {
+    const newListings = listings.map(l =>
+      l.sku === sku ? { ...l, shipped:true, shippedDate:TODAY, updatedAt:new Date().toISOString() } : l
+    );
+    setListings(newListings);
+    hardSave?.({ listings: newListings });
+  };
+  const markAllShipped = () => {
+    const newListings = listings.map(l =>
+      (l.sold && !l.shipped) ? { ...l, shipped:true, shippedDate:TODAY, updatedAt:new Date().toISOString() } : l
+    );
+    setListings(newListings);
+    hardSave?.({ listings: newListings });
+  };
 
   /* Group by platform family (e.g. "Vinted 1" and "Vinted 2" → "Vinted") */
   const byPlat = useMemo(() => {
@@ -5851,14 +6052,17 @@ function ShippingTab({ listings, setListings }) {
                       className="btn btn-g btn-sm"
                       onClick={() => {
                         const returnDate = getToday();
-                        setListings(prev => prev.map(item => item.sku !== l.sku ? item : {
+                        const newListings = listings.map(item => item.sku !== l.sku ? item : {
                           ...item,
                           sold:false, soldPrice:null, profit:null,
                           daySold:null, days:null, shipped:false, shippedDate:null,
                           listed:true,
                           pendingReturn:false, returnReason:"", returnDate:"",
                           notes:(item.notes ? item.notes + "\n" : "") + `Returned ${returnDate} — relisted`,
-                        }));
+                          updatedAt: new Date().toISOString(),
+                        });
+                        setListings(newListings);
+                        hardSave?.({ listings: newListings });
                         setResolving(null);
                         sendPushNotification({
                           title: "ArchiveDistrict",
@@ -5872,7 +6076,7 @@ function ShippingTab({ listings, setListings }) {
                       className="btn btn-o btn-sm"
                       onClick={() => {
                         const returnDate = getToday();
-                        setListings(prev => prev.map(item => item.sku !== l.sku ? item : {
+                        const newListings = listings.map(item => item.sku !== l.sku ? item : {
                           ...item,
                           sold:false, soldPrice:null, profit:null,
                           daySold:null, days:null, shipped:false, shippedDate:null,
@@ -5880,7 +6084,10 @@ function ShippingTab({ listings, setListings }) {
                           platforms:[], platformDates:{},
                           pendingReturn:false, returnReason:"", returnDate:"",
                           notes:(item.notes ? item.notes + "\n" : "") + `Returned ${returnDate} — re-inventoried`,
-                        }));
+                          updatedAt: new Date().toISOString(),
+                        });
+                        setListings(newListings);
+                        hardSave?.({ listings: newListings });
                         setResolving(null);
                         sendPushNotification({
                           title: "ArchiveDistrict",
@@ -6459,7 +6666,7 @@ function PriceCalculator({ listings=[] }) {
    priority mirrored here for the coverage tracker: exact Brand+Type >
    Type-only > Brand-only.
 ═══════════════════════════════════════════════════════════════ */
-function PricingTab({ listings=[] }) {
+function PricingTab({ listings=[], stockData=[] }) {
   const [rules,      setRules]      = useState([]);
   const [loading,    setLoading]    = useState(true);
   const [loadError,  setLoadError]  = useState("");
@@ -6596,6 +6803,32 @@ function PricingTab({ listings=[] }) {
     return [...new Set(listings.map(l => (l.type||"").trim()).filter(Boolean))].sort();
   }, [newBrand, brandTypeMap, listings]);
 
+  // Bundle picker — a shortcut for filling Brand+Type, not a separate rule
+  // key. Picking a bundle pulls the brand/type combos actually found among
+  // that bundle's listings (grouped by bundle NAME, since the same product
+  // is often restocked more than once under a different Bundle SKU) and
+  // offers them as one-click suggestions — the underlying pricing_rules
+  // table stays exactly Brand+Type, unchanged, so Walter's Python pricing
+  // resolution needs no changes to match.
+  const [selectedBundle, setSelectedBundle] = useState("");
+  const bundleNames = useMemo(() => {
+    return [...new Set(stockData.map(s => (s.name||"").trim()).filter(Boolean))].sort();
+  }, [stockData]);
+  const bundleVariations = useMemo(() => {
+    if (!selectedBundle) return [];
+    const items = listings.filter(l => (l.name||"").trim() === selectedBundle);
+    const seen = new Map(); // "brand|||type" -> count
+    items.forEach(l => {
+      const brand = (l.brand||"").trim(), type = (l.type||"").trim();
+      if (!brand && !type) return;
+      const key = brand + "|||" + type;
+      seen.set(key, (seen.get(key)||0) + 1);
+    });
+    return [...seen.entries()]
+      .map(([key,count]) => { const [brand,type] = key.split("|||"); return {brand,type,count}; })
+      .sort((a,b) => b.count - a.count);
+  }, [selectedBundle, listings]);
+
   // Suggestions: the most common Brand+Type combos among uncovered items —
   // one click fills the form so closing a coverage gap doesn't need typing.
   const uncoveredSuggestions = useMemo(() => {
@@ -6638,6 +6871,30 @@ function PricingTab({ listings=[] }) {
 
       <div className="tw" style={{padding:"14px 18px",marginBottom:14}}>
         <div style={{fontWeight:700,fontSize:12,textTransform:"uppercase",letterSpacing:".5px",color:"var(--txm)",marginBottom:10}}>Add rule</div>
+
+        <div style={{marginBottom:14,paddingBottom:14,borderBottom:"1px solid var(--bd)"}}>
+          <div style={{fontSize:10,color:"var(--txd)",marginBottom:5}}>Shortcut — pick a bundle to pull its brand/type combos</div>
+          <select className="fsel" value={selectedBundle} onChange={e=>setSelectedBundle(e.target.value)} style={{width:260}}>
+            <option value="">— select a bundle —</option>
+            {bundleNames.map(n=><option key={n} value={n}>{n}</option>)}
+          </select>
+          {selectedBundle && (
+            bundleVariations.length ? (
+              <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:9}}>
+                {bundleVariations.map((v,i) => (
+                  <button key={i} onClick={()=>{ setNewBrand(v.brand); setNewType(v.type); }}
+                    title={`${v.count} item${v.count!==1?"s":""} in this bundle`}
+                    style={{background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:20,padding:"4px 11px",cursor:"pointer",fontSize:11,color:"var(--txm)"}}>
+                    {v.brand || <i>any brand</i>} {v.type || <i>any type</i>} <span style={{color:"var(--txd)"}}>×{v.count}</span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div style={{fontSize:11,color:"var(--txd)",marginTop:8}}>No brand/type data found on this bundle's listings yet.</div>
+            )
+          )}
+        </div>
+
         <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
           <div style={{display:"flex",flexDirection:"column",gap:3}}>
             <span style={{fontSize:10,color:"var(--txd)"}}>Brand (blank = any)</span>
@@ -6666,7 +6923,7 @@ function PricingTab({ listings=[] }) {
         )}
       </div>
 
-      <div className="tw" style={{padding:0,overflow:"hidden"}}>
+      <div className="tw" style={{padding:0}}>
         {loading ? (
           <div style={{padding:20,fontSize:12,color:"var(--txd)"}}>Loading…</div>
         ) : loadError ? (
@@ -6711,7 +6968,7 @@ function PricingTab({ listings=[] }) {
             ))}
           </div>
         ) : (
-          <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
+          <div className="ts">
             <table className="tbl" style={{minWidth:620}}>
               <thead>
                 <tr>
@@ -6847,14 +7104,22 @@ function Analytics({ listings, stockData, customPlatforms: cpArg, liveData }) {
   const minDays  = platformStats.length ? Math.min(...platformStats.map(p=>p.avgDays||999)) : 0;
   const maxPrice = platformStats.length ? Math.max(...platformStats.map(p=>p.avgPrice))     : 0;
 
-  /* ── Restock intelligence ── */
+  /* ── Restock intelligence — manual flag only, consolidated by bundle name ──
+     Only the "Flag for restock" checkbox on the Stock tab controls inclusion
+     now (no auto-detection). Multiple bundleSkus sharing the same product
+     name (e.g. restocked more than once) are combined into a single row with
+     real aggregated numbers — not just the first match with duplicates
+     dropped, which silently discarded the other bundles' remaining stock. */
   const restockItems = useMemo(() => {
-    return derived.map(s => {
+    const flaggedNames = new Set(derived.filter(s=>s.restock).map(s=>s.name));
+    return [...flaggedNames].map(name => {
+      const bundles = derived.filter(s => s.name === name);
+      const items   = listings.filter(l => l.name === name && l.listed);
+      const sold    = items.filter(l => l.sold && l.days!=null);
+
       const tag = (() => {
-        const items = listings.filter(l=>l.bundleSku===s.bundleSku&&l.name===s.name&&l.listed);
-        const sold  = items.filter(l=>l.sold&&l.days!=null);
         if (!sold.length) return "UNKNOWN";
-        if (sold.length<3&&sold.length<items.length) return "NEW";
+        if (sold.length<3 && sold.length<items.length) return "NEW";
         const t=items.length;
         const p=n=>t?Math.round(sold.filter(l=>l.days<=n).length/t*100):0;
         if(p(7)>=60||p(14)>=80) return "FAST";
@@ -6862,16 +7127,18 @@ function Analytics({ listings, stockData, customPlatforms: cpArg, liveData }) {
         if(p(42)===0) return "DEAD";
         return "SLOW";
       })();
-      const stWarn = getAS(liveData).sellThruWarning||60;
-      const autoFlag = s.sellThru>=stWarn && (tag==="FAST"||tag==="MEDIUM") && s.qtyRemaining<=5;
-      if (!autoFlag && !s.restock) return null;
-      const urgency = s.qtyRemaining<=2&&tag==="FAST" ? "critical"
-        : s.qtyRemaining<=4||tag==="MEDIUM"            ? "high"
+
+      const qtyRemaining  = bundles.reduce((a,s)=>a+s.qtyRemaining, 0);
+      const totalSellable = bundles.reduce((a,s)=>a+(s.sellable||0), 0);
+      const sellThru  = totalSellable ? Math.round(sold.length/totalSellable*100) : 0;
+      const avgDays   = sold.length ? Math.round(sold.reduce((a,l)=>a+(l.days||0),0)/sold.length) : null;
+      const avgProfit = sold.length ? sold.reduce((a,l)=>a+(l.profit||0),0)/sold.length : 0;
+      const urgency = qtyRemaining<=2&&tag==="FAST" ? "critical"
+        : qtyRemaining<=4||tag==="MEDIUM"            ? "high"
         : "watch";
-      return {...s, tag, urgency, autoFlag};
-    }).filter(Boolean)
-    .filter((item,idx,arr)=>arr.findIndex(x=>x.bundleSku===item.bundleSku&&x.name===item.name)===idx)
-    .sort((a,b)=>
+
+      return { name, tag, urgency, qtyRemaining, sellThru, avgDays, avgProfit, bundleSkus: bundles.map(s=>s.bundleSku) };
+    }).sort((a,b)=>
       ["critical","high","watch"].indexOf(a.urgency)-["critical","high","watch"].indexOf(b.urgency)
     );
   }, [derived, listings]);
@@ -6926,14 +7193,14 @@ function Analytics({ listings, stockData, customPlatforms: cpArg, liveData }) {
       <div className="sh" style={{marginBottom:8}}>
         <div className="st">Restock Intelligence
           <InfoTip>
-            <strong>Auto-detected</strong> — no manual flagging needed.<br/><br/>
-            Criteria: sell-through ≥60% + FAST or MEDIUM tag + ≤5 remaining.<br/><br/>
+            Shows only bundles with <strong>"Flag for restock"</strong> ticked on the Stock tab.<br/><br/>
+            Bundles sharing the same product name (e.g. restocked more than once under a different Bundle SKU) are combined into one row — remaining stock is summed, sell-through/avg days/avg profit are recalculated across the combined pool.<br/><br/>
             <strong>⚠ Now</strong> = critically low on a fast seller.<br/>
             <strong>↑ Soon</strong> = running low, order soon.<br/>
             <strong>Watch</strong> = not urgent yet.
           </InfoTip>
         </div>
-        <div className="ss" style={{marginLeft:4}}>Auto-detected + manually flagged</div>
+        <div className="ss" style={{marginLeft:4}}>Manually flagged bundles only</div>
       </div>
 
       {restockItems.length > 0 ? (
@@ -6955,7 +7222,7 @@ function Analytics({ listings, stockData, customPlatforms: cpArg, liveData }) {
             <table className="tbl">
               <thead><tr>
                 <th>Bundle</th><th>Remaining</th><th>Sell-through</th>
-                <th>Avg Days</th><th>Avg Profit</th><th>Signal</th><th>Source</th>
+                <th>Avg Days</th><th>Avg Profit</th><th>Signal</th>
               </tr></thead>
               <tbody>
                 {restockItems.map((r,i)=>(
@@ -6977,7 +7244,6 @@ function Analytics({ listings, stockData, customPlatforms: cpArg, liveData }) {
                       {r.urgency==="high"    &&<span className="badge b-am">↑ Soon</span>}
                       {r.urgency==="watch"   &&<span style={{fontSize:10,color:"var(--txd)",fontWeight:700}}>Watch</span>}
                     </td>
-                    <td><span style={{fontSize:10,color:"var(--txd)"}}>{r.autoFlag?"⚡ Auto":"📌 Manual"}</span></td>
                   </tr>
                 ))}
               </tbody>
@@ -7429,6 +7695,160 @@ function Growth({ listings, stockData }) {
   );
 }
 
+
+/* ═══════════════════════════════════════════════════════════════
+   PREDICTIONS — Optimisation Plan Phase 3
+   Forecasts revenue from incoming stock (bundles received but not yet
+   turned into listings — the `imported` flag already used on the Stock
+   tab) combined with the historical sell-through rate of past bundles
+   sharing the same product name.
+
+   Model, per bundle name with incoming stock:
+     sellThroughRate   = historical sold count / historical sellable count
+                          for this name — i.e. what fraction of everything
+                          ever stocked under this name actually sells at all.
+     fractionWithinT   = of the items that DID sell, what fraction sold
+                          within the chosen timeframe (from their own
+                          dayListed -> daySold gap) — reuses the same
+                          FAST/MEDIUM tag percentile logic used elsewhere.
+     predictedUnits    = incomingQty * sellThroughRate * fractionWithinT
+     predictedRevenue  = predictedUnits * avgSoldPrice (historical, this name)
+
+   Bundle names with no sales history at all are shown but excluded from
+   the totals — nothing to extrapolate from, so no number is fabricated.
+═══════════════════════════════════════════════════════════════ */
+function PredictionsTab({ stockData=[], listings=[] }) {
+  const [timeframe, setTimeframe] = useState(30); // days
+
+  const rows = useMemo(() => {
+    const incoming = stockData.filter(s => !s.imported && s.sellable > 0);
+    // Group incoming bundles by name (same "restocked under a new bundleSku" case as Restock Intelligence)
+    const byName = {};
+    incoming.forEach(s => {
+      const name = (s.name||"").trim();
+      if (!name) return;
+      if (!byName[name]) byName[name] = { name, incomingQty: 0, costPer: s.costPer||0 };
+      byName[name].incomingQty += s.sellable;
+    });
+
+    return Object.values(byName).map(g => {
+      const historicalItems = listings.filter(l => (l.name||"").trim() === g.name);
+      const historicalSold  = historicalItems.filter(l => l.sold);
+      const sellableHistoric = stockData
+        .filter(s => (s.name||"").trim() === g.name)
+        .reduce((a,s)=>a+(s.sellable||0), 0);
+
+      if (!historicalSold.length || !sellableHistoric) {
+        return { ...g, hasData:false, sellThroughRate:null, fractionWithinT:null,
+                 avgSoldPrice:null, predictedUnits:0, predictedRevenue:0 };
+      }
+
+      const sellThroughRate = Math.min(1, historicalSold.length / sellableHistoric);
+      const withDays = historicalSold.filter(l => l.days!=null);
+      const fractionWithinT = withDays.length
+        ? withDays.filter(l => l.days <= timeframe).length / withDays.length
+        : 0;
+      const avgSoldPrice = historicalSold.reduce((a,l)=>a+(l.soldPrice||0),0) / historicalSold.length;
+
+      const predictedUnits   = g.incomingQty * sellThroughRate * fractionWithinT;
+      const predictedRevenue = predictedUnits * avgSoldPrice;
+
+      return { ...g, hasData:true, sellThroughRate, fractionWithinT, avgSoldPrice,
+                predictedUnits, predictedRevenue };
+    }).sort((a,b) => b.predictedRevenue - a.predictedRevenue);
+  }, [stockData, listings, timeframe]);
+
+  const withData    = rows.filter(r => r.hasData);
+  const noData       = rows.filter(r => !r.hasData);
+  const totalUnits   = withData.reduce((a,r)=>a+r.predictedUnits, 0);
+  const totalRevenue = withData.reduce((a,r)=>a+r.predictedRevenue, 0);
+  const totalIncomingQty = rows.reduce((a,r)=>a+r.incomingQty, 0);
+
+  return (
+    <div>
+      <div className="sh" style={{marginBottom:8}}>
+        <div className="st">Predictions
+          <InfoTip>
+            Forecasts revenue from <strong>incoming stock</strong> (bundles received but not yet turned into listings — see "Imported" on the Stock tab) using the historical sell-through rate of past bundles with the <strong>same product name</strong>.<br/><br/>
+            Predicted units = incoming qty × (historical % that ever sells) × (historical % that sells within your chosen timeframe).<br/><br/>
+            Bundle names with no sales history yet are shown separately — there's nothing to extrapolate from, so no number is guessed for them.
+          </InfoTip>
+        </div>
+        <div className="ss" style={{marginLeft:4}}>Based on incoming (unimported) stock + historical sell-through by bundle name</div>
+      </div>
+
+      <div style={{display:"flex",gap:6,marginBottom:14}}>
+        {[7,30,90].map(t => (
+          <button key={t} onClick={()=>setTimeframe(t)} style={{
+            padding:"6px 16px",fontSize:12,fontWeight:700,borderRadius:"var(--r)",cursor:"pointer",
+            border:`1.5px solid ${timeframe===t?"var(--ac)":"var(--bd)"}`,
+            background:timeframe===t?"var(--acl)":"var(--sf2)",
+            color:timeframe===t?"var(--ac)":"var(--txm)",
+          }}>Next {t} days</button>
+        ))}
+      </div>
+
+      <div className="kg kg4" style={{marginBottom:14}}>
+        {[
+          {l:"Incoming Units",       v:totalIncomingQty,           s:"across all unimported bundles"},
+          {l:"Predicted Units Sold", v:Math.round(totalUnits*10)/10, s:`within ${timeframe} days`},
+          {l:"Predicted Revenue",    v:fmt(totalRevenue),          s:`within ${timeframe} days`},
+          {l:"No History Yet",      v:noData.length,               s:"bundle names, excluded above"},
+        ].map(k=>(
+          <div key={k.l} className="kc">
+            <div className="kl">{k.l}</div>
+            <div className="kv" style={{fontSize:20}}>{k.v}</div>
+            <div className="ks">{k.s}</div>
+          </div>
+        ))}
+      </div>
+
+      {withData.length > 0 && (
+        <div className="tw" style={{marginBottom:14}}><div className="ts">
+          <table className="tbl">
+            <thead><tr>
+              <th>Bundle</th><th>Incoming Qty</th><th>Historical Sell-Through</th>
+              <th>Sells within {timeframe}d</th><th>Avg Sold Price</th>
+              <th>Predicted Units</th><th>Predicted Revenue</th>
+            </tr></thead>
+            <tbody>
+              {withData.map((r,i)=>(
+                <tr key={i}>
+                  <td style={{fontWeight:700,fontSize:11,whiteSpace:"normal",wordBreak:"break-word",maxWidth:160}}>{r.name}</td>
+                  <td>{r.incomingQty}</td>
+                  <td>{Math.round(r.sellThroughRate*100)}%</td>
+                  <td>{Math.round(r.fractionWithinT*100)}%</td>
+                  <td>{fmt(r.avgSoldPrice)}</td>
+                  <td style={{fontWeight:700}}>{Math.round(r.predictedUnits*10)/10}</td>
+                  <td style={{fontWeight:700,color:"var(--gn)"}}>{fmt(r.predictedRevenue)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div></div>
+      )}
+
+      {noData.length > 0 && (
+        <div className="tw" style={{padding:"14px 16px"}}>
+          <div style={{fontWeight:700,fontSize:12,color:"var(--txm)",marginBottom:8}}>Incoming — no sales history yet</div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+            {noData.map((r,i)=>(
+              <span key={i} style={{fontSize:11,background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:20,padding:"4px 11px",color:"var(--txm)"}}>
+                {r.name} <span style={{color:"var(--txd)"}}>({r.incomingQty} incoming)</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {rows.length === 0 && (
+        <div className="tw" style={{padding:"24px",textAlign:"center",color:"var(--txd)",fontSize:12}}>
+          No incoming stock right now — every received bundle has already had listings created ("Imported" ticked on the Stock tab).
+        </div>
+      )}
+    </div>
+  );
+}
 
 /* ═══════════════════════════════════════════════════════════════
    HISTORY — Command 10
@@ -8696,12 +9116,17 @@ export default function App() {
   const fileRef       = useRef();
   const listingsRef   = useRef(LISTINGS_INIT);  // always-fresh refs for snapshots
   const stockDataRef  = useRef(STOCK_INIT);
+  const liveDataRef   = useRef(liveData);        // same pattern — used by mergeListings'
+                                                  // tombstone check inside the empty-deps
+                                                  // applyRemotePayload useCallback, where a
+                                                  // plain `liveData` closure would go stale
   const past          = useRef([]);              // undo stack  [{listings, stockData}]
   const future        = useRef([]);              // redo stack
 
   /* Keep refs current */
   useEffect(() => { listingsRef.current  = listings;  }, [listings]);
   useEffect(() => { stockDataRef.current = stockData; }, [stockData]);
+  useEffect(() => { liveDataRef.current  = liveData;  }, [liveData]);
 
   /* ── Snapshot helpers ── */
   const saveSnap = useCallback(() => {
@@ -8840,21 +9265,44 @@ export default function App() {
     })();
   }, []);
 
+  // Record SKUs as deleted so a stale remote payload (e.g. a different tab
+  // that hadn't seen the delete yet, saving its own full array afterward)
+  // can't resurrect them via mergeListings below. Timestamped so a genuine
+  // deliberate re-add later still wins over an old tombstone. Pruned to 30
+  // days so this never grows unbounded.
+  const withDeletedSkus = (prevLiveData, skus) => {
+    const now      = Date.now();
+    const cutoff    = now - 30*24*60*60*1000;
+    const existing  = prevLiveData?.deletedSkus || {};
+    const pruned = {};
+    Object.entries(existing).forEach(([sku,ts]) => { if (ts >= cutoff) pruned[sku] = ts; });
+    skus.forEach(sku => { pruned[sku] = now; });
+    return { ...prevLiveData, deletedSkus: pruned };
+  };
+
   /* ── Per-item merge — keeps newest version of each listing ── */
   const mergeListings = (local, remote) => {
     const localMap  = new Map(local.map(l => [l.sku, l]));
     const remoteMap = new Map(remote.map(l => [l.sku, l]));
     const allSkus   = new Set([...localMap.keys(), ...remoteMap.keys()]);
+    const deletedSkus = liveDataRef.current?.deletedSkus || {};
     return [...allSkus].map(sku => {
       const loc = localMap.get(sku);
       const rem = remoteMap.get(sku);
-      if (!loc) return rem;   // new listing from remote device
+      if (!loc) {
+        // Present remotely, absent locally — normally "new from remote device",
+        // but if we tombstoned this SKU (deleted it) more recently than the
+        // remote copy's own updatedAt, the deletion wins: stay absent.
+        const deletedAt = deletedSkus[sku];
+        if (deletedAt && (!rem.updatedAt || deletedAt >= rem.updatedAt)) return null;
+        return rem;
+      }
       if (!rem) return loc;   // new listing from local device
       // Both have it — keep whichever was updated more recently
       if (!loc.updatedAt) return rem;
       if (!rem.updatedAt) return loc;
       return loc.updatedAt >= rem.updatedAt ? loc : rem;
-    });
+    }).filter(Boolean);
   };
 
   /* ── Supabase Realtime — push changes from other devices instantly ── */
@@ -9028,6 +9476,7 @@ export default function App() {
     // reload right after deleting could pull the pre-delete data back.
     const saveListings  = overrides.listings  ?? listings;
     const saveStockData = overrides.stockData ?? stockData;
+    const saveLiveData  = overrides.liveData  ?? liveData;
     setHardSaving(true);
     setHardSaveMsg("");
     clearTimeout(saveTimer.current);
@@ -9035,8 +9484,8 @@ export default function App() {
     const ts = new Date().toISOString();
     lastSaveTs.current = ts;
     setTimeout(() => { isRemoteUpdate.current = false; }, 2000);
-    const ok = await saveState(saveListings, saveStockData, { weekly: weeklyGoal, monthly: monthlyGoal, weeklyRev: weeklyRevGoal, monthlyRev: monthlyRevGoal, liveData });
-    if (ok) saveManualSnapshot(saveListings, saveStockData, { weekly: weeklyGoal, monthly: monthlyGoal, weeklyRev: weeklyRevGoal, monthlyRev: monthlyRevGoal, liveData });
+    const ok = await saveState(saveListings, saveStockData, { weekly: weeklyGoal, monthly: monthlyGoal, weeklyRev: weeklyRevGoal, monthlyRev: monthlyRevGoal, liveData: saveLiveData });
+    if (ok) saveManualSnapshot(saveListings, saveStockData, { weekly: weeklyGoal, monthly: monthlyGoal, weeklyRev: weeklyRevGoal, monthlyRev: monthlyRevGoal, liveData: saveLiveData });
     const time = new Date().toLocaleTimeString("en-GB", { hour:"2-digit", minute:"2-digit" });
     setHardSaveMsg(ok ? `✓ Saved at ${time} — ${saveListings.length} listings` : "✗ Save failed — check connection");
     setStorageStatus(ok ? "saved" : "error");
@@ -9357,19 +9806,20 @@ export default function App() {
 
           <div className="content">
             {view==="dashboard"   && <Dashboard listings={listings} stockData={stockData} weeklyGoal={weeklyGoal} setWeeklyGoal={setWeeklyGoal} monthlyGoal={monthlyGoal} setMonthlyGoal={setMonthlyGoal} weeklyRevGoal={weeklyRevGoal} setWeeklyRevGoal={setWeeklyRevGoal} monthlyRevGoal={monthlyRevGoal} setMonthlyRevGoal={setMonthlyRevGoal} liveData={liveData} />}
-            {view==="stock"       && <StockTab stockData={stockData} setStockData={setStockData} listings={listings} setListings={setListings} hardSave={hardSave} />}
+            {view==="stock"       && <StockTab stockData={stockData} setStockData={setStockData} listings={listings} setListings={setListings} hardSave={hardSave} liveData={liveData} setLiveData={setLiveData} />}
             {view==="listings"    && <ListingsTab listings={listings} setListings={setListings} stockData={stockData} customPlatforms={customPlatforms} liveData={liveData} setLiveData={setLiveData} hardSave={hardSave} />}
             {view==="movement"    && <MovementTracker listings={listings} />}
             {view==="listingdata" && <ListingDataTab listings={listings} liveData={liveData} />}
-            {view==="marklisted"  && <MarkAsListed listings={listings} setListings={setListings} customPlatforms={customPlatforms} liveData={liveData} />}
-            {view==="drafter"     && <ListingDrafter listings={listings} setListings={setListings} liveData={liveData} />}
-            {view==="marksold"    && <QuickMarkSold listings={listings} setListings={setListings} customPlatforms={customPlatforms} liveData={liveData} />}
-            {view==="shipping"    && <ShippingTab listings={listings} setListings={setListings} />}
+            {view==="marklisted"  && <MarkAsListed listings={listings} setListings={setListings} customPlatforms={customPlatforms} liveData={liveData} hardSave={hardSave} />}
+            {view==="drafter"     && <ListingDrafter listings={listings} setListings={setListings} liveData={liveData} hardSave={hardSave} />}
+            {view==="marksold"    && <QuickMarkSold listings={listings} setListings={setListings} customPlatforms={customPlatforms} liveData={liveData} hardSave={hardSave} />}
+            {view==="shipping"    && <ShippingTab listings={listings} setListings={setListings} hardSave={hardSave} />}
             {view==="livedata"    && <LiveData listings={listings} stockData={stockData} liveData={liveData} setLiveData={setLiveData} customPlatforms={customPlatforms} />}
             {view==="calculator"  && <PriceCalculator listings={listings} />}
-            {view==="pricing"     && <PricingTab listings={listings} />}
+            {view==="pricing"     && <PricingTab listings={listings} stockData={stockData} />}
             {view==="analytics"   && <Analytics listings={listings} stockData={stockData} customPlatforms={customPlatforms} liveData={liveData} />}
             {view==="growth"      && <Growth listings={listings} stockData={stockData} />}
+            {view==="predictions" && <PredictionsTab listings={listings} stockData={stockData} />}
             {view==="history"     && <History listings={listings} stockData={stockData} liveData={liveData} />}
             {view==="settings"    && <Settings liveData={liveData} setLiveData={setLiveData} customPlatforms={customPlatforms} setListings={setListings} exportJSON={exportJSON} onRestoreVersion={(v)=>{ setListingsRaw(v.listings); setStockDataRaw(v.stockData); setView("dashboard"); }} />}
           </div>
