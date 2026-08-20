@@ -305,6 +305,18 @@ const DEFAULT_COLS = [
   {id:"daySold",      label:"Day Sold",       visible:true,  locked:false, minW:90 },
   {id:"days",         label:"Days to Sell",   visible:true,  locked:false, minW:90 },
   {id:"shipped",      label:"Shipped?",       visible:true,  locked:false, minW:75 },
+  // Written by Walter's write-back (Optimisation Plan Phase 2) — field names
+  // are exactly what Walter's Python side writes (snake_case, not this
+  // file's usual camelCase) since it's the same listing object in Supabase.
+  // Hidden by default, toggle on via the Columns panel like any other column.
+  {id:"ebay_item_id",         label:"eBay Item ID",       visible:false, locked:false, minW:110},
+  {id:"depop_product_id",     label:"Depop Product ID",   visible:false, locked:false, minW:110},
+  {id:"ebay_listed_price",    label:"eBay Listed £",      visible:false, locked:false, minW:95 },
+  {id:"depop_listed_price",   label:"Depop Listed £",     visible:false, locked:false, minW:95 },
+  {id:"vinted_listed_price",  label:"Vinted Listed £",    visible:false, locked:false, minW:95 },
+  {id:"ebay_sold_price",      label:"eBay Sold £",        visible:false, locked:false, minW:90 },
+  {id:"depop_sold_price",     label:"Depop Sold £",       visible:false, locked:false, minW:90 },
+  {id:"vinted_sold_price",    label:"Vinted Sold £",      visible:false, locked:false, minW:90 },
 ];
 
 /* ─── Default column config for Stock tab ─── */
@@ -478,7 +490,6 @@ function STh({col,sortCol,sortDir,onSort,children,style,noSort,onResize}) {
    NAV CONFIG
 ═══════════════════════════════════════════════════════════════ */
 const NAV = [
-  {id:"morningbrief",label:"Morning Brief",  icon:"☀️", group:"Overview" },
   {id:"dashboard",   label:"Dashboard",      icon:"⊞", group:"Overview" },
   {id:"stock",       label:"Stock",          icon:"◫", group:"Overview" },
   {id:"listings",    label:"Listings",       icon:"☰", group:"Overview" },
@@ -498,7 +509,6 @@ const NAV = [
   {id:"settings",    label:"Settings",        icon:"⚙️", group:"Settings"  },
 ];
 const TITLES = {
-  morningbrief:"Morning Brief",
   dashboard:"Dashboard",stock:"Stock Inventory",listings:"Listings",
   movement:"Movement Tracker",listingdata:"Listing Data",marklisted:"Mark as Listed",drafter:"Listing Drafter",
   marksold:"Mark as Sold",shipping:"Shipping",livedata:"Live Data",
@@ -813,7 +823,9 @@ function exportToCSV(rows, colDefs, filename) {
       if (typeof v === "boolean") return v ? "Yes" : "No";
       if (c.id === "sellThru")    return `${v}%`;
       if (["costPer","totalCost","totalProfit","netProceeds","stockValLeft",
-           "avgSoldPrice","avgProfit","price","soldPrice","profit"].includes(c.id))
+           "avgSoldPrice","avgProfit","price","soldPrice","profit",
+           "ebay_listed_price","depop_listed_price","vinted_listed_price",
+           "ebay_sold_price","depop_sold_price","vinted_sold_price"].includes(c.id))
         return (+(v)||0).toFixed(2);
       return String(v);
     })
@@ -2468,6 +2480,38 @@ function ListingCell({ colId, l, onShipToggle, onSelect, selected, stockBundleSk
         {l.shipped ? "✓ Sent" : "Ship"}
       </button>
     );
+  }
+  // Written by Walter's write-back — see DEFAULT_COLS above for why these
+  // ids are snake_case unlike everything else in this table.
+  if (colId === "ebay_item_id") {
+    if (!l.ebay_item_id) return <span style={{color:"var(--txd)"}}>—</span>;
+    return (
+      <a href={`https://www.ebay.co.uk/itm/${l.ebay_item_id}`} target="_blank" rel="noopener noreferrer"
+        onClick={e => e.stopPropagation()}
+        style={{color:"var(--ac)",fontWeight:600,textDecoration:"none"}}>
+        {l.ebay_item_id} ↗
+      </a>
+    );
+  }
+  if (colId === "depop_product_id") {
+    if (!l.depop_product_id) return <span style={{color:"var(--txd)"}}>—</span>;
+    return (
+      <a href={`https://www.depop.com/products/${l.depop_product_id}`} target="_blank" rel="noopener noreferrer"
+        onClick={e => e.stopPropagation()}
+        style={{color:"var(--ac)",fontWeight:600,textDecoration:"none"}}>
+        {l.depop_product_id} ↗
+      </a>
+    );
+  }
+  if (["ebay_listed_price","depop_listed_price","vinted_listed_price"].includes(colId)) {
+    const v = l[colId];
+    return v != null ? fmt(v) : <span style={{color:"var(--txd)"}}>—</span>;
+  }
+  if (["ebay_sold_price","depop_sold_price","vinted_sold_price"].includes(colId)) {
+    const v = l[colId];
+    return v != null
+      ? <span style={{fontWeight:700,color:"var(--gn)"}}>{fmt(v)}</span>
+      : <span style={{color:"var(--txd)"}}>—</span>;
   }
   return "—";
 }
@@ -5795,8 +5839,23 @@ function SalesHistoryTab({ listings=[], setListings }) {
   const weekStats  = statsFor(startOfWeek);
   const monthStats = statsFor(startOfMonth);
 
-  const toggleReviewPending = (sku) => {
-    setListings(prev => prev.map(l => l.sku===sku ? { ...l, reviewPending: !l.reviewPending } : l));
+  // Flagging stamps when — gives the follow-up action ("Mark received") a
+  // real completion event to record, instead of the star just toggling a
+  // bare boolean with nothing to actually do once it's on.
+  const flagReviewPending = (sku) => {
+    setListings(prev => prev.map(l => l.sku===sku
+      ? { ...l, reviewPending:true, reviewFlaggedAt:new Date().toISOString(), reviewReceivedAt:null }
+      : l));
+  };
+  const markReviewReceived = (sku) => {
+    setListings(prev => prev.map(l => l.sku===sku
+      ? { ...l, reviewPending:false, reviewReceivedAt:new Date().toISOString() }
+      : l));
+  };
+  const unflagReviewPending = (sku) => {
+    setListings(prev => prev.map(l => l.sku===sku
+      ? { ...l, reviewPending:false, reviewFlaggedAt:null }
+      : l));
   };
 
   return (
@@ -5826,7 +5885,16 @@ function SalesHistoryTab({ listings=[], setListings }) {
                   <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                     <span className="sku">{l.sku}</span>
                     <span style={{fontWeight:700,fontSize:12}}>{l.name}</span>
-                    {l.reviewPending && <span className="badge" style={{background:"#fff8f0",color:"#7a4e0e",border:"1px solid #f0c040",fontSize:10,padding:"1px 7px",borderRadius:20}}>⭐ Review pending</span>}
+                    {l.reviewPending && (
+                      <span className="badge" style={{background:"#fff8f0",color:"#7a4e0e",border:"1px solid #f0c040",fontSize:10,padding:"1px 7px",borderRadius:20}}>
+                        ⭐ Review pending{l.reviewFlaggedAt ? ` · flagged ${new Date(l.reviewFlaggedAt).toLocaleDateString("en-GB",{day:"numeric",month:"short"})}` : ""}
+                      </span>
+                    )}
+                    {!l.reviewPending && l.reviewReceivedAt && (
+                      <span className="badge" style={{background:"var(--gnl)",color:"var(--gn)",border:"1px solid rgba(31,92,53,.2)",fontSize:10,padding:"1px 7px",borderRadius:20}}>
+                        ✓ Review received {new Date(l.reviewReceivedAt).toLocaleDateString("en-GB",{day:"numeric",month:"short"})}
+                      </span>
+                    )}
                   </div>
                   <div style={{fontSize:11,color:"var(--txm)",marginTop:3}}>
                     Sold on <strong>{l.platform||"—"}</strong> for <strong>{fmt(l.soldPrice)}</strong> · {l.daySold||"—"}
@@ -5835,11 +5903,23 @@ function SalesHistoryTab({ listings=[], setListings }) {
                     <div style={{fontSize:10,color:"#7a4e0e",marginTop:4}}>📋 Still needs delisting from: {needsDelist.join(", ")}</div>
                   )}
                 </div>
-                <button onClick={()=>toggleReviewPending(l.sku)}
-                  title={l.reviewPending ? "Clear review-pending flag" : "Flag as awaiting buyer review"}
-                  style={{flexShrink:0,background:l.reviewPending?"#fff8f0":"var(--sf2)",border:`1px solid ${l.reviewPending?"#f0c040":"var(--bdd)"}`,borderRadius:"var(--r)",padding:"4px 9px",cursor:"pointer",fontSize:12}}>
-                  ⭐
-                </button>
+                {l.reviewPending ? (
+                  <div style={{display:"flex",gap:5,flexShrink:0}}>
+                    <button onClick={()=>markReviewReceived(l.sku)} title="Buyer left a review — mark it received"
+                      style={{background:"var(--gnl)",border:"1px solid rgba(31,92,53,.2)",borderRadius:"var(--r)",padding:"4px 9px",cursor:"pointer",fontSize:11,fontWeight:700,color:"var(--gn)"}}>
+                      ✓ Received
+                    </button>
+                    <button onClick={()=>unflagReviewPending(l.sku)} title="Remove the pending flag"
+                      style={{background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:"var(--r)",padding:"4px 8px",cursor:"pointer",fontSize:11,color:"var(--txm)"}}>
+                      ✕
+                    </button>
+                  </div>
+                ) : (
+                  <button onClick={()=>flagReviewPending(l.sku)} title="Flag as awaiting buyer review"
+                    style={{flexShrink:0,background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:"var(--r)",padding:"4px 9px",cursor:"pointer",fontSize:12}}>
+                    ⭐
+                  </button>
+                )}
               </div>
             </div>
           );
@@ -6190,7 +6270,8 @@ function GoalCard({ title, period, profit, revenue, profitGoal, setProfit, profi
   );
 }
 
-function Dashboard({ listings, stockData, weeklyGoal: wgProp, setWeeklyGoal, monthlyGoal: mgProp, setMonthlyGoal, weeklyRevGoal: wrgProp, setWeeklyRevGoal, monthlyRevGoal: mrgProp, setMonthlyRevGoal, liveData }) {
+function Dashboard({ listings, stockData, weeklyGoal: wgProp, setWeeklyGoal, monthlyGoal: mgProp, setMonthlyGoal, weeklyRevGoal: wrgProp, setWeeklyRevGoal, monthlyRevGoal: mrgProp, setMonthlyRevGoal, liveData, setLiveData, hardSave }) {
+  const [dashTab, setDashTab] = useState("dashboard");
   // Prefer goals from appSettings (Settings tab) — fall back to App state props
   const as = getAS(liveData);
   const weeklyGoal     = as.weeklyGoal     || wgProp  || "";
@@ -6227,6 +6308,19 @@ function Dashboard({ listings, stockData, weeklyGoal: wgProp, setWeeklyGoal, mon
 
   return (
     <div>
+      <div className="tab-bar" style={{marginBottom:16}}>
+        {[
+          {id:"dashboard", label:"Dashboard"},
+          {id:"brief",     label:"Morning Brief"},
+        ].map(t => (
+          <div key={t.id} className={`tab ${dashTab===t.id?"active":""}`} onClick={()=>setDashTab(t.id)}>{t.label}</div>
+        ))}
+      </div>
+
+      {dashTab==="brief" ? (
+        <MorningBriefTab listings={listings} liveData={liveData} setLiveData={setLiveData} hardSave={hardSave} />
+      ) : (
+      <>
       {/* KPI cards */}
       <div className="kg kg4">
         {[
@@ -6279,6 +6373,8 @@ function Dashboard({ listings, stockData, weeklyGoal: wgProp, setWeeklyGoal, mon
           </div>
         ))}
       </div>
+      </>
+      )}
     </div>
   );
 }
@@ -6334,7 +6430,10 @@ function MorningBriefTab({ listings, liveData, setLiveData, hardSave }) {
   const soldWk    = listings.filter(l => l.sold && l.daySold && l.daySold >= WEEK_START);
   const wkRevenue = soldWk.reduce((a,l)=>a+(l.soldPrice||0),0);
   const active       = listings.filter(l => l.listed && !l.sold);
-  const readyToList  = listings.filter(l => !l.listed && !l.sold && !!l.photoUrl);
+  // Having a measurement recorded (length and/or pit-to-pit) means the item
+  // was physically handled and photographed to take it — a more reliable
+  // "photographed" signal in this workflow than the photoUrl field.
+  const readyToList  = listings.filter(l => !l.listed && !l.sold && !!(l.length || l.pitToPit));
 
   const slowMoverDays = getAS(liveData).slowMoverDays || 14;
   const slowMovers = useMemo(() => listings
@@ -6372,7 +6471,7 @@ function MorningBriefTab({ listings, liveData, setLiveData, hardSave }) {
           {l:"Sold This Week",    v:soldWk.length,       s:"items"},
           {l:"Revenue This Week", v:fmt(wkRevenue),       s:`w/c ${WEEK_START}`},
           {l:"Active Listings",   v:active.length,        s:"currently live"},
-          {l:"Ready to List",     v:readyToList.length,   s:"has photo, not listed"},
+          {l:"Ready to List",     v:readyToList.length,   s:"measured, not listed"},
         ].map(k=>(
           <div key={k.l} className="kc">
             <div className="kl">{k.l}</div>
@@ -9993,8 +10092,7 @@ export default function App() {
           </div>
 
           <div className="content">
-            {view==="morningbrief" && <MorningBriefTab listings={listings} liveData={liveData} setLiveData={setLiveData} hardSave={hardSave} />}
-            {view==="dashboard"   && <Dashboard listings={listings} stockData={stockData} weeklyGoal={weeklyGoal} setWeeklyGoal={setWeeklyGoal} monthlyGoal={monthlyGoal} setMonthlyGoal={setMonthlyGoal} weeklyRevGoal={weeklyRevGoal} setWeeklyRevGoal={setWeeklyRevGoal} monthlyRevGoal={monthlyRevGoal} setMonthlyRevGoal={setMonthlyRevGoal} liveData={liveData} />}
+            {view==="dashboard"   && <Dashboard listings={listings} stockData={stockData} weeklyGoal={weeklyGoal} setWeeklyGoal={setWeeklyGoal} monthlyGoal={monthlyGoal} setMonthlyGoal={setMonthlyGoal} weeklyRevGoal={weeklyRevGoal} setWeeklyRevGoal={setWeeklyRevGoal} monthlyRevGoal={monthlyRevGoal} setMonthlyRevGoal={setMonthlyRevGoal} liveData={liveData} setLiveData={setLiveData} hardSave={hardSave} />}
             {view==="stock"       && <StockTab stockData={stockData} setStockData={setStockData} listings={listings} setListings={setListings} hardSave={hardSave} liveData={liveData} setLiveData={setLiveData} />}
             {view==="listings"    && <ListingsTab listings={listings} setListings={setListings} stockData={stockData} customPlatforms={customPlatforms} liveData={liveData} setLiveData={setLiveData} hardSave={hardSave} />}
             {view==="movement"    && <MovementTracker listings={listings} />}
