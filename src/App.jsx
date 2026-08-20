@@ -478,6 +478,7 @@ function STh({col,sortCol,sortDir,onSort,children,style,noSort,onResize}) {
    NAV CONFIG
 ═══════════════════════════════════════════════════════════════ */
 const NAV = [
+  {id:"morningbrief",label:"Morning Brief",  icon:"☀️", group:"Overview" },
   {id:"dashboard",   label:"Dashboard",      icon:"⊞", group:"Overview" },
   {id:"stock",       label:"Stock",          icon:"◫", group:"Overview" },
   {id:"listings",    label:"Listings",       icon:"☰", group:"Overview" },
@@ -497,6 +498,7 @@ const NAV = [
   {id:"settings",    label:"Settings",        icon:"⚙️", group:"Settings"  },
 ];
 const TITLES = {
+  morningbrief:"Morning Brief",
   dashboard:"Dashboard",stock:"Stock Inventory",listings:"Listings",
   movement:"Movement Tracker",listingdata:"Listing Data",marklisted:"Mark as Listed",drafter:"Listing Drafter",
   marksold:"Mark as Sold",shipping:"Shipping",livedata:"Live Data",
@@ -6282,6 +6284,192 @@ function Dashboard({ listings, stockData, weeklyGoal: wgProp, setWeeklyGoal, mon
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   MORNING BRIEF — Optimisation Plan Phase 3
+   Reads Walter's walter_schedule table (Phase 2) for "today's sessions";
+   everything else is derived from listings already in memory. "Sold since
+   last brief" is tracked via a liveData.lastBriefAt timestamp, stamped
+   each time this tab is opened — captured into a ref BEFORE being
+   overwritten so this same visit's stamp doesn't blank its own comparison.
+═══════════════════════════════════════════════════════════════ */
+function MorningBriefTab({ listings, liveData, setLiveData, hardSave }) {
+  const [schedules,     setSchedules]     = useState([]);
+  const [loadingSched,  setLoadingSched]  = useState(true);
+  const [schedError,    setSchedError]    = useState("");
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data, error } = await supabase.from("walter_schedule").select("*").eq("enabled", true);
+        if (error) throw error;
+        setSchedules(data || []);
+      } catch (e) {
+        // walter_schedule may not exist yet on older projects — fail quiet, not an error banner
+        setSchedError(e?.code === "42P01" ? "" : (e.message || "Failed to load Walter schedule"));
+      } finally {
+        setLoadingSched(false);
+      }
+    })();
+  }, []);
+
+  // Freeze the PREVIOUS brief's timestamp before this visit overwrites it —
+  // useRef's initial value is only used on the very first render, so this
+  // captures the pre-stamp value regardless of what liveData becomes after.
+  const prevBriefAtRef  = useRef(liveData?.lastBriefAt || null);
+  const briefGeneratedAt = useRef(new Date());
+  useEffect(() => {
+    const newLiveData = { ...liveData, lastBriefAt: briefGeneratedAt.current.toISOString() };
+    setLiveData(newLiveData);
+    hardSave?.({ liveData: newLiveData });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const soldSinceLastBrief = useMemo(() => {
+    const since = prevBriefAtRef.current;
+    if (!since) return [];
+    return listings
+      .filter(l => l.sold && l.daySold && new Date(l.daySold) >= new Date(since))
+      .sort((a,b) => new Date(b.daySold) - new Date(a.daySold));
+  }, [listings]);
+
+  const soldWk    = listings.filter(l => l.sold && l.daySold && l.daySold >= WEEK_START);
+  const wkRevenue = soldWk.reduce((a,l)=>a+(l.soldPrice||0),0);
+  const active       = listings.filter(l => l.listed && !l.sold);
+  const readyToList  = listings.filter(l => !l.listed && !l.sold && !!l.photoUrl);
+
+  const slowMoverDays = getAS(liveData).slowMoverDays || 14;
+  const slowMovers = useMemo(() => listings
+    .filter(l => l.listed && !l.sold && l.dayListed)
+    .map(l => ({ ...l, daysLive: Math.max(0, Math.floor((new Date(TODAY)-new Date(l.dayListed))/86400000)) }))
+    .filter(l => l.daysLive >= slowMoverDays)
+    .sort((a,b) => b.daysLive - a.daysLive)
+  , [listings, slowMoverDays]);
+
+  // 0=Mon..6=Sun — matches Walter's days_of_week convention (Python weekday())
+  const todayIdx = (new Date().getDay() + 6) % 7;
+  const todaySchedules = schedules.filter(s => (s.days_of_week||[]).includes(todayIdx));
+  const scheduleStatus = (s) => {
+    if (s.last_run_date !== getToday()) return "Scheduled";
+    if (s.last_run_status === "ok") return "Done";
+    if (s.last_run_status === "error") return "Failed";
+    if (s.last_run_status && s.last_run_status.startsWith("skipped")) return "Skipped";
+    return "Scheduled";
+  };
+  const statusColour = (st) => st==="Done"?"var(--gn)":st==="Failed"?"var(--ac)":st==="Skipped"?"var(--am)":"var(--txm)";
+
+  const generatedLabel = briefGeneratedAt.current.toLocaleString("en-GB",
+    { weekday:"short", day:"numeric", month:"short", hour:"2-digit", minute:"2-digit" });
+
+  return (
+    <div>
+      <div className="sh" style={{marginBottom:8}}>
+        <div className="st">Morning Brief</div>
+        <div className="ss" style={{marginLeft:4}}>Generated {generatedLabel}</div>
+      </div>
+
+      {/* Stats row */}
+      <div className="kg kg4" style={{marginBottom:16}}>
+        {[
+          {l:"Sold This Week",    v:soldWk.length,       s:"items"},
+          {l:"Revenue This Week", v:fmt(wkRevenue),       s:`w/c ${WEEK_START}`},
+          {l:"Active Listings",   v:active.length,        s:"currently live"},
+          {l:"Ready to List",     v:readyToList.length,   s:"has photo, not listed"},
+        ].map(k=>(
+          <div key={k.l} className="kc">
+            <div className="kl">{k.l}</div>
+            <div className="kv" style={{fontSize:20}}>{k.v}</div>
+            <div className="ks">{k.s}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Today's Walter sessions */}
+      <div className="tw" style={{padding:"16px 18px",marginBottom:16}}>
+        <div style={{fontWeight:900,fontSize:14,marginBottom:4}}>Today's Walter Sessions</div>
+        <div style={{fontSize:11,color:"var(--txd)",marginBottom:12}}>Walter runs in the background — no need to open the app.</div>
+        {loadingSched ? (
+          <div style={{fontSize:12,color:"var(--txd)"}}>Loading…</div>
+        ) : schedError ? (
+          <div style={{fontSize:12,color:"var(--ac)"}}>{schedError}</div>
+        ) : todaySchedules.length === 0 ? (
+          <div style={{fontSize:12,color:"var(--txd)"}}>No Walter sessions scheduled for today.</div>
+        ) : (
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {todaySchedules.map(s => {
+              const status = scheduleStatus(s);
+              return (
+                <div key={s.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 12px",background:"var(--sf2)",borderRadius:"var(--r)"}}>
+                  <div>
+                    <div style={{fontWeight:700,fontSize:12}}>{s.time_of_day} — {s.label || s.platform}</div>
+                    <div style={{fontSize:11,color:"var(--txm)"}}>
+                      {s.platform} · up to {s.max_items} item{s.max_items!==1?"s":""}{s.last_run_summary?` · ${s.last_run_summary}`:""}
+                    </div>
+                  </div>
+                  <span style={{fontSize:11,fontWeight:700,color:statusColour(status)}}>{status}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Sold since last brief */}
+      <div className="tw" style={{padding:"16px 18px",marginBottom:16}}>
+        <div style={{fontWeight:900,fontSize:14,marginBottom:10}}>Sold Since Last Brief</div>
+        {!prevBriefAtRef.current ? (
+          <div style={{fontSize:12,color:"var(--txd)"}}>First time viewing the Morning Brief — nothing to compare against yet. Come back later to see what sold since this visit.</div>
+        ) : soldSinceLastBrief.length === 0 ? (
+          <div style={{fontSize:12,color:"var(--txd)"}}>Nothing sold since your last visit.</div>
+        ) : (
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            {soldSinceLastBrief.map(l => (
+              <div key={l.sku} style={{display:"flex",justifyContent:"space-between",fontSize:12}}>
+                <span><span className="sku">{l.sku}</span> {l.name}</span>
+                <span style={{fontWeight:700,color:"var(--gn)"}}>{fmt(l.soldPrice)} on {l.platform}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Ready to list */}
+      <div className="tw" style={{padding:"16px 18px",marginBottom:16}}>
+        <div style={{fontWeight:900,fontSize:14,marginBottom:10}}>Ready to List ({readyToList.length})</div>
+        {readyToList.length === 0 ? (
+          <div style={{fontSize:12,color:"var(--txd)"}}>Nothing waiting — every photographed item is already listed.</div>
+        ) : (
+          <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+            {readyToList.slice(0,30).map(l => (
+              <span key={l.sku} style={{fontSize:11,background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:20,padding:"4px 11px",color:"var(--txm)"}}>
+                {l.sku} — {l.name}
+              </span>
+            ))}
+            {readyToList.length > 30 && <span style={{fontSize:11,color:"var(--txd)"}}>+{readyToList.length-30} more</span>}
+          </div>
+        )}
+      </div>
+
+      {/* Slow movers */}
+      <div className="tw" style={{padding:"16px 18px"}}>
+        <div style={{fontWeight:900,fontSize:14,marginBottom:10}}>Slow Movers ({slowMoverDays}+ days, {slowMovers.length})</div>
+        {slowMovers.length === 0 ? (
+          <div style={{fontSize:12,color:"var(--txd)"}}>Nothing's been sitting unsold that long.</div>
+        ) : (
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            {slowMovers.slice(0,20).map(l => (
+              <div key={l.sku} style={{display:"flex",justifyContent:"space-between",fontSize:12}}>
+                <span><span className="sku">{l.sku}</span> {l.name}</span>
+                <span style={{fontWeight:700,color:"var(--ac)"}}>{l.daysLive}d</span>
+              </div>
+            ))}
+            {slowMovers.length > 20 && <div style={{fontSize:11,color:"var(--txd)",marginTop:4}}>+{slowMovers.length-20} more</div>}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
    LIVE DATA — Command 9
 ═══════════════════════════════════════════════════════════════ */
 function LiveData({ listings, stockData, liveData, setLiveData, customPlatforms }) {
@@ -9805,6 +9993,7 @@ export default function App() {
           </div>
 
           <div className="content">
+            {view==="morningbrief" && <MorningBriefTab listings={listings} liveData={liveData} setLiveData={setLiveData} hardSave={hardSave} />}
             {view==="dashboard"   && <Dashboard listings={listings} stockData={stockData} weeklyGoal={weeklyGoal} setWeeklyGoal={setWeeklyGoal} monthlyGoal={monthlyGoal} setMonthlyGoal={setMonthlyGoal} weeklyRevGoal={weeklyRevGoal} setWeeklyRevGoal={setWeeklyRevGoal} monthlyRevGoal={monthlyRevGoal} setMonthlyRevGoal={setMonthlyRevGoal} liveData={liveData} />}
             {view==="stock"       && <StockTab stockData={stockData} setStockData={setStockData} listings={listings} setListings={setListings} hardSave={hardSave} liveData={liveData} setLiveData={setLiveData} />}
             {view==="listings"    && <ListingsTab listings={listings} setListings={setListings} stockData={stockData} customPlatforms={customPlatforms} liveData={liveData} setLiveData={setLiveData} hardSave={hardSave} />}
