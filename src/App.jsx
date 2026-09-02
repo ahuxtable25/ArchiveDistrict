@@ -660,6 +660,14 @@ nav::-webkit-scrollbar-thumb{background:var(--bd);border-radius:2px}
 .sw{position:relative;width:100%;box-sizing:border-box}.si{position:absolute;left:9px;top:50%;transform:translateY(-50%);font-size:13px;color:var(--txd);pointer-events:none}
 .fi{background:var(--sf);border:1px solid var(--bdd);color:var(--tx);font-family:Arial,sans-serif;font-size:12px;padding:7px 10px 7px 28px;border-radius:var(--r);outline:none;width:100%;transition:border-color .12s;box-sizing:border-box}
 .fi:focus{border-color:var(--ac);box-shadow:0 0 0 3px var(--acl)}
+.auth-loading{min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--bg)}
+.login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--bg);padding:20px;box-sizing:border-box}
+.login-card{width:100%;max-width:340px;background:var(--sf);border:1px solid var(--bd);border-radius:var(--r2);padding:32px 28px;box-shadow:0 8px 30px rgba(15,15,14,.08);text-align:center}
+.login-title{font-family:Arial,sans-serif;font-size:19px;font-weight:800;color:var(--tx);margin:0 0 4px}
+.login-sub{font-family:Arial,sans-serif;font-size:12px;color:var(--txm);margin:0 0 20px;line-height:1.5}
+.login-label{display:block;text-align:left;font-family:Arial,sans-serif;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--txm);margin:0 0 4px}
+.login-err{font-family:Arial,sans-serif;font-size:11.5px;color:var(--ac);background:var(--acl);border-radius:var(--r);padding:8px 10px;margin-top:12px;text-align:left}
+.login-foot{font-family:Arial,sans-serif;font-size:11px;color:var(--txd);margin:18px 0 0}
 .fs{background:var(--sf);border:1px solid var(--bdd);color:var(--txm);font-family:Arial,sans-serif;font-size:12px;padding:7px 10px;border-radius:var(--r);outline:none;cursor:pointer;max-width:100%;box-sizing:border-box;min-width:0}
 .tog-btn{display:inline-flex;align-items:center;gap:6px;padding:6px 11px;font-family:Arial,sans-serif;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;cursor:pointer;border-radius:var(--r);border:1px solid var(--bdd);background:var(--sf);color:var(--txm);transition:all .12s;user-select:none}
 .tog-btn.on{background:var(--acl);border-color:var(--ac2);color:var(--ac)}
@@ -8897,6 +8905,135 @@ function SettingNumInput({ value, onChange, min, max, placeholder, width=110 }) 
   );
 }
 
+function SettingsAccount({ session }) {
+  const [factors,    setFactors]    = useState(null); // null = loading
+  const [enrolling,  setEnrolling]  = useState(false);
+  const [qrCode,     setQrCode]     = useState(null);
+  const [secret,     setSecret]     = useState(null);
+  const [factorId,   setFactorId]   = useState(null);
+  const [verifyCode, setVerifyCode] = useState("");
+  const [msg,        setMsg]        = useState("");
+  const [busy,       setBusy]       = useState(false);
+
+  const loadFactors = async () => {
+    const { data, error } = await supabase.auth.mfa.listFactors();
+    if (!error) setFactors(data.totp || []);
+  };
+
+  useEffect(() => { loadFactors(); }, []);
+
+  const startEnroll = async () => {
+    setMsg(""); setBusy(true);
+    try {
+      const { data, error } = await supabase.auth.mfa.enroll({ factorType: "totp" });
+      if (error) throw error;
+      setFactorId(data.id);
+      setQrCode(data.totp.qr_code);
+      setSecret(data.totp.secret);
+      setEnrolling(true);
+    } catch (e) {
+      setMsg("Error: " + (e.message || "could not start enrollment"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const confirmEnroll = async () => {
+    setMsg(""); setBusy(true);
+    try {
+      const { data: ch, error: chErr } = await supabase.auth.mfa.challenge({ factorId });
+      if (chErr) throw chErr;
+      const { error: vErr } = await supabase.auth.mfa.verify({
+        factorId, challengeId: ch.id, code: verifyCode.trim(),
+      });
+      if (vErr) throw vErr;
+      setEnrolling(false); setQrCode(null); setSecret(null); setFactorId(null); setVerifyCode("");
+      setMsg("✓ Two-factor authentication enabled");
+      loadFactors();
+      setTimeout(() => setMsg(""), 3000);
+    } catch (e) {
+      setMsg("Invalid code — try again");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const cancelEnroll = async () => {
+    if (factorId) { try { await supabase.auth.mfa.unenroll({ factorId }); } catch {} }
+    setEnrolling(false); setQrCode(null); setSecret(null); setFactorId(null); setVerifyCode(""); setMsg("");
+  };
+
+  const removeFactor = async (id) => {
+    if (!window.confirm("Turn off two-factor authentication?")) return;
+    setBusy(true);
+    try {
+      const { error } = await supabase.auth.mfa.unenroll({ factorId: id });
+      if (error) throw error;
+      setMsg("Two-factor authentication turned off");
+      loadFactors();
+      setTimeout(() => setMsg(""), 3000);
+    } catch (e) {
+      setMsg("Error: " + (e.message || "could not remove"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const verified = (factors || []).filter(f => f.status === "verified");
+
+  return (
+    <div className="tw" style={{padding:"18px 20px",marginBottom:14}}>
+      <SettingsHeader title="Account & Security" sub="Your login and two-factor authentication." />
+
+      <div style={{marginBottom:18}}>
+        <div style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:".4px",color:"var(--txm)",marginBottom:4}}>Signed in as</div>
+        <div style={{fontSize:13,fontWeight:700}}>{session?.user?.email}</div>
+      </div>
+
+      <div style={{borderTop:"1px solid var(--bd)",paddingTop:16}}>
+        <div style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:".4px",color:"var(--txm)",marginBottom:8}}>Two-factor authentication</div>
+
+        {factors === null && <div style={{fontSize:12,color:"var(--txd)"}}>Loading…</div>}
+
+        {factors !== null && !enrolling && verified.length === 0 && (
+          <>
+            <p style={{fontSize:12,color:"var(--txm)",marginBottom:10,lineHeight:1.5,maxWidth:420}}>
+              Not enabled. Add an authenticator app (Google Authenticator, Authy, 1Password, etc.) for an extra layer of security at sign-in.
+            </p>
+            <button className="btn btn-p" onClick={startEnroll} disabled={busy}>Enable 2FA</button>
+          </>
+        )}
+
+        {verified.length > 0 && !enrolling && (
+          <>
+            <p style={{fontSize:12,color:"var(--gn)",fontWeight:700,marginBottom:10}}>✓ Enabled</p>
+            {verified.map(f => (
+              <button key={f.id} className="btn btn-del btn-sm" onClick={() => removeFactor(f.id)} disabled={busy}>Turn off</button>
+            ))}
+          </>
+        )}
+
+        {enrolling && (
+          <div style={{maxWidth:280}}>
+            <p style={{fontSize:12,color:"var(--txm)",marginBottom:10}}>Scan this QR code with your authenticator app, then enter the 6-digit code it shows.</p>
+            {qrCode && <img src={qrCode} alt="2FA QR code" style={{width:160,height:160,display:"block",margin:"0 auto 10px",border:"1px solid var(--bd)",borderRadius:"var(--r)"}} />}
+            {secret && <div style={{fontSize:10.5,color:"var(--txd)",textAlign:"center",marginBottom:12,wordBreak:"break-all"}}>Or enter manually: <code>{secret}</code></div>}
+            <input className="fi" style={{paddingLeft:10,textAlign:"center",letterSpacing:"3px",fontSize:16,marginBottom:10}}
+              placeholder="000000" inputMode="numeric" maxLength={6}
+              value={verifyCode} onChange={e => setVerifyCode(e.target.value.replace(/\D/g,"").slice(0,6))} />
+            <div style={{display:"flex",gap:8}}>
+              <button className="btn btn-p" style={{flex:1,justifyContent:"center"}} onClick={confirmEnroll} disabled={busy || verifyCode.length < 6}>Confirm</button>
+              <button className="btn btn-o" style={{flex:1,justifyContent:"center"}} onClick={cancelEnroll} disabled={busy}>Cancel</button>
+            </div>
+          </div>
+        )}
+
+        {msg && <div style={{fontSize:11.5,marginTop:10,color:(msg.startsWith("Error")||msg.startsWith("Invalid"))?"var(--ac)":"var(--gn)",fontWeight:700}}>{msg}</div>}
+      </div>
+    </div>
+  );
+}
+
 function SettingsContact() {
   const [type,    setType]    = useState("question");
   const [name,    setName]    = useState("");
@@ -8961,7 +9098,7 @@ function SettingsContact() {
   );
 }
 
-function Settings({ liveData, setLiveData, customPlatforms, setListings, onRestoreVersion, exportJSON, initialTab }) {
+function Settings({ liveData, setLiveData, customPlatforms, setListings, onRestoreVersion, exportJSON, initialTab, session }) {
   // platformAccounts shape: { Vinted: ["Vinted 1","Vinted 2"], Depop: ["Depop"], ... }
   const initAccounts = () => {
     const pa = liveData?.platformAccounts;
@@ -9129,6 +9266,7 @@ function Settings({ liveData, setLiveData, customPlatforms, setListings, onResto
           {id:"stock_",      label:"Stock"},
           {id:"notifs",      label:"Notifications"},
           {id:"data",        label:"Data"},
+          {id:"account",     label:"Account"},
           {id:"contact",     label:"Contact Us"},
         ].map(t => (
           <div key={t.id} className={`tab ${settingsTab===t.id?"active":""}`} onClick={()=>setSettingsTab(t.id)}>{t.label}</div>
@@ -9459,6 +9597,8 @@ function Settings({ liveData, setLiveData, customPlatforms, setListings, onResto
       )}
 
       {/* ── CONTACT US TAB ── */}
+      {settingsTab==="account" && <SettingsAccount session={session} />}
+
       {settingsTab==="contact" && <SettingsContact />}
 
       </div>
@@ -9467,7 +9607,145 @@ function Settings({ liveData, setLiveData, customPlatforms, setListings, onResto
   );
 }
 
+function LoginScreen() {
+  const [email,    setEmail]    = useState("");
+  const [password, setPassword] = useState("");
+  const [busy,     setBusy]     = useState(false);
+  const [err,      setErr]      = useState("");
+
+  // Set once sign-in succeeds but the account has TOTP 2FA enrolled —
+  // switches the form into the "enter your 6-digit code" step.
+  const [mfaFactorId, setMfaFactorId] = useState(null);
+  const [mfaCode,     setMfaCode]     = useState("");
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setErr(""); setBusy(true);
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: email.trim(), password,
+      });
+      if (error) throw error;
+
+      const { data: aal, error: aalErr } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+      if (aalErr) throw aalErr;
+
+      if (aal.nextLevel === "aal2" && aal.nextLevel !== aal.currentLevel) {
+        const { data: factors, error: fErr } = await supabase.auth.mfa.listFactors();
+        if (fErr) throw fErr;
+        const totp = (factors.totp || [])[0];
+        if (totp) setMfaFactorId(totp.id);
+        // else: no factor on file but aal2 required — shouldn't happen, leave form as-is
+      }
+      // else: fully signed in — App()'s onAuthStateChange picks this up automatically
+    } catch (e2) {
+      setErr(e2.message || "Sign in failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleVerify(e) {
+    e.preventDefault();
+    setErr(""); setBusy(true);
+    try {
+      const { data: ch, error: chErr } = await supabase.auth.mfa.challenge({ factorId: mfaFactorId });
+      if (chErr) throw chErr;
+      const { error: vErr } = await supabase.auth.mfa.verify({
+        factorId: mfaFactorId, challengeId: ch.id, code: mfaCode.trim(),
+      });
+      if (vErr) throw vErr;
+      // success — onAuthStateChange fires, App() moves past LoginScreen
+    } catch (e2) {
+      setErr(e2.message || "Invalid code — try again");
+      setMfaCode("");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const badge = (
+    <div className="logo-badge" style={{margin:"0 auto 18px"}}>
+      <span>ARCHIVE</span><span>DISTRICT</span><span className="since">SINCE 2019</span>
+    </div>
+  );
+
+  if (mfaFactorId) {
+    return (
+      <div className="login-wrap">
+        <div className="login-card">
+          {badge}
+          <h1 className="login-title">Two-factor verification</h1>
+          <p className="login-sub">Enter the 6-digit code from your authenticator app.</p>
+          <form onSubmit={handleVerify}>
+            <input
+              className="fi" style={{paddingLeft:10,textAlign:"center",letterSpacing:"4px",fontSize:18}}
+              placeholder="000000" inputMode="numeric" maxLength={6} autoFocus
+              value={mfaCode}
+              onChange={e => setMfaCode(e.target.value.replace(/\D/g,"").slice(0,6))}
+            />
+            {err && <div className="login-err">{err}</div>}
+            <button className="btn btn-p" style={{width:"100%",justifyContent:"center",marginTop:12,padding:"10px"}}
+              disabled={busy || mfaCode.length < 6}>
+              {busy ? "Verifying…" : "Verify"}
+            </button>
+            <button type="button" className="btn btn-o" style={{width:"100%",justifyContent:"center",marginTop:8,padding:"10px"}}
+              onClick={() => { setMfaFactorId(null); setMfaCode(""); setErr(""); }}>
+              Back
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="login-wrap">
+      <div className="login-card">
+        {badge}
+        <h1 className="login-title">Sign in</h1>
+        <p className="login-sub">Business OS — authorised team members only.</p>
+        <form onSubmit={handleSubmit}>
+          <label className="login-label">Email</label>
+          <input
+            className="fi" style={{paddingLeft:10,marginBottom:10}}
+            type="email" autoComplete="username" autoFocus required
+            value={email} onChange={e => setEmail(e.target.value)}
+          />
+          <label className="login-label">Password</label>
+          <input
+            className="fi" style={{paddingLeft:10}}
+            type="password" autoComplete="current-password" required
+            value={password} onChange={e => setPassword(e.target.value)}
+          />
+          {err && <div className="login-err">{err}</div>}
+          <button className="btn btn-p" style={{width:"100%",justifyContent:"center",marginTop:14,padding:"10px"}}
+            disabled={busy}>
+            {busy ? "Signing in…" : "Sign in"}
+          </button>
+        </form>
+        <p className="login-foot">No account? Ask an admin to create one for you.</p>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
+  // ── Auth (Supabase Auth — email/password, optional TOTP 2FA) ──
+  const [session,     setSession]     = useState(null);
+  const [authChecked, setAuthChecked] = useState(false);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+      setAuthChecked(true);
+    });
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, sess) => {
+      setSession(sess);
+    });
+    return () => sub.subscription.unsubscribe();
+  }, []);
+
   const [view,            setView]            = useState("dashboard");
   const [sidebarOpen,     setSidebarOpen]     = useState(() => {
     try {
@@ -10107,6 +10385,28 @@ export default function App() {
   const dotShadow = storageStatus === "error" ? "0 0 0 2px var(--acl)" : "0 0 0 2px #d0f0de";
   const statusLabel = storageStatus === "loading" ? "Saving…" : storageStatus === "error" ? "Save error" : "Saved ✓";
 
+  // ── Auth gate — block the whole app behind a valid Supabase session ──
+  if (!authChecked) {
+    return (
+      <>
+        <style>{CSS}</style>
+        <div className="auth-loading">
+          <div className="logo-badge">
+            <span>ARCHIVE</span><span>DISTRICT</span><span className="since">SINCE 2019</span>
+          </div>
+        </div>
+      </>
+    );
+  }
+  if (!session) {
+    return (
+      <>
+        <style>{CSS}</style>
+        <LoginScreen />
+      </>
+    );
+  }
+
   return (
     <>
       <style>{CSS}</style>
@@ -10158,6 +10458,20 @@ export default function App() {
           <div className="sb-foot">
             <div className="live-dot" style={{background:dotColor,boxShadow:dotShadow}} />
             <span>{statusLabel}</span>
+          </div>
+          <div className="sb-foot" style={{fontSize:10.5}}>
+            <span style={{flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={session?.user?.email}>
+              {session?.user?.email}
+            </span>
+            <span
+              onClick={() => supabase.auth.signOut()}
+              style={{cursor:"pointer",fontWeight:700,textTransform:"uppercase",letterSpacing:".4px",opacity:.75}}
+              onMouseEnter={e => e.currentTarget.style.opacity = 1}
+              onMouseLeave={e => e.currentTarget.style.opacity = .75}
+              title="Sign out"
+            >
+              Sign out
+            </span>
           </div>
         </div>
 
@@ -10241,7 +10555,7 @@ export default function App() {
             {view==="growth"      && <Growth listings={listings} stockData={stockData} />}
             {view==="predictions" && <PredictionsTab listings={listings} stockData={stockData} />}
             {view==="history"     && <History listings={listings} stockData={stockData} liveData={liveData} />}
-            {view==="settings"    && <Settings liveData={liveData} setLiveData={setLiveData} customPlatforms={customPlatforms} setListings={setListings} exportJSON={exportJSON} onRestoreVersion={(v)=>{ setListingsRaw(v.listings); setStockDataRaw(v.stockData); setView("dashboard"); }} />}
+            {view==="settings"    && <Settings liveData={liveData} setLiveData={setLiveData} customPlatforms={customPlatforms} setListings={setListings} exportJSON={exportJSON} onRestoreVersion={(v)=>{ setListingsRaw(v.listings); setStockDataRaw(v.stockData); setView("dashboard"); }} session={session} />}
           </div>
         </div>
       </div>
