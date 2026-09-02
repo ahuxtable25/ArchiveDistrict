@@ -5624,7 +5624,7 @@ function QuickMarkSold({ listings, setListings, customPlatforms, liveData, hardS
       </div>
 
       {soldTab==="history" ? (
-        <SalesHistoryTab listings={listings} setListings={setListings} />
+        <SalesHistoryTab listings={listings} setListings={setListings} hardSave={hardSave} />
       ) : (
       <>
       <div className="info-banner">
@@ -5816,28 +5816,100 @@ function QuickMarkSold({ listings, setListings, customPlatforms, liveData, hardS
    Built entirely from listings already in memory (sold items already carry
    soldPrice/platform/daySold) — no new Supabase table needed.
 ═══════════════════════════════════════════════════════════════ */
-function SalesHistoryTab({ listings=[], setListings }) {
+// Platforms whose sold-detection can't confirm the real sale price (Depop's
+// product-page badge; Vinted's monitoring agent will have the same
+// limitation once built) — flagged via {platform}_sold_detected instead of
+// being auto-completed, and surfaced here for a human to resolve.
+const DETECTABLE_PLATFORMS = [
+  { key: "depop",  label: "Depop"  },
+  { key: "vinted", label: "Vinted" },
+];
+const SNOOZE_HOURS = 24;
+
+function SalesHistoryTab({ listings=[], setListings, hardSave }) {
+  const [confirmingKey, setConfirmingKey] = useState(null); // `${sku}|${platformKey}`
+  const [confirmPrice,  setConfirmPrice]  = useState("");
+  const [confirmDate,   setConfirmDate]   = useState(getToday());
+
+  // Items an automated check flagged as "looks sold" — need a human to
+  // confirm the sale (real price), mark it delisted (false positive /
+  // removed without selling), or dismiss for a day and revisit.
+  const needsConfirmation = useMemo(() => {
+    const now = Date.now();
+    const out = [];
+    listings.forEach(l => {
+      if (l.sold) return;
+      DETECTABLE_PLATFORMS.forEach(({key, label}) => {
+        if (!l[`${key}_sold_detected`]) return;
+        const snoozedAt = l[`${key}_sold_detected_snoozed_at`];
+        if (snoozedAt && (now - new Date(snoozedAt).getTime()) < SNOOZE_HOURS*3600*1000) return;
+        out.push({ sku: l.sku, item: l, platformKey: key, platformLabel: label });
+      });
+    });
+    return out.sort((a,b) => a.sku.localeCompare(b.sku));
+  }, [listings]);
+
+  const startConfirm = (row) => {
+    setConfirmingKey(row.sku + "|" + row.platformKey);
+    setConfirmPrice(String(row.item[`${row.platformKey}_listed_price`] || ""));
+    setConfirmDate(getToday());
+  };
+  const cancelConfirm = () => { setConfirmingKey(null); setConfirmPrice(""); };
+
+  const confirmSale = (row) => {
+    const price = parseFloat(confirmPrice);
+    if (!price || price <= 0) return;
+    const item = row.item;
+    const days = item.dayListed
+      ? Math.max(0, Math.floor((new Date(confirmDate) - new Date(item.dayListed)) / 86400000))
+      : 0;
+    const newListings = listings.map(l => l.sku !== row.sku ? l : {
+      ...l,
+      sold:true, soldPrice:price,
+      profit: parseFloat((price - (l.price||0)).toFixed(2)),
+      platform: row.platformLabel, daySold: confirmDate, days, shipped:false,
+      [`${row.platformKey}_sold_detected`]: false,
+      [`${row.platformKey}_sold_price`]: price,
+      [`${row.platformKey}_sold_date`]: confirmDate,
+    });
+    setListings(newListings);
+    hardSave?.({ listings: newListings });
+    setConfirmingKey(null);
+    sendPushNotification({
+      title: "ArchiveDistrict",
+      body:  `💰 ${row.sku} confirmed sold on ${row.platformLabel} for ${fmt(price)}`,
+      tag:   `sold-${row.sku}`,
+      notifKey: "notifSold",
+    });
+  };
+
+  const markDelisted = (row) => {
+    const newListings = listings.map(l => l.sku !== row.sku ? l : {
+      ...l,
+      [`${row.platformKey}_sold_detected`]: false,
+      // Drop this platform (and any account variant, e.g. Vinted_AD) from
+      // platforms[] — it's confirmed gone, just not via a sale.
+      platforms: (l.platforms||[]).filter(p => p !== row.platformLabel && !p.startsWith(row.platformLabel+"_")),
+    });
+    setListings(newListings);
+    hardSave?.({ listings: newListings });
+  };
+
+  const checkLater = (row) => {
+    const newListings = listings.map(l => l.sku !== row.sku ? l : {
+      ...l,
+      [`${row.platformKey}_sold_detected_snoozed_at`]: new Date().toISOString(),
+    });
+    setListings(newListings);
+    hardSave?.({ listings: newListings });
+  };
+
   const sold = useMemo(() => {
     return listings
       .filter(l => l.sold)
       .slice()
       .sort((a,b) => new Date(b.daySold||0) - new Date(a.daySold||0));
   }, [listings]);
-
-  const now = new Date();
-  const startOfWeek = (() => {
-    const d = new Date(now); const day = d.getDay(); const diff = (day===0?6:day-1); // Monday start
-    d.setDate(d.getDate()-diff); d.setHours(0,0,0,0); return d;
-  })();
-  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-
-  const statsFor = (since) => {
-    const inRange = sold.filter(l => l.daySold && new Date(l.daySold) >= since);
-    const revenue = inRange.reduce((sum,l) => sum + (l.soldPrice||0), 0);
-    return { count: inRange.length, revenue };
-  };
-  const weekStats  = statsFor(startOfWeek);
-  const monthStats = statsFor(startOfMonth);
 
   // Flagging stamps when — gives the follow-up action ("Mark received") a
   // real completion event to record, instead of the star just toggling a
@@ -5860,18 +5932,79 @@ function SalesHistoryTab({ listings=[], setListings }) {
 
   return (
     <div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10,marginBottom:16}}>
-        <div className="tw" style={{padding:"14px 16px"}}>
-          <div style={{fontSize:10,color:"var(--txd)",textTransform:"uppercase",letterSpacing:".5px",marginBottom:4}}>This Week</div>
-          <div style={{fontWeight:900,fontSize:20}}>{fmt(weekStats.revenue)}</div>
-          <div style={{fontSize:11,color:"var(--txm)"}}>{weekStats.count} sale{weekStats.count!==1?"s":""}</div>
+      {needsConfirmation.length > 0 && (
+        <div className="tw" style={{padding:"14px 16px",marginBottom:16,border:"1px solid #f0c040"}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+            <span style={{fontSize:14}}>🔔</span>
+            <div style={{fontWeight:900,fontSize:13}}>Needs Confirmation ({needsConfirmation.length})</div>
+          </div>
+          <div style={{fontSize:11,color:"var(--txd)",marginBottom:12}}>
+            Walter's automated check thinks these sold, but can't see the real price — confirm the sale, mark it delisted (removed without selling), or check back later.
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {needsConfirmation.map(row => {
+              const key = row.sku + "|" + row.platformKey;
+              const isConfirming = confirmingKey === key;
+              return (
+                <div key={key} style={{background:"#fff8f0",border:"1px solid #f0c040",borderRadius:"var(--r2)",padding:"10px 12px"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                    <div style={{minWidth:0}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                        <span className="sku">{row.sku}</span>
+                        <span style={{fontWeight:700,fontSize:12}}>{row.item.name}</span>
+                        <span className="badge b-b" style={{fontSize:10}}>{row.platformLabel}</span>
+                      </div>
+                      <div style={{fontSize:11,color:"#7a4e0e",marginTop:3}}>
+                        Detected sold {row.item[`${row.platformKey}_sold_detected_at`]
+                          ? new Date(row.item[`${row.platformKey}_sold_detected_at`]).toLocaleDateString("en-GB",{day:"numeric",month:"short"})
+                          : "recently"}
+                      </div>
+                    </div>
+                    {!isConfirming && (
+                      <div style={{display:"flex",gap:6,flexShrink:0}}>
+                        <button onClick={()=>startConfirm(row)}
+                          style={{background:"var(--gnl)",border:"1px solid rgba(31,92,53,.2)",borderRadius:"var(--r)",padding:"5px 11px",cursor:"pointer",fontSize:11,fontWeight:700,color:"var(--gn)"}}>
+                          ✓ Confirm sale
+                        </button>
+                        <button onClick={()=>markDelisted(row)}
+                          style={{background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:"var(--r)",padding:"5px 11px",cursor:"pointer",fontSize:11,color:"var(--txm)"}}>
+                          📦 Mark delisted
+                        </button>
+                        <button onClick={()=>checkLater(row)}
+                          style={{background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:"var(--r)",padding:"5px 11px",cursor:"pointer",fontSize:11,color:"var(--txm)"}}>
+                          ⏰ Check later
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  {isConfirming && (
+                    <div style={{display:"flex",gap:8,alignItems:"flex-end",flexWrap:"wrap",marginTop:10,paddingTop:10,borderTop:"1px solid #f0c040"}}>
+                      <div>
+                        <div style={{fontSize:10,color:"var(--txd)",marginBottom:3}}>Sold price £</div>
+                        <input className="finp" type="number" step="0.01" value={confirmPrice}
+                          onChange={e=>setConfirmPrice(e.target.value)} style={{width:90}} autoFocus />
+                      </div>
+                      <div>
+                        <div style={{fontSize:10,color:"var(--txd)",marginBottom:3}}>Date sold</div>
+                        <input className="finp" type="date" value={confirmDate}
+                          onChange={e=>setConfirmDate(e.target.value)} style={{width:130}} />
+                      </div>
+                      <button onClick={()=>confirmSale(row)} disabled={!confirmPrice || parseFloat(confirmPrice)<=0}
+                        style={{background:"var(--gn)",color:"#fff",border:"none",borderRadius:"var(--r)",padding:"7px 14px",cursor:"pointer",fontSize:11,fontWeight:700,opacity:(!confirmPrice||parseFloat(confirmPrice)<=0)?0.5:1}}>
+                        Confirm £{confirmPrice||"0.00"}
+                      </button>
+                      <button onClick={cancelConfirm}
+                        style={{background:"var(--sf)",border:"1px solid var(--bdd)",borderRadius:"var(--r)",padding:"7px 11px",cursor:"pointer",fontSize:11,color:"var(--txm)"}}>
+                        Cancel
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
-        <div className="tw" style={{padding:"14px 16px"}}>
-          <div style={{fontSize:10,color:"var(--txd)",textTransform:"uppercase",letterSpacing:".5px",marginBottom:4}}>This Month</div>
-          <div style={{fontWeight:900,fontSize:20}}>{fmt(monthStats.revenue)}</div>
-          <div style={{fontSize:11,color:"var(--txm)"}}>{monthStats.count} sale{monthStats.count!==1?"s":""}</div>
-        </div>
-      </div>
+      )}
 
       <div style={{maxHeight:520,overflowY:"auto",display:"flex",flexDirection:"column",gap:1}}>
         {sold.length===0 ? (
