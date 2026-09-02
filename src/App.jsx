@@ -161,6 +161,16 @@ const listingHasFamily = (l, family) => {
   const allPlats = [...new Set([...(l.platforms||[]), l.platform].filter(Boolean))];
   return allPlats.some(p => getPlatFamily(p) === family);
 };
+// Platform filter can be either a family ("Vinted" — matches any Vinted_*
+// account) or a specific account ("Vinted_NLW" — matches only that one).
+// Tries an exact-account match first, falls back to family match so a
+// bare platform name (single-account platforms like "Depop"/"eBay") still
+// works the same as before.
+const listingMatchesPlatFilter = (l, filterValue) => {
+  const allPlats = [...new Set([...(l.platforms||[]), l.platform].filter(Boolean))];
+  if (allPlats.includes(filterValue)) return true;
+  return allPlats.some(p => getPlatFamily(p) === filterValue);
+};
 
 /* ─── LISTING DROPDOWN OPTIONS (from real data + common extras) ─── */
 const DEFAULT_COLOURS = [
@@ -310,7 +320,7 @@ const DEFAULT_COLS = [
   // file's usual camelCase) since it's the same listing object in Supabase.
   // Hidden by default, toggle on via the Columns panel like any other column.
   {id:"ebay_item_id",         label:"eBay Item ID",       visible:false, locked:false, minW:110},
-  {id:"depop_product_id",     label:"Depop Product ID",   visible:false, locked:false, minW:110},
+  {id:"depop_product_id",     label:"Depop Listing",      visible:false, locked:false, minW:110},
   {id:"ebay_listed_price",    label:"eBay Listed £",      visible:false, locked:false, minW:95 },
   {id:"depop_listed_price",   label:"Depop Listed £",     visible:false, locked:false, minW:95 },
   {id:"vinted_listed_price",  label:"Vinted Listed £",    visible:false, locked:false, minW:95 },
@@ -625,6 +635,7 @@ nav::-webkit-scrollbar-thumb{background:var(--bd);border-radius:2px}
 .col-resize:hover{background:var(--ac);opacity:.4}
 .zoom-bar-placeholder{display:none}
 .tbl th:hover{color:var(--tx)}.tbl th.no-sort{cursor:default}.tbl th.no-sort:hover{color:var(--txm)}
+.tbl-wrap-th th{white-space:normal!important;line-height:1.3}
 .tbl{table-layout:auto}.tbl td{padding:9px 11px;border-bottom:1px solid var(--bd);color:var(--tx);vertical-align:middle;white-space:nowrap;max-width:180px;overflow:hidden;text-overflow:ellipsis}
 .tbl td.full{max-width:none;overflow:visible}
 .tbl td.name-cell{min-width:160px;max-width:280px;white-space:normal;word-break:break-word;font-size:11px}
@@ -2502,12 +2513,22 @@ function ListingCell({ colId, l, onShipToggle, onSelect, selected, stockBundleSk
     );
   }
   if (colId === "depop_product_id") {
-    if (!l.depop_product_id) return <span style={{color:"var(--txd)"}}>—</span>;
+    const raw = l.depop_product_id;
+    if (!raw) return <span style={{color:"var(--txd)"}}>—</span>;
+    // Depop's real listing URLs need the full username+slug path (e.g.
+    // /products/seller-item-name-a1b2/) — a bare numeric ID does NOT
+    // resolve (confirmed live: redirects to Depop's homepage). Walter
+    // now stores that full relative path here, not a bare ID, so build
+    // the link by appending it directly rather than reconstructing
+    // /products/{id}. Defensive fallback for any older bare-ID value.
+    const href = raw.startsWith("http") ? raw
+      : raw.startsWith("/") ? `https://www.depop.com${raw}`
+      : `https://www.depop.com/products/${raw}`;
     return (
-      <a href={`https://www.depop.com/products/${l.depop_product_id}`} target="_blank" rel="noopener noreferrer"
+      <a href={href} target="_blank" rel="noopener noreferrer"
         onClick={e => e.stopPropagation()}
         style={{color:"var(--ac)",fontWeight:600,textDecoration:"none"}}>
-        {l.depop_product_id} ↗
+        View ↗
       </a>
     );
   }
@@ -3058,7 +3079,7 @@ function ListingsTab({ listings, setListings, stockData, customPlatforms, liveDa
 
     // Dropdown filters
     if (bundleFilter !== "All") d = d.filter(l => l.bundleSku === bundleFilter);
-    if (platFilter   !== "All") d = d.filter(l => listingHasFamily(l, platFilter));
+    if (platFilter   !== "All") d = d.filter(l => listingMatchesPlatFilter(l, platFilter));
     if (sizeFilter   !== "All") d = d.filter(l => l.size === sizeFilter);
 
     // Sort
@@ -3268,7 +3289,22 @@ function ListingsTab({ listings, setListings, stockData, customPlatforms, liveDa
 
         <select className="fs" value={platFilter} onChange={e=>setPlatFilter(e.target.value)}>
           <option value="All">All Platforms</option>
-          {getPlatFamilies(customPlatforms||DEFAULT_PLATFORMS).map(f => <option key={f} value={f}>{f}</option>)}
+          {PLAT_FAMILY_BASES.map(base => {
+            const accounts = [...new Set((customPlatforms||DEFAULT_PLATFORMS).filter(p => getPlatFamily(p)===base))];
+            if (!accounts.length) return null;
+            // Single-account platform (e.g. one Depop account) — plain option, same as before.
+            if (accounts.length === 1 && accounts[0] === base) {
+              return <option key={base} value={base}>{base}</option>;
+            }
+            // Multi-account platform (e.g. 3 linked Vinted accounts) — group so a
+            // specific account can be filtered on, not just the whole family.
+            return (
+              <optgroup key={base} label={base}>
+                <option value={base}>All {base}</option>
+                {accounts.map(a => <option key={a} value={a}>{a}</option>)}
+              </optgroup>
+            );
+          })}
         </select>
 
         <select className="fs" value={sizeFilter} onChange={e=>setSizeFilter(e.target.value)}>
@@ -8126,48 +8162,74 @@ function Growth({ listings, stockData }) {
 
 /* ═══════════════════════════════════════════════════════════════
    PREDICTIONS — Optimisation Plan Phase 3
-   Forecasts revenue from incoming stock (bundles received but not yet
-   turned into listings — the `imported` flag already used on the Stock
-   tab) combined with the historical sell-through rate of past bundles
-   sharing the same product name.
+   Forecasts revenue from everything not yet actively for sale under a
+   given product name — both incoming/unimported stock (the `imported`
+   flag already used on the Stock tab — "ordered but not received" is the
+   same thing here, there's no separate pre-order status in the data
+   model) AND individual listings already created but not yet published
+   to a platform (`!l.listed`, same definition Listing Data's "To Be
+   Listed" tab already uses) — combined with the historical sell-through
+   rate of past bundles sharing the same product name.
 
-   Model, per bundle name with incoming stock:
-     sellThroughRate   = historical sold count / historical sellable count
-                          for this name — i.e. what fraction of everything
-                          ever stocked under this name actually sells at all.
+   Model, per name with incoming stock and/or unlisted items:
+     pipelineQty       = incomingQty (unimported stock) + unlistedQty
+                          (created listings not yet posted anywhere)
+     sellThroughRate   = historical sold count / historical sellable count,
+                          counted ONLY against bundles that have actually
+                          been imported (i.e. actually given a chance to
+                          sell) — deliberately excludes the current
+                          incoming/unimported batch itself. Confirmed via
+                          real data this was a genuine bug, not just a
+                          labelling issue: a 10-unit unimported batch was
+                          counted in its own historical baseline, dragging
+                          an otherwise-100% sell-through rate down to a
+                          misleading 83% even though every listing ever
+                          made under that name had sold.
      fractionWithinT   = of the items that DID sell, what fraction sold
                           within the chosen timeframe (from their own
-                          dayListed -> daySold gap) — reuses the same
-                          FAST/MEDIUM tag percentile logic used elsewhere.
-     predictedUnits    = incomingQty * sellThroughRate * fractionWithinT
+                          dayListed -> daySold gap) — this is a SPEED
+                          metric (how fast do they sell once listed), not
+                          a second sell-through rate — can legitimately
+                          read differently from sellThroughRate, they're
+                          not measuring the same thing.
+     predictedUnits    = pipelineQty * sellThroughRate * fractionWithinT
      predictedRevenue  = predictedUnits * avgSoldPrice (historical, this name)
 
-   Bundle names with no sales history at all are shown but excluded from
-   the totals — nothing to extrapolate from, so no number is fabricated.
+   Names with no sales history at all are shown but excluded from the
+   totals — nothing to extrapolate from, so no number is fabricated.
 ═══════════════════════════════════════════════════════════════ */
 function PredictionsTab({ stockData=[], listings=[] }) {
   const [timeframe, setTimeframe] = useState(30); // days
 
   const rows = useMemo(() => {
-    const incoming = stockData.filter(s => !s.imported && s.sellable > 0);
-    // Group incoming bundles by name (same "restocked under a new bundleSku" case as Restock Intelligence)
+    const incoming      = stockData.filter(s => !s.imported && s.sellable > 0);
+    const unlistedItems = listings.filter(l => !l.listed && !l.sold);
+
     const byName = {};
-    incoming.forEach(s => {
-      const name = (s.name||"").trim();
+    const bump = (name, incomingQty, unlistedQty) => {
+      name = (name||"").trim();
       if (!name) return;
-      if (!byName[name]) byName[name] = { name, incomingQty: 0, costPer: s.costPer||0 };
-      byName[name].incomingQty += s.sellable;
-    });
+      if (!byName[name]) byName[name] = { name, incomingQty: 0, unlistedQty: 0 };
+      byName[name].incomingQty += incomingQty;
+      byName[name].unlistedQty += unlistedQty;
+    };
+    incoming.forEach(s => bump(s.name, s.sellable, 0));
+    unlistedItems.forEach(l => bump(l.name, 0, 1));
 
     return Object.values(byName).map(g => {
+      const pipelineQty = g.incomingQty + g.unlistedQty;
       const historicalItems = listings.filter(l => (l.name||"").trim() === g.name);
       const historicalSold  = historicalItems.filter(l => l.sold);
+      // Only bundles actually imported (turned into real listings — i.e.
+      // given a genuine chance to sell) count toward the baseline. Stock
+      // still sitting unimported/unlisted hasn't had that chance yet, so
+      // including it here would understate how well this product really sells.
       const sellableHistoric = stockData
-        .filter(s => (s.name||"").trim() === g.name)
+        .filter(s => (s.name||"").trim() === g.name && s.imported)
         .reduce((a,s)=>a+(s.sellable||0), 0);
 
       if (!historicalSold.length || !sellableHistoric) {
-        return { ...g, hasData:false, sellThroughRate:null, fractionWithinT:null,
+        return { ...g, pipelineQty, hasData:false, sellThroughRate:null, fractionWithinT:null,
                  avgSoldPrice:null, predictedUnits:0, predictedRevenue:0 };
       }
 
@@ -8178,10 +8240,10 @@ function PredictionsTab({ stockData=[], listings=[] }) {
         : 0;
       const avgSoldPrice = historicalSold.reduce((a,l)=>a+(l.soldPrice||0),0) / historicalSold.length;
 
-      const predictedUnits   = g.incomingQty * sellThroughRate * fractionWithinT;
+      const predictedUnits   = pipelineQty * sellThroughRate * fractionWithinT;
       const predictedRevenue = predictedUnits * avgSoldPrice;
 
-      return { ...g, hasData:true, sellThroughRate, fractionWithinT, avgSoldPrice,
+      return { ...g, pipelineQty, hasData:true, sellThroughRate, fractionWithinT, avgSoldPrice,
                 predictedUnits, predictedRevenue };
     }).sort((a,b) => b.predictedRevenue - a.predictedRevenue);
   }, [stockData, listings, timeframe]);
@@ -8190,19 +8252,20 @@ function PredictionsTab({ stockData=[], listings=[] }) {
   const noData       = rows.filter(r => !r.hasData);
   const totalUnits   = withData.reduce((a,r)=>a+r.predictedUnits, 0);
   const totalRevenue = withData.reduce((a,r)=>a+r.predictedRevenue, 0);
-  const totalIncomingQty = rows.reduce((a,r)=>a+r.incomingQty, 0);
+  const totalPipelineQty = rows.reduce((a,r)=>a+r.pipelineQty, 0);
 
   return (
     <div>
       <div className="sh" style={{marginBottom:8}}>
         <div className="st">Predictions
           <InfoTip>
-            Forecasts revenue from <strong>incoming stock</strong> (bundles received but not yet turned into listings — see "Imported" on the Stock tab) using the historical sell-through rate of past bundles with the <strong>same product name</strong>.<br/><br/>
-            Predicted units = incoming qty × (historical % that ever sells) × (historical % that sells within your chosen timeframe).<br/><br/>
-            Bundle names with no sales history yet are shown separately — there's nothing to extrapolate from, so no number is guessed for them.
+            Forecasts revenue from everything not yet actively for sale under a name: <strong>incoming stock</strong> (bundles received but not yet turned into listings — "Imported" on the Stock tab; "not yet received" is the same thing here) <strong>plus unlisted items</strong> (listings already created but not yet posted to any platform — same items Listing Data's "To Be Listed" tab tracks) — using the historical sell-through rate of past bundles with the <strong>same product name</strong>.<br/><br/>
+            Predicted units = pipeline qty × (historical % that ever sells) × (historical % that sells within your chosen timeframe).<br/><br/>
+            "Historical sell-through" and "Sells within Nd" measure different things, so they can legitimately disagree: the first is what fraction of everything ever stocked under this name has sold at all; the second is, of the ones that DID sell, how fast they went. A name can be "100% sells within 30 days" (every sale happens fast) while historical sell-through is lower (because some stock hasn't been listed yet — that unlisted/incoming stock is deliberately excluded from the historical rate itself, so it doesn't drag down a name's own track record).<br/><br/>
+            Names with no sales history yet are shown separately — there's nothing to extrapolate from, so no number is guessed for them.
           </InfoTip>
         </div>
-        <div className="ss" style={{marginLeft:4}}>Based on incoming (unimported) stock + historical sell-through by bundle name</div>
+        <div className="ss" style={{marginLeft:4}}>Based on incoming stock + unlisted items + historical sell-through by product name</div>
       </div>
 
       <div style={{display:"flex",gap:6,marginBottom:14}}>
@@ -8218,10 +8281,10 @@ function PredictionsTab({ stockData=[], listings=[] }) {
 
       <div className="kg kg4" style={{marginBottom:14}}>
         {[
-          {l:"Incoming Units",       v:totalIncomingQty,           s:"across all unimported bundles"},
+          {l:"Pipeline Units",       v:totalPipelineQty,           s:"incoming stock + unlisted items"},
           {l:"Predicted Units Sold", v:Math.round(totalUnits*10)/10, s:`within ${timeframe} days`},
           {l:"Predicted Revenue",    v:fmt(totalRevenue),          s:`within ${timeframe} days`},
-          {l:"No History Yet",      v:noData.length,               s:"bundle names, excluded above"},
+          {l:"No History Yet",      v:noData.length,               s:"product names, excluded above"},
         ].map(k=>(
           <div key={k.l} className="kc">
             <div className="kl">{k.l}</div>
@@ -8233,9 +8296,9 @@ function PredictionsTab({ stockData=[], listings=[] }) {
 
       {withData.length > 0 && (
         <div className="tw" style={{marginBottom:14}}><div className="ts">
-          <table className="tbl">
+          <table className="tbl tbl-wrap-th">
             <thead><tr>
-              <th>Bundle</th><th>Incoming Qty</th><th>Historical Sell-Through</th>
+              <th>Product Name</th><th>Pipeline Qty</th><th>Historical Sell-Through</th>
               <th>Sells within {timeframe}d</th><th>Avg Sold Price</th>
               <th>Predicted Units</th><th>Predicted Revenue</th>
             </tr></thead>
@@ -8243,7 +8306,12 @@ function PredictionsTab({ stockData=[], listings=[] }) {
               {withData.map((r,i)=>(
                 <tr key={i}>
                   <td style={{fontWeight:700,fontSize:11,whiteSpace:"normal",wordBreak:"break-word",maxWidth:160}}>{r.name}</td>
-                  <td>{r.incomingQty}</td>
+                  <td>
+                    {r.pipelineQty}
+                    {(r.incomingQty>0 && r.unlistedQty>0) && (
+                      <div className="ss" style={{fontWeight:400}}>{r.incomingQty} incoming + {r.unlistedQty} unlisted</div>
+                    )}
+                  </td>
                   <td>{Math.round(r.sellThroughRate*100)}%</td>
                   <td>{Math.round(r.fractionWithinT*100)}%</td>
                   <td>{fmt(r.avgSoldPrice)}</td>
@@ -8258,11 +8326,11 @@ function PredictionsTab({ stockData=[], listings=[] }) {
 
       {noData.length > 0 && (
         <div className="tw" style={{padding:"14px 16px"}}>
-          <div style={{fontWeight:700,fontSize:12,color:"var(--txm)",marginBottom:8}}>Incoming — no sales history yet</div>
+          <div style={{fontWeight:700,fontSize:12,color:"var(--txm)",marginBottom:8}}>In the pipeline — no sales history yet</div>
           <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
             {noData.map((r,i)=>(
               <span key={i} style={{fontSize:11,background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:20,padding:"4px 11px",color:"var(--txm)"}}>
-                {r.name} <span style={{color:"var(--txd)"}}>({r.incomingQty} incoming)</span>
+                {r.name} <span style={{color:"var(--txd)"}}>({r.pipelineQty} pending)</span>
               </span>
             ))}
           </div>
@@ -8271,7 +8339,7 @@ function PredictionsTab({ stockData=[], listings=[] }) {
 
       {rows.length === 0 && (
         <div className="tw" style={{padding:"24px",textAlign:"center",color:"var(--txd)",fontSize:12}}>
-          No incoming stock right now — every received bundle has already had listings created ("Imported" ticked on the Stock tab).
+          Nothing in the pipeline right now — no unimported stock and no unlisted items waiting to be posted.
         </div>
       )}
     </div>
