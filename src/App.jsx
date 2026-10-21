@@ -6495,7 +6495,7 @@ function Dashboard({ listings, stockData, weeklyGoal: wgProp, setWeeklyGoal, mon
       </div>
 
       {dashTab==="brief" ? (
-        <MorningBriefTab listings={listings} liveData={liveData} setLiveData={setLiveData} hardSave={hardSave} />
+        <MorningBriefTab liveData={liveData} />
       ) : (
       <>
       {/* KPI cards */}
@@ -6557,14 +6557,82 @@ function Dashboard({ listings, stockData, weeklyGoal: wgProp, setWeeklyGoal, mon
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   MORNING BRIEF — Optimisation Plan Phase 3
-   Reads Walter's walter_schedule table (Phase 2) for "today's sessions";
-   everything else is derived from listings already in memory. "Sold since
-   last brief" is tracked via a liveData.lastBriefAt timestamp, stamped
-   each time this tab is opened — captured into a ref BEFORE being
-   overwritten so this same visit's stamp doesn't blank its own comparison.
+   MORNING BRIEF
+   A once-a-day snapshot stored in liveData.morningBrief. App() builds a
+   new one the first time the app is opened after 8am each day (see the
+   generation effect in App) — opening the tab never regenerates it, and
+   before 8am the previous day's brief is still shown. "Since last brief"
+   windows run from the previous snapshot's generatedAt. Only Today's
+   Walter Sessions stays live, read from walter_schedule on each view.
 ═══════════════════════════════════════════════════════════════ */
-function MorningBriefTab({ listings, liveData, setLiveData, hardSave }) {
+const BRIEF_HOUR = 8;
+
+// Most recent 8:00am boundary — a snapshot older than this is due for regeneration.
+const briefDueSlot = () => {
+  const d = new Date();
+  d.setHours(BRIEF_HOUR, 0, 0, 0);
+  if (new Date() < d) d.setDate(d.getDate() - 1);
+  return d;
+};
+
+const buildMorningBrief = (listings, prevAt, slowMoverDays) => {
+  const nowIso   = new Date().toISOString();
+  const prevDate = prevAt ? new Date(prevAt).toISOString().slice(0, 10) : null;
+  const today    = getToday();
+  const slim     = (l, extra = {}) => ({ sku: l.sku, name: l.name, ...extra });
+
+  // Measurements recorded = physically handled/photographed (same signal the
+  // old brief used). Ready is now per platform: not sold, and not already on it.
+  const ready = listings.filter(l => !l.sold && !!(l.length || l.pitToPit));
+  const draftPending = listings.filter(l => {
+    if (l.sold || !l.vinted_draft_account) return false;
+    return !(l.platforms || []).includes(l.vinted_draft_account);
+  });
+
+  const sold = prevDate
+    ? listings.filter(l => l.sold && l.daySold && l.daySold >= prevDate)
+        .sort((a, b) => String(b.daySold).localeCompare(String(a.daySold)))
+        .map(l => slim(l, { soldPrice: l.soldPrice || 0, platform: l.platform || "" }))
+    : [];
+
+  // Listed since the last brief — per-platform dates when present, else dayListed.
+  const listed = prevDate ? listings.filter(l => !l.sold).map(l => {
+    const dates  = l.platformDates || {};
+    const labels = Object.keys(dates).filter(k => dates[k] >= prevDate);
+    if (!labels.length && !Object.keys(dates).length && l.dayListed && l.dayListed >= prevDate) {
+      labels.push(l.platform || "listed");
+    }
+    if (!labels.length) return null;
+    return slim(l, { labels, fromDraft: !!(l.vinted_draft_confirmed_at && l.vinted_draft_confirmed_at.slice(0, 10) >= prevDate) });
+  }).filter(Boolean) : [];
+
+  const soldWk = listings.filter(l => l.sold && l.daySold && l.daySold >= WEEK_START);
+  const slow = listings
+    .filter(l => l.listed && !l.sold && l.dayListed)
+    .map(l => ({ sku: l.sku, name: l.name, daysLive: Math.max(0, Math.floor((new Date(today) - new Date(l.dayListed)) / 86400000)) }))
+    .filter(l => l.daysLive >= slowMoverDays)
+    .sort((a, b) => b.daysLive - a.daysLive);
+
+  return {
+    generatedAt: nowIso,
+    prevAt: prevAt || null,
+    ready: {
+      ebay:   ready.filter(l => !listingHasFamily(l, "eBay")).length,
+      depop:  ready.filter(l => !listingHasFamily(l, "Depop")).length,
+      vinted: ready.filter(l => !listingHasFamily(l, "Vinted") && !l.vinted_draft_account).length,
+      vintedDrafts: draftPending.length,
+    },
+    draftPending: draftPending.map(l => slim(l, { account: l.vinted_draft_account })),
+    sold, listed,
+    weekSold: soldWk.length,
+    weekRevenue: soldWk.reduce((a, l) => a + (l.soldPrice || 0), 0),
+    slowMoverDays,
+    slowTotal: slow.length,
+    slow: slow.slice(0, 20),
+  };
+};
+
+function MorningBriefTab({ liveData }) {
   const [schedules,     setSchedules]     = useState([]);
   const [loadingSched,  setLoadingSched]  = useState(true);
   const [schedError,    setSchedError]    = useState("");
@@ -6584,41 +6652,7 @@ function MorningBriefTab({ listings, liveData, setLiveData, hardSave }) {
     })();
   }, []);
 
-  // Freeze the PREVIOUS brief's timestamp before this visit overwrites it —
-  // useRef's initial value is only used on the very first render, so this
-  // captures the pre-stamp value regardless of what liveData becomes after.
-  const prevBriefAtRef  = useRef(liveData?.lastBriefAt || null);
-  const briefGeneratedAt = useRef(new Date());
-  useEffect(() => {
-    const newLiveData = { ...liveData, lastBriefAt: briefGeneratedAt.current.toISOString() };
-    setLiveData(newLiveData);
-    hardSave?.({ liveData: newLiveData });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const soldSinceLastBrief = useMemo(() => {
-    const since = prevBriefAtRef.current;
-    if (!since) return [];
-    return listings
-      .filter(l => l.sold && l.daySold && new Date(l.daySold) >= new Date(since))
-      .sort((a,b) => new Date(b.daySold) - new Date(a.daySold));
-  }, [listings]);
-
-  const soldWk    = listings.filter(l => l.sold && l.daySold && l.daySold >= WEEK_START);
-  const wkRevenue = soldWk.reduce((a,l)=>a+(l.soldPrice||0),0);
-  const active       = listings.filter(l => l.listed && !l.sold);
-  // Having a measurement recorded (length and/or pit-to-pit) means the item
-  // was physically handled and photographed to take it — a more reliable
-  // "photographed" signal in this workflow than the photoUrl field.
-  const readyToList  = listings.filter(l => !l.listed && !l.sold && !!(l.length || l.pitToPit));
-
-  const slowMoverDays = getAS(liveData).slowMoverDays || 14;
-  const slowMovers = useMemo(() => listings
-    .filter(l => l.listed && !l.sold && l.dayListed)
-    .map(l => ({ ...l, daysLive: Math.max(0, Math.floor((new Date(TODAY)-new Date(l.dayListed))/86400000)) }))
-    .filter(l => l.daysLive >= slowMoverDays)
-    .sort((a,b) => b.daysLive - a.daysLive)
-  , [listings, slowMoverDays]);
+  const b = liveData?.morningBrief;
 
   // 0=Mon..6=Sun — matches Walter's days_of_week convention (Python weekday())
   const todayIdx = (new Date().getDay() + 6) % 7;
@@ -6632,31 +6666,57 @@ function MorningBriefTab({ listings, liveData, setLiveData, hardSave }) {
   };
   const statusColour = (st) => st==="Done"?"var(--gn)":st==="Failed"?"var(--ac)":st==="Skipped"?"var(--am)":"var(--txm)";
 
-  const generatedLabel = briefGeneratedAt.current.toLocaleString("en-GB",
+  if (!b) {
+    return (
+      <div>
+        <div className="sh" style={{marginBottom:8}}><div className="st">Morning Brief</div></div>
+        <div className="tw" style={{padding:"16px 18px",fontSize:12,color:"var(--txd)"}}>Preparing today's brief…</div>
+      </div>
+    );
+  }
+
+  const generatedLabel = new Date(b.generatedAt).toLocaleString("en-GB",
     { weekday:"short", day:"numeric", month:"short", hour:"2-digit", minute:"2-digit" });
+  const fmtDate = (iso) => new Date(iso).toLocaleDateString("en-GB", { weekday:"short", day:"numeric", month:"short" });
+  const noPrev = !b.prevAt;
 
   return (
     <div>
       <div className="sh" style={{marginBottom:8}}>
         <div className="st">Morning Brief</div>
-        <div className="ss" style={{marginLeft:4}}>Generated {generatedLabel}</div>
+        <div className="ss" style={{marginLeft:4}}>Generated {generatedLabel} · refreshes on first open after {BRIEF_HOUR}am</div>
       </div>
 
-      {/* Stats row */}
+      {/* Ready to list per platform + Vinted drafts */}
       <div className="kg kg4" style={{marginBottom:16}}>
         {[
-          {l:"Sold This Week",    v:soldWk.length,       s:"items"},
-          {l:"Revenue This Week", v:fmt(wkRevenue),       s:`w/c ${WEEK_START}`},
-          {l:"Active Listings",   v:active.length,        s:"currently live"},
-          {l:"Ready to List",     v:readyToList.length,   s:"measured, not listed"},
+          {l:"Ready: eBay",   v:b.ready.ebay,   s:"photographed, not on eBay"},
+          {l:"Ready: Depop",  v:b.ready.depop,  s:"photographed, not on Depop"},
+          {l:"Ready: Vinted", v:b.ready.vinted, s:"photographed, no draft/listing"},
+          {l:"✏️ Vinted Drafts", v:b.ready.vintedDrafts, s:"saved, not live yet", draft:true},
         ].map(k=>(
-          <div key={k.l} className="kc">
-            <div className="kl">{k.l}</div>
-            <div className="kv" style={{fontSize:20}}>{k.v}</div>
+          <div key={k.l} className="kc" style={k.draft ? {background:"#fdf0d5",border:"1.5px dashed #d9922b"} : undefined}>
+            <div className="kl" style={k.draft?{color:"#7a4b00"}:undefined}>{k.l}</div>
+            <div className="kv" style={{fontSize:20,...(k.draft?{color:"#7a4b00"}:{})}}>{k.v}</div>
             <div className="ks">{k.s}</div>
           </div>
         ))}
       </div>
+
+      {/* Pending Vinted drafts */}
+      {b.draftPending.length > 0 && (
+        <div className="tw" style={{padding:"16px 18px",marginBottom:16}}>
+          <div style={{fontWeight:900,fontSize:14,marginBottom:10}}>Vinted drafts pending ({b.draftPending.length})</div>
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            {b.draftPending.map(l => (
+              <div key={l.sku} style={{display:"flex",justifyContent:"space-between",fontSize:12}}>
+                <span><span className="sku">{l.sku}</span> {l.name}</span>
+                <span style={{color:"var(--txm)"}}>{l.account}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Today's Walter sessions */}
       <div className="tw" style={{padding:"16px 18px",marginBottom:16}}>
@@ -6690,14 +6750,14 @@ function MorningBriefTab({ listings, liveData, setLiveData, hardSave }) {
 
       {/* Sold since last brief */}
       <div className="tw" style={{padding:"16px 18px",marginBottom:16}}>
-        <div style={{fontWeight:900,fontSize:14,marginBottom:10}}>Sold Since Last Brief</div>
-        {!prevBriefAtRef.current ? (
-          <div style={{fontSize:12,color:"var(--txd)"}}>First time viewing the Morning Brief — nothing to compare against yet. Come back later to see what sold since this visit.</div>
-        ) : soldSinceLastBrief.length === 0 ? (
-          <div style={{fontSize:12,color:"var(--txd)"}}>Nothing sold since your last visit.</div>
+        <div style={{fontWeight:900,fontSize:14,marginBottom:10}}>Sold Since Last Brief{b.prevAt ? ` (${fmtDate(b.prevAt)})` : ""}</div>
+        {noPrev ? (
+          <div style={{fontSize:12,color:"var(--txd)"}}>This is the first brief — nothing to compare against yet. Tomorrow's will show what sold since this one.</div>
+        ) : b.sold.length === 0 ? (
+          <div style={{fontSize:12,color:"var(--txd)"}}>Nothing sold since the last brief.</div>
         ) : (
           <div style={{display:"flex",flexDirection:"column",gap:6}}>
-            {soldSinceLastBrief.map(l => (
+            {b.sold.map(l => (
               <div key={l.sku} style={{display:"flex",justifyContent:"space-between",fontSize:12}}>
                 <span><span className="sku">{l.sku}</span> {l.name}</span>
                 <span style={{fontWeight:700,color:"var(--gn)"}}>{fmt(l.soldPrice)} on {l.platform}</span>
@@ -6707,37 +6767,41 @@ function MorningBriefTab({ listings, liveData, setLiveData, hardSave }) {
         )}
       </div>
 
-      {/* Ready to list */}
+      {/* Listed since last brief */}
       <div className="tw" style={{padding:"16px 18px",marginBottom:16}}>
-        <div style={{fontWeight:900,fontSize:14,marginBottom:10}}>Ready to List ({readyToList.length})</div>
-        {readyToList.length === 0 ? (
-          <div style={{fontSize:12,color:"var(--txd)"}}>Nothing waiting — every photographed item is already listed.</div>
+        <div style={{fontWeight:900,fontSize:14,marginBottom:10}}>Listed Since Last Brief{b.prevAt ? ` (${fmtDate(b.prevAt)})` : ""}</div>
+        {noPrev ? (
+          <div style={{fontSize:12,color:"var(--txd)"}}>This is the first brief — nothing to compare against yet.</div>
+        ) : b.listed.length === 0 ? (
+          <div style={{fontSize:12,color:"var(--txd)"}}>Nothing new has gone live since the last brief.</div>
         ) : (
-          <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
-            {readyToList.slice(0,30).map(l => (
-              <span key={l.sku} style={{fontSize:11,background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:20,padding:"4px 11px",color:"var(--txm)"}}>
-                {l.sku} — {l.name}
-              </span>
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            {b.listed.map(l => (
+              <div key={l.sku} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,gap:8}}>
+                <span><span className="sku">{l.sku}</span> {l.name}
+                  {l.fromDraft && <span style={{fontSize:9,fontWeight:700,background:"#fdf0d5",color:"#7a4b00",borderRadius:10,padding:"2px 7px",marginLeft:6}}>VINTED DRAFT NOW LIVE</span>}
+                </span>
+                <span style={{fontWeight:700,color:"var(--gn)",textAlign:"right"}}>{l.labels.join(", ")}</span>
+              </div>
             ))}
-            {readyToList.length > 30 && <span style={{fontSize:11,color:"var(--txd)"}}>+{readyToList.length-30} more</span>}
           </div>
         )}
       </div>
 
       {/* Slow movers */}
       <div className="tw" style={{padding:"16px 18px"}}>
-        <div style={{fontWeight:900,fontSize:14,marginBottom:10}}>Slow Movers ({slowMoverDays}+ days, {slowMovers.length})</div>
-        {slowMovers.length === 0 ? (
+        <div style={{fontWeight:900,fontSize:14,marginBottom:10}}>Slow Movers ({b.slowMoverDays}+ days, {b.slowTotal})</div>
+        {b.slow.length === 0 ? (
           <div style={{fontSize:12,color:"var(--txd)"}}>Nothing's been sitting unsold that long.</div>
         ) : (
           <div style={{display:"flex",flexDirection:"column",gap:6}}>
-            {slowMovers.slice(0,20).map(l => (
+            {b.slow.map(l => (
               <div key={l.sku} style={{display:"flex",justifyContent:"space-between",fontSize:12}}>
                 <span><span className="sku">{l.sku}</span> {l.name}</span>
                 <span style={{fontWeight:700,color:"var(--ac)"}}>{l.daysLive}d</span>
               </div>
             ))}
-            {slowMovers.length > 20 && <div style={{fontSize:11,color:"var(--txd)",marginTop:4}}>+{slowMovers.length-20} more</div>}
+            {b.slowTotal > b.slow.length && <div style={{fontSize:11,color:"var(--txd)",marginTop:4}}>+{b.slowTotal-b.slow.length} more</div>}
           </div>
         )}
       </div>
@@ -10258,6 +10322,24 @@ export default function App() {
     setHardSaving(false);
     return ok;
   }, [listings, stockData, weeklyGoal, monthlyGoal, liveData]);
+
+  /* ── Morning Brief — generate once per day, on first app open after 8am ──
+     Waits until the real data has loaded and the user is signed in (an empty
+     pre-load listings array would otherwise be snapshotted as "the brief").
+     liveDataRef is read instead of liveData so storing the brief doesn't
+     retrigger this effect. */
+  const briefGenRef = useRef(false);
+  useEffect(() => {
+    if (!session || storageStatus !== "saved" || !listings.length || briefGenRef.current) return;
+    const existing = liveDataRef.current?.morningBrief;
+    if (existing && new Date(existing.generatedAt) >= briefDueSlot()) return;
+    briefGenRef.current = true;
+    const brief = buildMorningBrief(listings, existing?.generatedAt || null, getAS(liveDataRef.current).slowMoverDays || 14);
+    const next = { ...liveDataRef.current, morningBrief: brief };
+    setLiveData(next);
+    hardSave({ liveData: next });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session, storageStatus, listings.length]);
 
   /* ── Manual refresh — SAFE: only replaces if remote is newer ── */
   const [refreshing, setRefreshing] = useState(false);
