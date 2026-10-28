@@ -4488,7 +4488,202 @@ function ListingRecap({ listings, platFilt, setPlatFilt }) {
   );
 }
 
-function MarkAsListed({ listings, setListings, customPlatforms, liveData, hardSave }) {
+/* ═══════════════════════════════════════════════════════════════
+   LISTING HISTORY + LISTING QC (Mark as Listed → "Listing History" tab)
+   Walter's reconcile scan (agents/listing_reconcile.py) finds items that are
+   LIVE on Vinted / eBay / Depop but not marked listed here, auto-marks exact
+   SKU matches, and writes anything needing a human to the listing_qc table
+   (phase8_listing_qc.sql). This tab shows those as confirm/dismiss cards —
+   same idea as Sales History's "Needs Confirmation" — above a history of
+   what was listed and when, derived from each item's platformDates.
+═══════════════════════════════════════════════════════════════ */
+const QC_KINDS = {
+  auto_marked:    { label:"Auto-marked",   colour:"var(--gn)", help:"Walter found this live and marked it listed — confirm it's right, or undo." },
+  unknown_sku:    { label:"Unknown SKU",   colour:"var(--am)", help:"A SKU was read from this live listing but it isn't in Archive District." },
+  no_sku:         { label:"No SKU found",  colour:"var(--am)", help:"Live, but Walter couldn't read a SKU from the listing text or first photo." },
+  sold_but_live:  { label:"Sold but live", colour:"var(--ac)", help:"Marked sold here but still live — it needs delisting." },
+  duplicate_live: { label:"Duplicate",     colour:"var(--am)", help:"The same SKU is live more than once on this platform." },
+};
+const QC_ID_FIELD = { Vinted:"vinted_item_id", eBay:"ebay_item_id", Depop:"depop_product_id" };
+
+function ListingHistoryTab({ listings=[], setListings, hardSave }) {
+  const [rows,     setRows]     = useState([]);
+  const [loading,  setLoading]  = useState(true);
+  const [qcError,  setQcError]  = useState("");
+  const [linkText, setLinkText] = useState({});   // qc id -> typed SKU
+  const [linkErr,  setLinkErr]  = useState({});   // qc id -> message
+  const [platFilter, setPlatFilter] = useState("All");
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase.from("listing_qc").select("*").eq("status","open").order("found_at",{ascending:false}).limit(300);
+      if (error) throw error;
+      setRows(data || []); setQcError("");
+    } catch (e) {
+      setRows([]);
+      setQcError(["42P01","PGRST205"].includes(e?.code) ? "" : (e.message || "Couldn't load the review list"));
+    } finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const resolve = async (row, status) => {
+    setRows(prev => prev.filter(r => r.id !== row.id));
+    await supabase.from("listing_qc").update({ status, resolved_at:new Date().toISOString() }).eq("id", row.id);
+  };
+
+  const bySku = useMemo(() => Object.fromEntries(listings.map(l => [l.sku, l])), [listings]);
+
+  // Undo an auto-mark: take that account back off the item.
+  const undoAuto = async (row) => {
+    const label = row.account;
+    const next = listings.map(l => {
+      if (l.sku !== row.sku) return l;
+      const platforms = (l.platforms||[]).filter(p => p !== label);
+      const dates = { ...(l.platformDates||{}) }; delete dates[label];
+      const idField = QC_ID_FIELD[row.platform];
+      const out = { ...l, platforms, platformDates:dates, listed: platforms.length > 0, updatedAt:new Date().toISOString() };
+      if (idField && String(l[idField]||"") === String(row.platform_item_id)) out[idField] = null;
+      return out;
+    });
+    setListings(next); hardSave?.({ listings: next });
+    await resolve(row, "undone");
+  };
+
+  // Unknown / unreadable live item: the user tells us which SKU it is.
+  const linkSku = async (row) => {
+    const sku = (linkText[row.id]||"").trim().toUpperCase();
+    const item = bySku[sku];
+    if (!item) { setLinkErr(p => ({...p, [row.id]: `No item with SKU ${sku||"…"}`})); return; }
+    const today = getToday();
+    const next = listings.map(l => {
+      if (l.sku !== sku) return l;
+      const platforms = (l.platforms||[]).includes(row.account) ? l.platforms : [ ...(l.platforms||[]), row.account ];
+      const idField = QC_ID_FIELD[row.platform];
+      return { ...l, listed:true, platforms, platformDates:{ ...(l.platformDates||{}), [row.account]: today },
+               ...(idField ? { [idField]: row.platform_item_id } : {}), listed_via:"manual-link", updatedAt:new Date().toISOString() };
+    });
+    setListings(next); hardSave?.({ listings: next });
+    await resolve(row, "confirmed");
+  };
+
+  const history = useMemo(() => {
+    const out = [];
+    listings.forEach(l => {
+      const d = l.platformDates || {};
+      const latest = Object.values(d).sort().slice(-1)[0];
+      Object.keys(d).forEach(label => out.push({ sku:l.sku, name:l.name, label, date:d[label], auto: l.listed_via==="scan" && d[label]===latest }));
+    });
+    return out.sort((a,b) => String(b.date).localeCompare(String(a.date)) || a.sku.localeCompare(b.sku));
+  }, [listings]);
+  const platFamilies = useMemo(() => [...new Set(history.map(h => getPlatFamily(h.label)))].sort(), [history]);
+  const shownHistory = (platFilter==="All" ? history : history.filter(h => getPlatFamily(h.label)===platFilter)).slice(0,150);
+
+  const btn = (bg, col, bd) => ({ background:bg, color:col, border:`1px solid ${bd}`, borderRadius:"var(--r)", padding:"5px 11px", cursor:"pointer", fontSize:11, fontWeight:700 });
+  const quiet = btn("var(--sf2)","var(--txm)","var(--bdd)");
+  const good  = btn("var(--gnl)","var(--gn)","rgba(31,92,53,.2)");
+
+  return (
+    <div>
+      {qcError && <div style={{fontSize:12,color:"var(--ac)",marginBottom:12}}>{qcError}</div>}
+
+      {!loading && rows.length > 0 && (
+        <div className="tw" style={{padding:"14px 16px",marginBottom:16,border:"1px solid #f0c040"}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+            <span style={{fontSize:14}}>🔔</span>
+            <div style={{fontWeight:900,fontSize:13}}>Needs Checking ({rows.length})</div>
+            <button onClick={load} style={{...quiet,marginLeft:"auto"}}>↻ Refresh</button>
+          </div>
+          <div style={{fontSize:11,color:"var(--txd)",marginBottom:12}}>
+            Walter scans your live Vinted, eBay and Depop listings against Archive District. Anything it can't safely sort out on its own lands here.
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {rows.map(row => {
+              const k = QC_KINDS[row.kind] || { label:row.kind, colour:"var(--txm)", help:"" };
+              const item = bySku[row.sku];
+              const needsSku = row.kind==="unknown_sku" || row.kind==="no_sku";
+              return (
+                <div key={row.id} style={{background:"#fff8f0",border:"1px solid #f0c040",borderRadius:"var(--r2)",padding:"10px 12px"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                    <span style={{fontSize:10,fontWeight:700,color:k.colour,border:`1px solid ${k.colour}`,borderRadius:10,padding:"1px 8px"}}>{k.label}</span>
+                    {row.sku && <span className="sku">{row.sku}</span>}
+                    <span style={{fontWeight:700,fontSize:12}}>{item?.name || row.title || "Untitled listing"}</span>
+                    <span className="badge b-b" style={{fontSize:10}}>{row.account || row.platform}</span>
+                    {row.url && <a href={row.url} target="_blank" rel="noopener noreferrer" style={{fontSize:11,color:"var(--ac)",fontWeight:600,textDecoration:"none"}}>View listing ↗</a>}
+                  </div>
+                  <div style={{fontSize:11,color:"#7a4e0e",marginTop:4}}>{row.detail || k.help}</div>
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center",marginTop:8}}>
+                    {row.kind==="auto_marked" ? (<>
+                      <button onClick={()=>resolve(row,"confirmed")} style={good}>✓ Correct</button>
+                      <button onClick={()=>undoAuto(row)} style={quiet}>↩ Undo</button>
+                    </>) : needsSku ? (<>
+                      <input className="finp" placeholder="Which SKU? e.g. A700" value={linkText[row.id]||""}
+                        onChange={e=>setLinkText(p=>({...p,[row.id]:e.target.value}))} style={{width:150}} />
+                      <button onClick={()=>linkSku(row)} style={good}>✓ Mark listed</button>
+                      <button onClick={()=>resolve(row,"dismissed")} style={quiet}>Dismiss</button>
+                    </>) : (<>
+                      <button onClick={()=>resolve(row,"confirmed")} style={good}>✓ Sorted</button>
+                      <button onClick={()=>resolve(row,"dismissed")} style={quiet}>Dismiss</button>
+                    </>)}
+                    {linkErr[row.id] && <span style={{fontSize:11,color:"var(--ac)"}}>{linkErr[row.id]}</span>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10,flexWrap:"wrap"}}>
+        <div style={{fontWeight:900,fontSize:14}}>Listing History</div>
+        <select className="fs" value={platFilter} onChange={e=>setPlatFilter(e.target.value)}>
+          <option value="All">All platforms</option>
+          {platFamilies.map(f => <option key={f} value={f}>{f}</option>)}
+        </select>
+        <div style={{fontSize:11,color:"var(--txd)"}}>Latest 150</div>
+      </div>
+      <div className="tw"><div className="ts">
+        <table className="tbl">
+          <thead><tr><th>Date</th><th>SKU</th><th>Item</th><th>Listed on</th><th>How</th></tr></thead>
+          <tbody>
+            {shownHistory.map((h,i) => (
+              <tr key={h.sku+h.label+i}>
+                <td>{h.date}</td>
+                <td><span className="sku">{h.sku}</span></td>
+                <td style={{whiteSpace:"normal",maxWidth:220}}>{h.name}</td>
+                <td>{h.label}</td>
+                <td>{h.auto ? <span className="badge b-g" style={{fontSize:10}}>Walter scan</span> : <span style={{color:"var(--txd)"}}>—</span>}</td>
+              </tr>
+            ))}
+            {shownHistory.length === 0 && <tr><td colSpan={5} style={{color:"var(--txd)"}}>Nothing recorded yet.</td></tr>}
+          </tbody>
+        </table>
+      </div></div>
+    </div>
+  );
+}
+
+function MarkAsListed(props) {
+  const [tab, setTab] = useState(props.initialTab || "mark");
+  useEffect(() => {
+    if (props.initialTab && props.initialTab !== "mark") { setTab(props.initialTab); props.onTabUsed?.(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.initialTab]);
+  return (
+    <div>
+      <div className="tab-bar" style={{marginBottom:16}}>
+        {[{id:"mark", label:"Mark as Listed"}, {id:"history", label:"Listing History"}].map(t => (
+          <div key={t.id} className={`tab ${tab===t.id?"active":""}`} onClick={()=>setTab(t.id)}>{t.label}</div>
+        ))}
+      </div>
+      {tab==="history"
+        ? <ListingHistoryTab listings={props.listings} setListings={props.setListings} hardSave={props.hardSave} />
+        : <MarkAsListedForm {...props} />}
+    </div>
+  );
+}
+
+function MarkAsListedForm({ listings, setListings, customPlatforms, liveData, hardSave }) {
   // Search all non-sold items — allows adding platforms to already-listed items
   const unlisted   = useMemo(() => listings.filter(l => !l.sold), [listings]);
   const _as        = getAS(liveData);
@@ -6447,7 +6642,7 @@ function GoalCard({ title, period, profit, revenue, profitGoal, setProfit, profi
   );
 }
 
-function Dashboard({ listings, stockData, weeklyGoal: wgProp, setWeeklyGoal, monthlyGoal: mgProp, setMonthlyGoal, weeklyRevGoal: wrgProp, setWeeklyRevGoal, monthlyRevGoal: mrgProp, setMonthlyRevGoal, liveData, setLiveData, hardSave }) {
+function Dashboard({ listings, stockData, weeklyGoal: wgProp, setWeeklyGoal, monthlyGoal: mgProp, setMonthlyGoal, weeklyRevGoal: wrgProp, setWeeklyRevGoal, monthlyRevGoal: mrgProp, setMonthlyRevGoal, liveData, setLiveData, hardSave, brief, onReviewListings }) {
   const [dashTab, setDashTab] = useState("dashboard");
   // Prefer goals from appSettings (Settings tab) — fall back to App state props
   const as = getAS(liveData);
@@ -6495,7 +6690,7 @@ function Dashboard({ listings, stockData, weeklyGoal: wgProp, setWeeklyGoal, mon
       </div>
 
       {dashTab==="brief" ? (
-        <MorningBriefTab liveData={liveData} />
+        <MorningBriefTab brief={brief} onReviewListings={onReviewListings} />
       ) : (
       <>
       {/* KPI cards */}
@@ -6558,7 +6753,7 @@ function Dashboard({ listings, stockData, weeklyGoal: wgProp, setWeeklyGoal, mon
 
 /* ═══════════════════════════════════════════════════════════════
    MORNING BRIEF
-   A once-a-day snapshot stored in liveData.morningBrief. App() builds a
+   A once-a-day snapshot stored in the morning_brief table. App() builds a
    new one the first time the app is opened after 8am each day (see the
    generation effect in App) — opening the tab never regenerates it, and
    before 8am the previous day's brief is still shown. "Since last brief"
@@ -6632,7 +6827,7 @@ const buildMorningBrief = (listings, prevAt, slowMoverDays) => {
   };
 };
 
-function MorningBriefTab({ liveData }) {
+function MorningBriefTab({ brief, onReviewListings }) {
   const [schedules,     setSchedules]     = useState([]);
   const [loadingSched,  setLoadingSched]  = useState(true);
   const [schedError,    setSchedError]    = useState("");
@@ -6652,7 +6847,18 @@ function MorningBriefTab({ liveData }) {
     })();
   }, []);
 
-  const b = liveData?.morningBrief;
+  // Walter's listing-scan results waiting for a human (live from the table, not part of the daily snapshot).
+  const [qcOpen, setQcOpen] = useState([]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data, error } = await supabase.from("listing_qc").select("kind").eq("status","open").limit(500);
+        if (!error) setQcOpen(data || []);
+      } catch { /* table not created yet — no card */ }
+    })();
+  }, []);
+
+  const b = brief;
 
   // 0=Mon..6=Sun — matches Walter's days_of_week convention (Python weekday())
   const todayIdx = (new Date().getDay() + 6) % 7;
@@ -6713,6 +6919,25 @@ function MorningBriefTab({ liveData }) {
                 <span><span className="sku">{l.sku}</span> {l.name}</span>
                 <span style={{color:"var(--txm)"}}>{l.account}</span>
               </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Needs checking — Walter's live-listing scan */}
+      {qcOpen.length > 0 && (
+        <div className="tw" style={{padding:"16px 18px",marginBottom:16,border:"1px solid #f0c040"}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+            <span style={{fontSize:14}}>🔔</span>
+            <div style={{fontWeight:900,fontSize:14}}>Needs checking ({qcOpen.length})</div>
+            <button onClick={()=>onReviewListings?.()} style={{marginLeft:"auto",background:"var(--ac)",color:"#fff",border:"none",borderRadius:"var(--r)",padding:"6px 12px",cursor:"pointer",fontSize:11,fontWeight:700}}>Review</button>
+          </div>
+          <div style={{fontSize:11,color:"var(--txd)",marginBottom:8}}>From Walter's scan of your live Vinted, eBay and Depop listings.</div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+            {Object.entries(qcOpen.reduce((a,r)=>{ a[r.kind]=(a[r.kind]||0)+1; return a; },{})).map(([k,n]) => (
+              <span key={k} style={{fontSize:11,background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:20,padding:"4px 11px",color:"var(--txm)"}}>
+                {(QC_KINDS[k]?.label || k)} · {n}
+              </span>
             ))}
           </div>
         </div>
@@ -10323,21 +10548,60 @@ export default function App() {
     return ok;
   }, [listings, stockData, weeklyGoal, monthlyGoal, liveData]);
 
-  /* ── Morning Brief — generate once per day, on first app open after 8am ──
-     Waits until the real data has loaded and the user is signed in (an empty
-     pre-load listings array would otherwise be snapshotted as "the brief").
-     liveDataRef is read instead of liveData so storing the brief doesn't
-     retrigger this effect. */
+  /* ── Morning Brief — one snapshot per day, first app open after 8am ──
+     Stored in its own morning_brief table (phase7_morning_brief.sql), NOT in
+     liveData: every full-state save writes the whole liveData object, so a
+     second device or an old cached copy of the app saving its own stale
+     liveData silently wiped the brief and it regenerated. A separate row can't
+     be clobbered that way, and the update below only succeeds for the first
+     device to claim the new day. Falls back to a per-device localStorage copy
+     if the table isn't there yet. */
+  const [brief, setBrief] = useState(() => {
+    try {
+      const c = JSON.parse(localStorage.getItem("ad_morning_brief") || "null");
+      return c && new Date(c.generatedAt) >= briefDueSlot() ? c : null;
+    } catch { return null; }
+  });
+  const [markListedTab, setMarkListedTab] = useState("mark");
   const briefGenRef = useRef(false);
   useEffect(() => {
     if (!session || storageStatus !== "saved" || !listings.length || briefGenRef.current) return;
-    const existing = liveDataRef.current?.morningBrief;
-    if (existing && new Date(existing.generatedAt) >= briefDueSlot()) return;
     briefGenRef.current = true;
-    const brief = buildMorningBrief(listings, existing?.generatedAt || null, getAS(liveDataRef.current).slowMoverDays || 14);
-    const next = { ...liveDataRef.current, morningBrief: brief };
-    setLiveData(next);
-    hardSave({ liveData: next });
+    const keep = (b) => { setBrief(b); try { localStorage.setItem("ad_morning_brief", JSON.stringify(b)); } catch {} };
+    (async () => {
+      const due = briefDueSlot();
+      const slowDays = getAS(liveDataRef.current).slowMoverDays || 14;
+      let prevAt = null;
+      try {
+        const { data: row, error } = await supabase.from("morning_brief").select("*").eq("id", 1).maybeSingle();
+        if (error) throw error;
+        if (row && new Date(row.generated_at) >= due) { keep(row.brief); return; }
+        prevAt = row?.generated_at || null;
+        const fresh = buildMorningBrief(listings, prevAt, slowDays);
+        let won;
+        if (row) {
+          const { data: upd, error: ue } = await supabase.from("morning_brief")
+            .update({ generated_at: fresh.generatedAt, brief: fresh }).eq("id", 1).lt("generated_at", due.toISOString()).select();
+          if (ue) throw ue;
+          won = !!(upd && upd.length);
+        } else {
+          const { error: ie } = await supabase.from("morning_brief").insert({ id: 1, generated_at: fresh.generatedAt, brief: fresh });
+          won = !ie;
+        }
+        if (won) { keep(fresh); return; }
+        // Another device claimed today's brief first — show theirs.
+        const { data: row2 } = await supabase.from("morning_brief").select("*").eq("id", 1).maybeSingle();
+        if (row2) { keep(row2.brief); return; }
+        throw new Error("morning_brief claim failed");
+      } catch (e) {
+        // Table missing or offline: build once for this device and remember it locally.
+        console.warn("[MorningBrief] shared store unavailable, using device copy:", e?.message || e);
+        let local = null;
+        try { local = JSON.parse(localStorage.getItem("ad_morning_brief") || "null"); } catch {}
+        if (local && new Date(local.generatedAt) >= due) { setBrief(local); return; }
+        keep(buildMorningBrief(listings, local?.generatedAt || prevAt, slowDays));
+      }
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, storageStatus, listings.length]);
 
@@ -10689,12 +10953,12 @@ export default function App() {
           </div>
 
           <div className="content">
-            {view==="dashboard"   && <Dashboard listings={listings} stockData={stockData} weeklyGoal={weeklyGoal} setWeeklyGoal={setWeeklyGoal} monthlyGoal={monthlyGoal} setMonthlyGoal={setMonthlyGoal} weeklyRevGoal={weeklyRevGoal} setWeeklyRevGoal={setWeeklyRevGoal} monthlyRevGoal={monthlyRevGoal} setMonthlyRevGoal={setMonthlyRevGoal} liveData={liveData} setLiveData={setLiveData} hardSave={hardSave} />}
+            {view==="dashboard"   && <Dashboard listings={listings} stockData={stockData} weeklyGoal={weeklyGoal} setWeeklyGoal={setWeeklyGoal} monthlyGoal={monthlyGoal} setMonthlyGoal={setMonthlyGoal} weeklyRevGoal={weeklyRevGoal} setWeeklyRevGoal={setWeeklyRevGoal} monthlyRevGoal={monthlyRevGoal} setMonthlyRevGoal={setMonthlyRevGoal} liveData={liveData} setLiveData={setLiveData} hardSave={hardSave} brief={brief} onReviewListings={() => { setMarkListedTab("history"); navigate("marklisted"); }} />}
             {view==="stock"       && <StockTab stockData={stockData} setStockData={setStockData} listings={listings} setListings={setListings} hardSave={hardSave} liveData={liveData} setLiveData={setLiveData} />}
             {view==="listings"    && <ListingsTab listings={listings} setListings={setListings} stockData={stockData} customPlatforms={customPlatforms} liveData={liveData} setLiveData={setLiveData} hardSave={hardSave} />}
             {view==="movement"    && <MovementTracker listings={listings} />}
             {view==="listingdata" && <ListingDataTab listings={listings} liveData={liveData} />}
-            {view==="marklisted"  && <MarkAsListed listings={listings} setListings={setListings} customPlatforms={customPlatforms} liveData={liveData} hardSave={hardSave} />}
+            {view==="marklisted"  && <MarkAsListed listings={listings} setListings={setListings} customPlatforms={customPlatforms} liveData={liveData} hardSave={hardSave} initialTab={markListedTab} onTabUsed={()=>setMarkListedTab("mark")} />}
             {view==="drafter"     && <ListingDrafter listings={listings} setListings={setListings} liveData={liveData} hardSave={hardSave} />}
             {view==="marksold"    && <QuickMarkSold listings={listings} setListings={setListings} customPlatforms={customPlatforms} liveData={liveData} hardSave={hardSave} />}
             {view==="shipping"    && <ShippingTab listings={listings} setListings={setListings} hardSave={hardSave} />}
