@@ -6082,7 +6082,10 @@ function SalesHistoryTab({ listings=[], setListings, hardSave }) {
         if (!l[`${key}_sold_detected`]) return;
         const snoozedAt = l[`${key}_sold_detected_snoozed_at`];
         if (snoozedAt && (now - new Date(snoozedAt).getTime()) < SNOOZE_HOURS*3600*1000) return;
-        out.push({ sku: l.sku, item: l, platformKey: key, platformLabel: label });
+        // Which account? Walter stamps the account it checked; older flags fall back to the item's own Vinted accounts.
+        const account = l[`${key}_sold_detected_account`]
+          || (key === "vinted" ? ((l.platforms||[]).filter(p => p.startsWith("Vinted")).join(" / ") || null) : null);
+        out.push({ sku: l.sku, item: l, platformKey: key, platformLabel: label, account });
       });
     });
     return out.sort((a,b) => a.sku.localeCompare(b.sku));
@@ -6106,7 +6109,7 @@ function SalesHistoryTab({ listings=[], setListings, hardSave }) {
       ...l,
       sold:true, soldPrice:price,
       profit: parseFloat((price - (l.price||0)).toFixed(2)),
-      platform: row.platformLabel, daySold: confirmDate, days, shipped:false,
+      platform: (row.account && !row.account.includes(" / ")) ? row.account : row.platformLabel, daySold: confirmDate, days, shipped:false,
       [`${row.platformKey}_sold_detected`]: false,
       [`${row.platformKey}_sold_price`]: price,
       [`${row.platformKey}_sold_date`]: confirmDate,
@@ -6116,7 +6119,7 @@ function SalesHistoryTab({ listings=[], setListings, hardSave }) {
     setConfirmingKey(null);
     sendPushNotification({
       title: "ArchiveDistrict",
-      body:  `💰 ${row.sku} confirmed sold on ${row.platformLabel} for ${fmt(price)}`,
+      body:  `💰 ${row.sku} confirmed sold on ${row.account || row.platformLabel} for ${fmt(price)}`,
       tag:   `sold-${row.sku}`,
       notifKey: "notifSold",
     });
@@ -6150,24 +6153,11 @@ function SalesHistoryTab({ listings=[], setListings, hardSave }) {
       .sort((a,b) => new Date(b.daySold||0) - new Date(a.daySold||0));
   }, [listings]);
 
-  // Flagging stamps when — gives the follow-up action ("Mark received") a
-  // real completion event to record, instead of the star just toggling a
-  // bare boolean with nothing to actually do once it's on.
-  const flagReviewPending = (sku) => {
-    setListings(prev => prev.map(l => l.sku===sku
-      ? { ...l, reviewPending:true, reviewFlaggedAt:new Date().toISOString(), reviewReceivedAt:null }
-      : l));
-  };
-  const markReviewReceived = (sku) => {
-    setListings(prev => prev.map(l => l.sku===sku
-      ? { ...l, reviewPending:false, reviewReceivedAt:new Date().toISOString() }
-      : l));
-  };
-  const unflagReviewPending = (sku) => {
-    setListings(prev => prev.map(l => l.sku===sku
-      ? { ...l, reviewPending:false, reviewFlaggedAt:null }
-      : l));
-  };
+  // Generic sales history: platform filter over the sold items, newest first.
+  const [salesPlat, setSalesPlat] = useState("All");
+  const salesFamilies = useMemo(() => [...new Set(sold.map(l => getPlatFamily(l.platform||"")).filter(Boolean))].sort(), [sold]);
+  const salesFiltered = useMemo(() => salesPlat==="All" ? sold : sold.filter(l => getPlatFamily(l.platform||"")===salesPlat), [sold, salesPlat]);
+  const shownSales = salesFiltered.slice(0, 200);
 
   return (
     <div>
@@ -6191,7 +6181,7 @@ function SalesHistoryTab({ listings=[], setListings, hardSave }) {
                       <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                         <span className="sku">{row.sku}</span>
                         <span style={{fontWeight:700,fontSize:12}}>{row.item.name}</span>
-                        <span className="badge b-b" style={{fontSize:10}}>{row.platformLabel}</span>
+                        <span className="badge b-b" style={{fontSize:10}}>{row.account || row.platformLabel}</span>
                       </div>
                       <div style={{fontSize:11,color:"#7a4e0e",marginTop:3}}>
                         Detected sold {row.item[`${row.platformKey}_sold_detected_at`]
@@ -6245,58 +6235,32 @@ function SalesHistoryTab({ listings=[], setListings, hardSave }) {
         </div>
       )}
 
-      <div style={{maxHeight:520,overflowY:"auto",display:"flex",flexDirection:"column",gap:1}}>
-        {sold.length===0 ? (
-          <div style={{padding:20,fontSize:12,color:"var(--txd)",textAlign:"center"}}>No sales recorded yet.</div>
-        ) : sold.map(l => {
-          const needsDelist = (l.platforms||[]).filter(p => p !== l.platform);
-          return (
-            <div key={l.sku} className="tw" style={{padding:"10px 14px",marginBottom:6}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10}}>
-                <div style={{minWidth:0,flex:1}}>
-                  <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                    <span className="sku">{l.sku}</span>
-                    <span style={{fontWeight:700,fontSize:12}}>{l.name}</span>
-                    {l.reviewPending && (
-                      <span className="badge" style={{background:"#fff8f0",color:"#7a4e0e",border:"1px solid #f0c040",fontSize:10,padding:"1px 7px",borderRadius:20}}>
-                        ⭐ Review pending{l.reviewFlaggedAt ? ` · flagged ${new Date(l.reviewFlaggedAt).toLocaleDateString("en-GB",{day:"numeric",month:"short"})}` : ""}
-                      </span>
-                    )}
-                    {!l.reviewPending && l.reviewReceivedAt && (
-                      <span className="badge" style={{background:"var(--gnl)",color:"var(--gn)",border:"1px solid rgba(31,92,53,.2)",fontSize:10,padding:"1px 7px",borderRadius:20}}>
-                        ✓ Review received {new Date(l.reviewReceivedAt).toLocaleDateString("en-GB",{day:"numeric",month:"short"})}
-                      </span>
-                    )}
-                  </div>
-                  <div style={{fontSize:11,color:"var(--txm)",marginTop:3}}>
-                    Sold on <strong>{l.platform||"—"}</strong> for <strong>{fmt(l.soldPrice)}</strong> · {l.daySold||"—"}
-                  </div>
-                  {needsDelist.length > 0 && (
-                    <div style={{fontSize:10,color:"#7a4e0e",marginTop:4}}>📋 Still needs delisting from: {needsDelist.join(", ")}</div>
-                  )}
-                </div>
-                {l.reviewPending ? (
-                  <div style={{display:"flex",gap:5,flexShrink:0}}>
-                    <button onClick={()=>markReviewReceived(l.sku)} title="Buyer left a review — mark it received"
-                      style={{background:"var(--gnl)",border:"1px solid rgba(31,92,53,.2)",borderRadius:"var(--r)",padding:"4px 9px",cursor:"pointer",fontSize:11,fontWeight:700,color:"var(--gn)"}}>
-                      ✓ Received
-                    </button>
-                    <button onClick={()=>unflagReviewPending(l.sku)} title="Remove the pending flag"
-                      style={{background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:"var(--r)",padding:"4px 8px",cursor:"pointer",fontSize:11,color:"var(--txm)"}}>
-                      ✕
-                    </button>
-                  </div>
-                ) : (
-                  <button onClick={()=>flagReviewPending(l.sku)} title="Flag as awaiting buyer review"
-                    style={{flexShrink:0,background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:"var(--r)",padding:"4px 9px",cursor:"pointer",fontSize:12}}>
-                    ⭐
-                  </button>
-                )}
-              </div>
-            </div>
-          );
-        })}
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10,flexWrap:"wrap"}}>
+        <div style={{fontWeight:900,fontSize:14}}>Sales History</div>
+        <select className="fs" value={salesPlat} onChange={e=>setSalesPlat(e.target.value)}>
+          <option value="All">All platforms</option>
+          {salesFamilies.map(f => <option key={f} value={f}>{f}</option>)}
+        </select>
+        <div style={{fontSize:11,color:"var(--txd)"}}>{shownSales.length} of {salesFiltered.length} · latest 200</div>
       </div>
+      <div className="tw"><div className="ts">
+        <table className="tbl">
+          <thead><tr><th>Date sold</th><th>SKU</th><th>Item</th><th>Sold on</th><th>Sold £</th><th>Profit</th></tr></thead>
+          <tbody>
+            {shownSales.map(l => (
+              <tr key={l.sku}>
+                <td>{l.daySold||"—"}</td>
+                <td><span className="sku">{l.sku}</span></td>
+                <td style={{whiteSpace:"normal",maxWidth:220}}>{l.name}</td>
+                <td>{l.platform||"—"}</td>
+                <td style={{fontWeight:700,color:"var(--gn)"}}>{fmt(l.soldPrice)}</td>
+                <td style={{color:(l.profit||0)<0?"var(--ac)":"var(--txm)"}}>{l.profit!=null ? fmt(l.profit) : "—"}</td>
+              </tr>
+            ))}
+            {shownSales.length === 0 && <tr><td colSpan={6} style={{color:"var(--txd)"}}>No sales recorded yet.</td></tr>}
+          </tbody>
+        </table>
+      </div></div>
     </div>
   );
 }
@@ -6862,7 +6826,9 @@ function MorningBriefTab({ brief, onReviewListings }) {
 
   // 0=Mon..6=Sun — matches Walter's days_of_week convention (Python weekday())
   const todayIdx = (new Date().getDay() + 6) % 7;
-  const todaySchedules = schedules.filter(s => (s.days_of_week||[]).includes(todayIdx));
+  // Only the listing sessions (eBay / Depop / Vinted) — Walter's housekeeping runs (sold sync, monitors, scans) stay out of the brief.
+  const LISTING_PLATFORMS = ["ebay","depop","vinted"];
+  const todaySchedules = schedules.filter(s => (s.days_of_week||[]).includes(todayIdx) && LISTING_PLATFORMS.includes(String(s.platform||"").toLowerCase()));
   const scheduleStatus = (s) => {
     if (s.last_run_date !== getToday()) return "Scheduled";
     if (s.last_run_status === "ok") return "Done";
