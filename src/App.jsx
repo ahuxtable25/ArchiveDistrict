@@ -4506,23 +4506,22 @@ const QC_KINDS = {
 };
 const QC_ID_FIELD = { Vinted:"vinted_item_id", eBay:"ebay_item_id", Depop:"depop_product_id" };
 
-function ListingHistoryTab({ listings=[], setListings, hardSave }) {
-  const [rows,     setRows]     = useState([]);
-  const [loading,  setLoading]  = useState(true);
-  const [qcError,  setQcError]  = useState("");
-  const [linkText, setLinkText] = useState({});   // qc id -> typed SKU
-  const [linkErr,  setLinkErr]  = useState({});   // qc id -> message
-  const [platFilter, setPlatFilter] = useState("All");
+/* Walter's listing-scan results waiting for a human (listing_qc, status "open"). Shared by the
+   Listing History tab and the Morning Brief so both resolve the same rows the same way. */
+function useListingQc() {
+  const [rows,    setRows]    = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error,   setError]   = useState("");
 
   const load = async () => {
     setLoading(true);
     try {
       const { data, error } = await supabase.from("listing_qc").select("*").eq("status","open").order("found_at",{ascending:false}).limit(300);
       if (error) throw error;
-      setRows(data || []); setQcError("");
+      setRows(data || []); setError("");
     } catch (e) {
       setRows([]);
-      setQcError(["42P01","PGRST205"].includes(e?.code) ? "" : (e.message || "Couldn't load the review list"));
+      setError(["42P01","PGRST205"].includes(e?.code) ? "" : (e.message || "Couldn't load the review list"));
     } finally { setLoading(false); }
   };
   useEffect(() => { load(); }, []);
@@ -4531,11 +4530,22 @@ function ListingHistoryTab({ listings=[], setListings, hardSave }) {
     setRows(prev => prev.filter(r => r.id !== row.id));
     await supabase.from("listing_qc").update({ status, resolved_at:new Date().toISOString() }).eq("id", row.id);
   };
+  return { rows, loading, error, load, resolve };
+}
 
-  const bySku = useMemo(() => Object.fromEntries(listings.map(l => [l.sku, l])), [listings]);
+const qcBtn = (bg, col, bd) => ({ background:bg, color:col, border:`1px solid ${bd}`, borderRadius:"var(--r)", padding:"5px 11px", cursor:"pointer", fontSize:11, fontWeight:700 });
+const qcQuiet = qcBtn("var(--sf2)","var(--txm)","var(--bdd)");
+const qcGood  = qcBtn("var(--gnl)","var(--gn)","rgba(31,92,53,.2)");
+
+function QcRowCard({ row, listings, setListings, hardSave, resolve }) {
+  const [linkText, setLinkText] = useState("");
+  const [linkErr,  setLinkErr]  = useState("");
+  const k = QC_KINDS[row.kind] || { label:row.kind, colour:"var(--txm)", help:"" };
+  const item = listings.find(l => l.sku === row.sku);
+  const needsSku = row.kind==="unknown_sku" || row.kind==="no_sku";
 
   // Undo an auto-mark: take that account back off the item.
-  const undoAuto = async (row) => {
+  const undoAuto = async () => {
     const label = row.account;
     const next = listings.map(l => {
       if (l.sku !== row.sku) return l;
@@ -4551,10 +4561,9 @@ function ListingHistoryTab({ listings=[], setListings, hardSave }) {
   };
 
   // Unknown / unreadable live item: the user tells us which SKU it is.
-  const linkSku = async (row) => {
-    const sku = (linkText[row.id]||"").trim().toUpperCase();
-    const item = bySku[sku];
-    if (!item) { setLinkErr(p => ({...p, [row.id]: `No item with SKU ${sku||"…"}`})); return; }
+  const linkSku = async () => {
+    const sku = linkText.trim().toUpperCase();
+    if (!listings.some(l => l.sku === sku)) { setLinkErr(`No item with SKU ${sku||"…"}`); return; }
     const today = getToday();
     const next = listings.map(l => {
       if (l.sku !== sku) return l;
@@ -4566,6 +4575,39 @@ function ListingHistoryTab({ listings=[], setListings, hardSave }) {
     setListings(next); hardSave?.({ listings: next });
     await resolve(row, "confirmed");
   };
+
+  return (
+    <div style={{background:"#fff8f0",border:"1px solid #f0c040",borderRadius:"var(--r2)",padding:"10px 12px"}}>
+      <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+        <span style={{fontSize:10,fontWeight:700,color:k.colour,border:`1px solid ${k.colour}`,borderRadius:10,padding:"1px 8px"}}>{k.label}</span>
+        {row.sku && <span className="sku">{row.sku}</span>}
+        <span style={{fontWeight:700,fontSize:12}}>{item?.name || row.title || "Untitled listing"}</span>
+        <span className="badge b-b" style={{fontSize:10}}>{row.account || row.platform}</span>
+        {row.url && <a href={row.url} target="_blank" rel="noopener noreferrer" style={{fontSize:11,color:"var(--ac)",fontWeight:600,textDecoration:"none"}}>View listing ↗</a>}
+      </div>
+      <div style={{fontSize:11,color:"#7a4e0e",marginTop:4}}>{row.detail || k.help}</div>
+      <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center",marginTop:8}}>
+        {row.kind==="auto_marked" ? (<>
+          <button onClick={()=>resolve(row,"confirmed")} style={qcGood}>✓ Correct</button>
+          <button onClick={undoAuto} style={qcQuiet}>↩ Undo</button>
+        </>) : needsSku ? (<>
+          <input className="finp" placeholder="Which SKU? e.g. A700" value={linkText}
+            onChange={e=>setLinkText(e.target.value)} style={{width:150}} />
+          <button onClick={linkSku} style={qcGood}>✓ Mark listed</button>
+          <button onClick={()=>resolve(row,"dismissed")} style={qcQuiet}>Dismiss</button>
+        </>) : (<>
+          <button onClick={()=>resolve(row,"confirmed")} style={qcGood}>✓ Sorted</button>
+          <button onClick={()=>resolve(row,"dismissed")} style={qcQuiet}>Dismiss</button>
+        </>)}
+        {linkErr && <span style={{fontSize:11,color:"var(--ac)"}}>{linkErr}</span>}
+      </div>
+    </div>
+  );
+}
+
+function ListingHistoryTab({ listings=[], setListings, hardSave }) {
+  const { rows, loading, error: qcError, load, resolve } = useListingQc();
+  const [platFilter, setPlatFilter] = useState("All");
 
   const history = useMemo(() => {
     const out = [];
@@ -4579,10 +4621,6 @@ function ListingHistoryTab({ listings=[], setListings, hardSave }) {
   const platFamilies = useMemo(() => [...new Set(history.map(h => getPlatFamily(h.label)))].sort(), [history]);
   const shownHistory = (platFilter==="All" ? history : history.filter(h => getPlatFamily(h.label)===platFilter)).slice(0,150);
 
-  const btn = (bg, col, bd) => ({ background:bg, color:col, border:`1px solid ${bd}`, borderRadius:"var(--r)", padding:"5px 11px", cursor:"pointer", fontSize:11, fontWeight:700 });
-  const quiet = btn("var(--sf2)","var(--txm)","var(--bdd)");
-  const good  = btn("var(--gnl)","var(--gn)","rgba(31,92,53,.2)");
-
   return (
     <div>
       {qcError && <div style={{fontSize:12,color:"var(--ac)",marginBottom:12}}>{qcError}</div>}
@@ -4592,44 +4630,15 @@ function ListingHistoryTab({ listings=[], setListings, hardSave }) {
           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
             <span style={{fontSize:14}}>🔔</span>
             <div style={{fontWeight:900,fontSize:13}}>Needs Checking ({rows.length})</div>
-            <button onClick={load} style={{...quiet,marginLeft:"auto"}}>↻ Refresh</button>
+            <button onClick={load} style={{...qcQuiet,marginLeft:"auto"}}>↻ Refresh</button>
           </div>
           <div style={{fontSize:11,color:"var(--txd)",marginBottom:12}}>
             Walter scans your live Vinted, eBay and Depop listings against Archive District. Anything it can't safely sort out on its own lands here.
           </div>
           <div style={{display:"flex",flexDirection:"column",gap:8}}>
-            {rows.map(row => {
-              const k = QC_KINDS[row.kind] || { label:row.kind, colour:"var(--txm)", help:"" };
-              const item = bySku[row.sku];
-              const needsSku = row.kind==="unknown_sku" || row.kind==="no_sku";
-              return (
-                <div key={row.id} style={{background:"#fff8f0",border:"1px solid #f0c040",borderRadius:"var(--r2)",padding:"10px 12px"}}>
-                  <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                    <span style={{fontSize:10,fontWeight:700,color:k.colour,border:`1px solid ${k.colour}`,borderRadius:10,padding:"1px 8px"}}>{k.label}</span>
-                    {row.sku && <span className="sku">{row.sku}</span>}
-                    <span style={{fontWeight:700,fontSize:12}}>{item?.name || row.title || "Untitled listing"}</span>
-                    <span className="badge b-b" style={{fontSize:10}}>{row.account || row.platform}</span>
-                    {row.url && <a href={row.url} target="_blank" rel="noopener noreferrer" style={{fontSize:11,color:"var(--ac)",fontWeight:600,textDecoration:"none"}}>View listing ↗</a>}
-                  </div>
-                  <div style={{fontSize:11,color:"#7a4e0e",marginTop:4}}>{row.detail || k.help}</div>
-                  <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center",marginTop:8}}>
-                    {row.kind==="auto_marked" ? (<>
-                      <button onClick={()=>resolve(row,"confirmed")} style={good}>✓ Correct</button>
-                      <button onClick={()=>undoAuto(row)} style={quiet}>↩ Undo</button>
-                    </>) : needsSku ? (<>
-                      <input className="finp" placeholder="Which SKU? e.g. A700" value={linkText[row.id]||""}
-                        onChange={e=>setLinkText(p=>({...p,[row.id]:e.target.value}))} style={{width:150}} />
-                      <button onClick={()=>linkSku(row)} style={good}>✓ Mark listed</button>
-                      <button onClick={()=>resolve(row,"dismissed")} style={quiet}>Dismiss</button>
-                    </>) : (<>
-                      <button onClick={()=>resolve(row,"confirmed")} style={good}>✓ Sorted</button>
-                      <button onClick={()=>resolve(row,"dismissed")} style={quiet}>Dismiss</button>
-                    </>)}
-                    {linkErr[row.id] && <span style={{fontSize:11,color:"var(--ac)"}}>{linkErr[row.id]}</span>}
-                  </div>
-                </div>
-              );
-            })}
+            {rows.map(row => (
+              <QcRowCard key={row.id} row={row} listings={listings} setListings={setListings} hardSave={hardSave} resolve={resolve} />
+            ))}
           </div>
         </div>
       )}
@@ -6096,6 +6105,33 @@ const getListingUrl = (l, platform, remaining = []) => {
   return null;
 };
 
+function DelistRow({ item, remaining, onDone }) {
+  return (
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap",padding:"10px 12px",background:"var(--sf2)",borderRadius:"var(--r)"}}>
+      <div style={{minWidth:0}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+          <span className="sku">{item.sku}</span>
+          <span style={{fontWeight:700,fontSize:12}}>{item.name}</span>
+        </div>
+        <div style={{fontSize:11,color:"var(--txm)",marginTop:3}}>Sold on <strong>{item.platform||"—"}</strong> · {item.daySold}</div>
+        <div style={{fontSize:11,color:"#7a4e0e",marginTop:3}}>Still live on: {remaining.map((p, i) => {
+          const href = getListingUrl(item, p, remaining);
+          return (
+            <span key={p}>{i > 0 && ", "}{href
+              ? <a href={href} target="_blank" rel="noopener noreferrer" style={{color:"var(--ac)",fontWeight:700,textDecoration:"none"}}>{p} ↗</a>
+              : p}</span>
+          );
+        })}</div>
+        {item.ebay_delisted_by === "walter" && <div style={{fontSize:11,color:"var(--gn)",marginTop:3}}>✓ eBay listing ended by Walter</div>}
+      </div>
+      <button onClick={onDone}
+        style={{flexShrink:0,background:"var(--gnl)",border:"1px solid rgba(31,92,53,.2)",borderRadius:"var(--r)",padding:"6px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:"var(--gn)"}}>
+        ✓ Done
+      </button>
+    </div>
+  );
+}
+
 function SalesHistoryTab({ listings=[], setListings, hardSave }) {
   const [confirmingKey, setConfirmingKey] = useState(null); // `${sku}|${platformKey}`
   const [confirmPrice,  setConfirmPrice]  = useState("");
@@ -6210,28 +6246,7 @@ function SalesHistoryTab({ listings=[], setListings, hardSave }) {
           </div>
           <div style={{display:"flex",flexDirection:"column",gap:8}}>
             {toDelist.map(({item, remaining}) => (
-              <div key={item.sku} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap",padding:"10px 12px",background:"var(--sf2)",borderRadius:"var(--r)"}}>
-                <div style={{minWidth:0}}>
-                  <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                    <span className="sku">{item.sku}</span>
-                    <span style={{fontWeight:700,fontSize:12}}>{item.name}</span>
-                  </div>
-                  <div style={{fontSize:11,color:"var(--txm)",marginTop:3}}>Sold on <strong>{item.platform||"—"}</strong> · {item.daySold}</div>
-                  <div style={{fontSize:11,color:"#7a4e0e",marginTop:3}}>Still live on: {remaining.map((p, i) => {
-                    const href = getListingUrl(item, p, remaining);
-                    return (
-                      <span key={p}>{i > 0 && ", "}{href
-                        ? <a href={href} target="_blank" rel="noopener noreferrer" style={{color:"var(--ac)",fontWeight:700,textDecoration:"none"}}>{p} ↗</a>
-                        : p}</span>
-                    );
-                  })}</div>
-                  {item.ebay_delisted_by === "walter" && <div style={{fontSize:11,color:"var(--gn)",marginTop:3}}>✓ eBay listing ended by Walter</div>}
-                </div>
-                <button onClick={()=>markDelistDone(item.sku)}
-                  style={{flexShrink:0,background:"var(--gnl)",border:"1px solid rgba(31,92,53,.2)",borderRadius:"var(--r)",padding:"6px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:"var(--gn)"}}>
-                  ✓ Done
-                </button>
-              </div>
+              <DelistRow key={item.sku} item={item} remaining={remaining} onDone={()=>markDelistDone(item.sku)} />
             ))}
           </div>
         </div>
@@ -6682,7 +6697,7 @@ function GoalCard({ title, period, profit, revenue, profitGoal, setProfit, profi
   );
 }
 
-function Dashboard({ listings, stockData, weeklyGoal: wgProp, setWeeklyGoal, monthlyGoal: mgProp, setMonthlyGoal, weeklyRevGoal: wrgProp, setWeeklyRevGoal, monthlyRevGoal: mrgProp, setMonthlyRevGoal, liveData, setLiveData, hardSave, brief, onReviewListings, onReviewSold }) {
+function Dashboard({ listings, stockData, weeklyGoal: wgProp, setWeeklyGoal, monthlyGoal: mgProp, setMonthlyGoal, weeklyRevGoal: wrgProp, setWeeklyRevGoal, monthlyRevGoal: mrgProp, setMonthlyRevGoal, liveData, setLiveData, hardSave, brief, onReviewListings, onReviewSold, setListings }) {
   const [dashTab, setDashTab] = useState("dashboard");
   // Prefer goals from appSettings (Settings tab) — fall back to App state props
   const as = getAS(liveData);
@@ -6730,7 +6745,7 @@ function Dashboard({ listings, stockData, weeklyGoal: wgProp, setWeeklyGoal, mon
       </div>
 
       {dashTab==="brief" ? (
-        <MorningBriefTab brief={brief} listings={listings} onReviewListings={onReviewListings} onReviewSold={onReviewSold} />
+        <MorningBriefTab brief={brief} listings={listings} setListings={setListings} hardSave={hardSave} onReviewListings={onReviewListings} onReviewSold={onReviewSold} />
       ) : (
       <>
       {/* KPI cards */}
@@ -6810,7 +6825,7 @@ const briefDueSlot = () => {
   return d;
 };
 
-const buildMorningBrief = (listings, prevAt, slowMoverDays) => {
+const buildMorningBrief = (listings, prevAt) => {
   const nowIso   = new Date().toISOString();
   const prevDate = prevAt ? new Date(prevAt).toISOString().slice(0, 10) : null;
   const today    = getToday();
@@ -6848,11 +6863,6 @@ const buildMorningBrief = (listings, prevAt, slowMoverDays) => {
     : [];
 
   const soldWk = listings.filter(l => l.sold && l.daySold && l.daySold >= WEEK_START);
-  const slow = listings
-    .filter(l => l.listed && !l.sold && l.dayListed)
-    .map(l => ({ sku: l.sku, name: l.name, daysLive: Math.max(0, Math.floor((new Date(today) - new Date(l.dayListed)) / 86400000)) }))
-    .filter(l => l.daysLive >= slowMoverDays)
-    .sort((a, b) => b.daysLive - a.daysLive);
 
   return {
     generatedAt: nowIso,
@@ -6867,13 +6877,10 @@ const buildMorningBrief = (listings, prevAt, slowMoverDays) => {
     sold, listed, ebayDelisted,
     weekSold: soldWk.length,
     weekRevenue: soldWk.reduce((a, l) => a + (l.soldPrice || 0), 0),
-    slowMoverDays,
-    slowTotal: slow.length,
-    slow: slow.slice(0, 20),
   };
 };
 
-function MorningBriefTab({ brief, listings = [], onReviewListings, onReviewSold }) {
+function MorningBriefTab({ brief, listings = [], setListings, hardSave, onReviewListings, onReviewSold }) {
   const [schedules,     setSchedules]     = useState([]);
   const [loadingSched,  setLoadingSched]  = useState(true);
   const [schedError,    setSchedError]    = useState("");
@@ -6893,28 +6900,46 @@ function MorningBriefTab({ brief, listings = [], onReviewListings, onReviewSold 
     })();
   }, []);
 
-  // Walter's listing-scan results waiting for a human (live from the table, not part of the daily snapshot).
-  const [qcOpen, setQcOpen] = useState([]);
-  useEffect(() => {
-    (async () => {
-      try {
-        const { data, error } = await supabase.from("listing_qc").select("kind").eq("status","open").limit(500);
-        if (!error) setQcOpen(data || []);
-      } catch { /* table not created yet — no card */ }
-    })();
-  }, []);
+  // Everything under "Needs checking" reads live data (not the daily snapshot), so counts fall as you clear items.
+  const qc = useListingQc();
 
   // Items an automated check flagged as "looks sold" — same rule as Sales History → Needs Confirmation.
-  const soldFlags = useMemo(() => {
+  const soldFlagRows = useMemo(() => {
     const now = Date.now();
-    return listings.filter(l => !l.sold && DETECTABLE_PLATFORMS.some(({key}) => {
-      if (!l[`${key}_sold_detected`]) return false;
-      const snoozedAt = l[`${key}_sold_detected_snoozed_at`];
-      return !(snoozedAt && (now - new Date(snoozedAt).getTime()) < SNOOZE_HOURS*3600*1000);
-    }));
+    const out = [];
+    listings.forEach(l => {
+      if (l.sold) return;
+      DETECTABLE_PLATFORMS.forEach(({key, label}) => {
+        if (!l[`${key}_sold_detected`]) return;
+        const snoozedAt = l[`${key}_sold_detected_snoozed_at`];
+        if (snoozedAt && (now - new Date(snoozedAt).getTime()) < SNOOZE_HOURS*3600*1000) return;
+        const account = l[`${key}_sold_detected_account`]
+          || (key === "vinted" ? ((l.platforms||[]).filter(p => p.startsWith("Vinted")).join(" / ") || null) : null);
+        out.push({ item: l, platformKey: key, platformLabel: label, account });
+      });
+    });
+    return out.sort((a, b) => a.item.sku.localeCompare(b.item.sku));
   }, [listings]);
 
-  const delistCount = useMemo(() => getToDelist(listings).length, [listings]);
+  const toDelist = useMemo(() => getToDelist(listings), [listings]);
+  const markDelistDone = (sku) => {
+    const next = listings.map(l => l.sku !== sku ? l : { ...l, delistDoneAt: getToday() });
+    setListings?.(next);
+    hardSave?.({ listings: next });
+  };
+
+  // One category per kind of thing needing a human; the chips summarise, tapping one folds its list.
+  const [folded,  setFolded]  = useState({});
+  const [showAll, setShowAll] = useState({});
+  const BRIEF_PER_CATEGORY = 5;
+  const categories = [
+    { id:"sold",   label:"Looks sold — confirm price", items: soldFlagRows },
+    { id:"delist", label:"Sold — still to delist",     items: toDelist },
+    ...[...new Set(qc.rows.map(r => r.kind))].map(kind => ({
+      id: "qc:" + kind, label: QC_KINDS[kind]?.label || kind, items: qc.rows.filter(r => r.kind === kind),
+    })),
+  ].filter(c => c.items.length > 0);
+  const needsTotal = categories.reduce((n, c) => n + c.items.length, 0);
 
   const b = brief;
 
@@ -6984,34 +7009,65 @@ function MorningBriefTab({ brief, listings = [], onReviewListings, onReviewSold 
         </div>
       )}
 
-      {/* Needs checking — Walter's live-listing scan */}
-      {(qcOpen.length > 0 || soldFlags.length > 0 || delistCount > 0) && (
+      {/* Needs checking — everything waiting for a human, with a count per category */}
+      {needsTotal > 0 && (
         <div className="tw" style={{padding:"16px 18px",marginBottom:16,border:"1px solid #f0c040"}}>
-          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6,flexWrap:"wrap"}}>
             <span style={{fontSize:14}}>🔔</span>
-            <div style={{fontWeight:900,fontSize:14}}>Needs checking ({qcOpen.length + soldFlags.length + delistCount})</div>
-            <div style={{marginLeft:"auto",display:"flex",gap:6}}>
-              {(soldFlags.length > 0 || delistCount > 0) && <button onClick={()=>onReviewSold?.()} style={{background:"var(--ac)",color:"#fff",border:"none",borderRadius:"var(--r)",padding:"6px 12px",cursor:"pointer",fontSize:11,fontWeight:700}}>Review sales</button>}
-              {qcOpen.length > 0 && <button onClick={()=>onReviewListings?.()} style={{background:"var(--ac)",color:"#fff",border:"none",borderRadius:"var(--r)",padding:"6px 12px",cursor:"pointer",fontSize:11,fontWeight:700}}>Review listings</button>}
+            <div style={{fontWeight:900,fontSize:14}}>Needs checking ({needsTotal})</div>
+            <div style={{marginLeft:"auto",display:"flex",gap:6,flexWrap:"wrap"}}>
+              <button onClick={()=>onReviewSold?.()} style={qcQuiet}>Sales History →</button>
+              <button onClick={()=>onReviewListings?.()} style={qcQuiet}>Listing History →</button>
             </div>
           </div>
-          <div style={{fontSize:11,color:"var(--txd)",marginBottom:8}}>From Walter's scans of your live Vinted, eBay and Depop listings.</div>
-          <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
-            {soldFlags.length > 0 && (
-              <span style={{fontSize:11,background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:20,padding:"4px 11px",color:"var(--txm)"}}>
-                Looks sold, confirm price · {soldFlags.length}
-              </span>
-            )}
-            {delistCount > 0 && (
-              <span style={{fontSize:11,background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:20,padding:"4px 11px",color:"var(--txm)"}}>
-                Sold, still to delist · {delistCount}
-              </span>
-            )}
-            {Object.entries(qcOpen.reduce((a,r)=>{ a[r.kind]=(a[r.kind]||0)+1; return a; },{})).map(([k,n]) => (
-              <span key={k} style={{fontSize:11,background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:20,padding:"4px 11px",color:"var(--txm)"}}>
-                {(QC_KINDS[k]?.label || k)} · {n}
-              </span>
+          <div style={{fontSize:11,color:"var(--txd)",marginBottom:10}}>From Walter's scans of your live Vinted, eBay and Depop listings. Tap a count to fold or open its list.</div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:12}}>
+            {categories.map(c => (
+              <button key={c.id} onClick={()=>setFolded(f => ({...f, [c.id]: !f[c.id]}))}
+                style={{fontSize:11,background:folded[c.id]?"var(--sf2)":"#fff8f0",border:"1px solid #f0c040",borderRadius:20,padding:"4px 11px",color:"var(--txm)",cursor:"pointer",fontWeight:700}}>
+                {c.label} · {c.items.length}
+              </button>
             ))}
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:14}}>
+            {categories.filter(c => !folded[c.id]).map(c => {
+              const shown = showAll[c.id] ? c.items : c.items.slice(0, BRIEF_PER_CATEGORY);
+              return (
+                <div key={c.id}>
+                  <div style={{fontWeight:700,fontSize:12,marginBottom:6}}>{c.label} ({c.items.length})</div>
+                  <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                    {c.id === "sold" && shown.map(r => (
+                      <div key={r.item.sku + r.platformKey} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap",background:"#fff8f0",border:"1px solid #f0c040",borderRadius:"var(--r2)",padding:"10px 12px"}}>
+                        <div style={{minWidth:0}}>
+                          <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                            <span className="sku">{r.item.sku}</span>
+                            <span style={{fontWeight:700,fontSize:12}}>{r.item.name}</span>
+                            <span className="badge b-b" style={{fontSize:10}}>{r.account || r.platformLabel}</span>
+                          </div>
+                          <div style={{fontSize:11,color:"#7a4e0e",marginTop:3}}>
+                            Detected sold {r.item[`${r.platformKey}_sold_detected_at`]
+                              ? new Date(r.item[`${r.platformKey}_sold_detected_at`]).toLocaleDateString("en-GB",{day:"numeric",month:"short"})
+                              : "recently"}
+                          </div>
+                        </div>
+                        <button onClick={()=>onReviewSold?.()} style={qcGood}>Confirm in Sales History →</button>
+                      </div>
+                    ))}
+                    {c.id === "delist" && shown.map(({item, remaining}) => (
+                      <DelistRow key={item.sku} item={item} remaining={remaining} onDone={()=>markDelistDone(item.sku)} />
+                    ))}
+                    {c.id.startsWith("qc:") && shown.map(row => (
+                      <QcRowCard key={row.id} row={row} listings={listings} setListings={setListings} hardSave={hardSave} resolve={qc.resolve} />
+                    ))}
+                  </div>
+                  {c.items.length > BRIEF_PER_CATEGORY && (
+                    <button onClick={()=>setShowAll(a => ({...a, [c.id]: !a[c.id]}))} style={{...qcQuiet,marginTop:8}}>
+                      {showAll[c.id] ? "Show fewer" : `Show all ${c.items.length}`}
+                    </button>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -7101,24 +7157,6 @@ function MorningBriefTab({ brief, listings = [], onReviewListings, onReviewSold 
           </div>
         </div>
       )}
-
-      {/* Slow movers */}
-      <div className="tw" style={{padding:"16px 18px"}}>
-        <div style={{fontWeight:900,fontSize:14,marginBottom:10}}>Slow Movers ({b.slowMoverDays}+ days, {b.slowTotal})</div>
-        {b.slow.length === 0 ? (
-          <div style={{fontSize:12,color:"var(--txd)"}}>Nothing's been sitting unsold that long.</div>
-        ) : (
-          <div style={{display:"flex",flexDirection:"column",gap:6}}>
-            {b.slow.map(l => (
-              <div key={l.sku} style={{display:"flex",justifyContent:"space-between",fontSize:12}}>
-                <span><span className="sku">{l.sku}</span> {l.name}</span>
-                <span style={{fontWeight:700,color:"var(--ac)"}}>{l.daysLive}d</span>
-              </div>
-            ))}
-            {b.slowTotal > b.slow.length && <div style={{fontSize:11,color:"var(--txd)",marginTop:4}}>+{b.slowTotal-b.slow.length} more</div>}
-          </div>
-        )}
-      </div>
     </div>
   );
 }
@@ -10660,14 +10698,13 @@ export default function App() {
     const keep = (b) => { setBrief(b); try { localStorage.setItem("ad_morning_brief", JSON.stringify(b)); } catch {} };
     (async () => {
       const due = briefDueSlot();
-      const slowDays = getAS(liveDataRef.current).slowMoverDays || 14;
       let prevAt = null;
       try {
         const { data: row, error } = await supabase.from("morning_brief").select("*").eq("id", 1).maybeSingle();
         if (error) throw error;
         if (row && new Date(row.generated_at) >= due) { keep(row.brief); return; }
         prevAt = row?.generated_at || null;
-        const fresh = buildMorningBrief(listings, prevAt, slowDays);
+        const fresh = buildMorningBrief(listings, prevAt);
         let won;
         if (row) {
           const { data: upd, error: ue } = await supabase.from("morning_brief")
@@ -10689,7 +10726,7 @@ export default function App() {
         let local = null;
         try { local = JSON.parse(localStorage.getItem("ad_morning_brief") || "null"); } catch {}
         if (local && new Date(local.generatedAt) >= due) { setBrief(local); return; }
-        keep(buildMorningBrief(listings, local?.generatedAt || prevAt, slowDays));
+        keep(buildMorningBrief(listings, local?.generatedAt || prevAt));
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -11043,7 +11080,7 @@ export default function App() {
           </div>
 
           <div className="content">
-            {view==="dashboard"   && <Dashboard listings={listings} stockData={stockData} weeklyGoal={weeklyGoal} setWeeklyGoal={setWeeklyGoal} monthlyGoal={monthlyGoal} setMonthlyGoal={setMonthlyGoal} weeklyRevGoal={weeklyRevGoal} setWeeklyRevGoal={setWeeklyRevGoal} monthlyRevGoal={monthlyRevGoal} setMonthlyRevGoal={setMonthlyRevGoal} liveData={liveData} setLiveData={setLiveData} hardSave={hardSave} brief={brief} onReviewListings={() => { setMarkListedTab("history"); navigate("marklisted"); }} onReviewSold={() => { setMarkSoldTab("history"); navigate("marksold"); }} />}
+            {view==="dashboard"   && <Dashboard listings={listings} stockData={stockData} weeklyGoal={weeklyGoal} setWeeklyGoal={setWeeklyGoal} monthlyGoal={monthlyGoal} setMonthlyGoal={setMonthlyGoal} weeklyRevGoal={weeklyRevGoal} setWeeklyRevGoal={setWeeklyRevGoal} monthlyRevGoal={monthlyRevGoal} setMonthlyRevGoal={setMonthlyRevGoal} liveData={liveData} setLiveData={setLiveData} hardSave={hardSave} brief={brief} onReviewListings={() => { setMarkListedTab("history"); navigate("marklisted"); }} onReviewSold={() => { setMarkSoldTab("history"); navigate("marksold"); }} setListings={setListings} />}
             {view==="stock"       && <StockTab stockData={stockData} setStockData={setStockData} listings={listings} setListings={setListings} hardSave={hardSave} liveData={liveData} setLiveData={setLiveData} />}
             {view==="listings"    && <ListingsTab listings={listings} setListings={setListings} stockData={stockData} customPlatforms={customPlatforms} liveData={liveData} setLiveData={setLiveData} hardSave={hardSave} />}
             {view==="movement"    && <MovementTracker listings={listings} />}
