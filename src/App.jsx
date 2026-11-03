@@ -6856,10 +6856,11 @@ const buildMorningBrief = (listings, prevAt) => {
     return slim(l, { labels, fromDraft: !!(l.vinted_draft_confirmed_at && l.vinted_draft_confirmed_at.slice(0, 10) >= prevDate) });
   }).filter(Boolean) : [];
 
-  // eBay listings Walter ended since the last brief because the item sold elsewhere.
-  const ebayDelisted = prevDate
-    ? listings.filter(l => l.ebay_delisted_by === "walter" && l.ebay_delisted_at && l.ebay_delisted_at >= prevDate)
-        .map(l => slim(l, { platform: l.platform || "" }))
+  // Listings Walter took down since the last brief because the item sold elsewhere (eBay ended, Depop marked sold).
+  const delisted = prevDate
+    ? listings.flatMap(l => [["ebay", "eBay"], ["depop", "Depop"]]
+        .filter(([k]) => l[`${k}_delisted_by`] === "walter" && l[`${k}_delisted_at`] && l[`${k}_delisted_at`] >= prevDate)
+        .map(([k, label]) => slim(l, { from: label, platform: l.platform || "", at: l[`${k}_delisted_at`] })))
     : [];
 
   const soldWk = listings.filter(l => l.sold && l.daySold && l.daySold >= WEEK_START);
@@ -6874,7 +6875,7 @@ const buildMorningBrief = (listings, prevAt) => {
       vintedDrafts: draftPending.length,
     },
     draftPending: draftPending.map(l => slim(l, { account: l.vinted_draft_account })),
-    sold, listed, ebayDelisted,
+    sold, listed, delisted,
     weekSold: soldWk.length,
     weekRevenue: soldWk.reduce((a, l) => a + (l.soldPrice || 0), 0),
   };
@@ -6922,24 +6923,18 @@ function MorningBriefTab({ brief, listings = [], setListings, hardSave, onReview
   }, [listings]);
 
   const toDelist = useMemo(() => getToDelist(listings), [listings]);
-  const markDelistDone = (sku) => {
-    const next = listings.map(l => l.sku !== sku ? l : { ...l, delistDoneAt: getToday() });
-    setListings?.(next);
-    hardSave?.({ listings: next });
-  };
 
-  // One category per kind of thing needing a human; the chips summarise, tapping one folds its list.
-  const [folded,  setFolded]  = useState({});
-  const [showAll, setShowAll] = useState({});
-  const BRIEF_PER_CATEGORY = 5;
+  // Counts per kind of thing needing a human. The lists themselves live in Sales History and Listing History.
   const categories = [
-    { id:"sold",   label:"Looks sold — confirm price", items: soldFlagRows },
-    { id:"delist", label:"Sold — still to delist",     items: toDelist },
+    { id:"sold",   label:"Looks sold — confirm price", items: soldFlagRows, to:"sales" },
+    { id:"delist", label:"Sold — still to delist",     items: toDelist,     to:"sales" },
     ...[...new Set(qc.rows.map(r => r.kind))].map(kind => ({
-      id: "qc:" + kind, label: QC_KINDS[kind]?.label || kind, items: qc.rows.filter(r => r.kind === kind),
+      id: "qc:" + kind, label: QC_KINDS[kind]?.label || kind, items: qc.rows.filter(r => r.kind === kind), to:"listings",
     })),
   ].filter(c => c.items.length > 0);
   const needsTotal = categories.reduce((n, c) => n + c.items.length, 0);
+  const salesCount    = categories.filter(c => c.to === "sales").reduce((n, c) => n + c.items.length, 0);
+  const listingsCount = categories.filter(c => c.to === "listings").reduce((n, c) => n + c.items.length, 0);
 
   const b = brief;
 
@@ -7009,65 +7004,25 @@ function MorningBriefTab({ brief, listings = [], setListings, hardSave, onReview
         </div>
       )}
 
-      {/* Needs checking — everything waiting for a human, with a count per category */}
+      {/* Needs checking — a count per category; the work itself happens in Sales History / Listing History */}
       {needsTotal > 0 && (
         <div className="tw" style={{padding:"16px 18px",marginBottom:16,border:"1px solid #f0c040"}}>
-          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6,flexWrap:"wrap"}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
             <span style={{fontSize:14}}>🔔</span>
             <div style={{fontWeight:900,fontSize:14}}>Needs checking ({needsTotal})</div>
-            <div style={{marginLeft:"auto",display:"flex",gap:6,flexWrap:"wrap"}}>
-              <button onClick={()=>onReviewSold?.()} style={qcQuiet}>Sales History →</button>
-              <button onClick={()=>onReviewListings?.()} style={qcQuiet}>Listing History →</button>
-            </div>
           </div>
-          <div style={{fontSize:11,color:"var(--txd)",marginBottom:10}}>From Walter's scans of your live Vinted, eBay and Depop listings. Tap a count to fold or open its list.</div>
+          <div style={{fontSize:11,color:"var(--txd)",marginBottom:10}}>From Walter's scans of your live Vinted, eBay and Depop listings. Tap a count to open it.</div>
           <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:12}}>
             {categories.map(c => (
-              <button key={c.id} onClick={()=>setFolded(f => ({...f, [c.id]: !f[c.id]}))}
-                style={{fontSize:11,background:folded[c.id]?"var(--sf2)":"#fff8f0",border:"1px solid #f0c040",borderRadius:20,padding:"4px 11px",color:"var(--txm)",cursor:"pointer",fontWeight:700}}>
+              <button key={c.id} onClick={()=>(c.to === "sales" ? onReviewSold : onReviewListings)?.()}
+                style={{fontSize:11,background:"#fff8f0",border:"1px solid #f0c040",borderRadius:20,padding:"4px 11px",color:"var(--txm)",cursor:"pointer",fontWeight:700}}>
                 {c.label} · {c.items.length}
               </button>
             ))}
           </div>
-          <div style={{display:"flex",flexDirection:"column",gap:14}}>
-            {categories.filter(c => !folded[c.id]).map(c => {
-              const shown = showAll[c.id] ? c.items : c.items.slice(0, BRIEF_PER_CATEGORY);
-              return (
-                <div key={c.id}>
-                  <div style={{fontWeight:700,fontSize:12,marginBottom:6}}>{c.label} ({c.items.length})</div>
-                  <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                    {c.id === "sold" && shown.map(r => (
-                      <div key={r.item.sku + r.platformKey} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap",background:"#fff8f0",border:"1px solid #f0c040",borderRadius:"var(--r2)",padding:"10px 12px"}}>
-                        <div style={{minWidth:0}}>
-                          <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                            <span className="sku">{r.item.sku}</span>
-                            <span style={{fontWeight:700,fontSize:12}}>{r.item.name}</span>
-                            <span className="badge b-b" style={{fontSize:10}}>{r.account || r.platformLabel}</span>
-                          </div>
-                          <div style={{fontSize:11,color:"#7a4e0e",marginTop:3}}>
-                            Detected sold {r.item[`${r.platformKey}_sold_detected_at`]
-                              ? new Date(r.item[`${r.platformKey}_sold_detected_at`]).toLocaleDateString("en-GB",{day:"numeric",month:"short"})
-                              : "recently"}
-                          </div>
-                        </div>
-                        <button onClick={()=>onReviewSold?.()} style={qcGood}>Confirm in Sales History →</button>
-                      </div>
-                    ))}
-                    {c.id === "delist" && shown.map(({item, remaining}) => (
-                      <DelistRow key={item.sku} item={item} remaining={remaining} onDone={()=>markDelistDone(item.sku)} />
-                    ))}
-                    {c.id.startsWith("qc:") && shown.map(row => (
-                      <QcRowCard key={row.id} row={row} listings={listings} setListings={setListings} hardSave={hardSave} resolve={qc.resolve} />
-                    ))}
-                  </div>
-                  {c.items.length > BRIEF_PER_CATEGORY && (
-                    <button onClick={()=>setShowAll(a => ({...a, [c.id]: !a[c.id]}))} style={{...qcQuiet,marginTop:8}}>
-                      {showAll[c.id] ? "Show fewer" : `Show all ${c.items.length}`}
-                    </button>
-                  )}
-                </div>
-              );
-            })}
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            {salesCount > 0 && <button onClick={()=>onReviewSold?.()} style={qcGood}>Sales History ({salesCount}) →</button>}
+            {listingsCount > 0 && <button onClick={()=>onReviewListings?.()} style={qcGood}>Listing History ({listingsCount}) →</button>}
           </div>
         </div>
       )}
@@ -7142,21 +7097,28 @@ function MorningBriefTab({ brief, listings = [], setListings, hardSave, onReview
         )}
       </div>
 
-      {/* eBay listings Walter ended */}
-      {(b.ebayDelisted || []).length > 0 && (
-        <div className="tw" style={{padding:"16px 18px",marginBottom:16}}>
-          <div style={{fontWeight:900,fontSize:14,marginBottom:4}}>Delisted From eBay ({b.ebayDelisted.length})</div>
-          <div style={{fontSize:11,color:"var(--txd)",marginBottom:10}}>Walter ended these eBay listings because they sold elsewhere — nothing for you to do.</div>
+      {/* Listings Walter took down since the last brief */}
+      <div className="tw" style={{padding:"16px 18px",marginBottom:16}}>
+        <div style={{fontWeight:900,fontSize:14,marginBottom:4}}>Delisted Since Last Brief{b.prevAt ? ` (${fmtDate(b.prevAt)})` : ""}</div>
+        <div style={{fontSize:11,color:"var(--txd)",marginBottom:10}}>Listings Walter took down because the item sold elsewhere — nothing for you to do.</div>
+        {noPrev ? (
+          <div style={{fontSize:12,color:"var(--txd)"}}>This is the first brief — nothing to compare against yet.</div>
+        ) : (b.delisted || []).length === 0 ? (
+          <div style={{fontSize:12,color:"var(--txd)"}}>Walter hasn't delisted anything since the last brief.</div>
+        ) : (
           <div style={{display:"flex",flexDirection:"column",gap:6}}>
-            {b.ebayDelisted.map(l => (
-              <div key={l.sku} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,gap:8}}>
+            {b.delisted.map((l, i) => (
+              <div key={l.sku + l.from + i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,gap:8}}>
                 <span><span className="sku">{l.sku}</span> {l.name}</span>
-                <span style={{fontWeight:700,color:"var(--gn)",textAlign:"right"}}>sold on {l.platform || "—"}</span>
+                <span style={{textAlign:"right"}}>
+                  <span style={{fontWeight:700,color:"var(--gn)"}}>{l.from} {l.from === "Depop" ? "marked sold" : "ended"}</span>
+                  <span style={{color:"var(--txm)"}}> · sold on {l.platform || "—"} · {fmtDate(l.at)}</span>
+                </span>
               </div>
             ))}
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
