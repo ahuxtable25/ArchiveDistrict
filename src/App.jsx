@@ -5776,7 +5776,7 @@ function DrafterMarkListed({ item, listings, setListings, liveData, hardSave }) 
 /* ═══════════════════════════════════════════════════════════════
    MARK AS SOLD — Command 8
 ═══════════════════════════════════════════════════════════════ */
-function QuickMarkSold({ listings, setListings, customPlatforms, liveData, hardSave }) {
+function QuickMarkSold({ listings, setListings, customPlatforms, liveData, hardSave, initialTab, onTabUsed }) {
   const unsold = useMemo(() => listings.filter(l => l.listed && !l.sold), [listings]);
   const _as        = getAS(liveData);
   const _hidden    = _as.hiddenSoldPlats || [];
@@ -5849,7 +5849,8 @@ function QuickMarkSold({ listings, setListings, customPlatforms, liveData, hardS
   };
 
   const canConfirm = item && soldPrice && platSel;
-  const [soldTab, setSoldTab] = useState("mark");
+  const [soldTab, setSoldTab] = useState(initialTab || "mark");
+  useEffect(() => { if (initialTab && initialTab !== "mark") { setSoldTab(initialTab); onTabUsed?.(); } }, [initialTab]);
 
   return (
     <div>
@@ -6065,6 +6066,21 @@ const DETECTABLE_PLATFORMS = [
 ];
 const SNOOZE_HOURS = 24;
 
+/* Sold in the last 30 days but still marked live somewhere else. Walter ends the eBay listing itself
+   (ebay_delisted_at), so eBay only counts here until it has. "Done" stamps delistDoneAt. */
+const DELIST_DAYS = 30;
+const getToDelist = (listings) => {
+  const cut = new Date(Date.now() - DELIST_DAYS * 86400000).toISOString().slice(0, 10);
+  return listings
+    .filter(l => l.sold && l.daySold && l.daySold >= cut && !l.delistDoneAt)
+    .map(l => ({
+      item: l,
+      remaining: (l.platforms || []).filter(p => p !== l.platform && !(getPlatFamily(p) === "eBay" && l.ebay_delisted_at)),
+    }))
+    .filter(r => r.remaining.length > 0)
+    .sort((a, b) => String(b.item.daySold).localeCompare(String(a.item.daySold)));
+};
+
 function SalesHistoryTab({ listings=[], setListings, hardSave }) {
   const [confirmingKey, setConfirmingKey] = useState(null); // `${sku}|${platformKey}`
   const [confirmPrice,  setConfirmPrice]  = useState("");
@@ -6137,6 +6153,13 @@ function SalesHistoryTab({ listings=[], setListings, hardSave }) {
     hardSave?.({ listings: newListings });
   };
 
+  const toDelist = useMemo(() => getToDelist(listings), [listings]);
+  const markDelistDone = (sku) => {
+    const newListings = listings.map(l => l.sku !== sku ? l : { ...l, delistDoneAt: getToday() });
+    setListings(newListings);
+    hardSave?.({ listings: newListings });
+  };
+
   const checkLater = (row) => {
     const newListings = listings.map(l => l.sku !== row.sku ? l : {
       ...l,
@@ -6161,6 +6184,37 @@ function SalesHistoryTab({ listings=[], setListings, hardSave }) {
 
   return (
     <div>
+      {toDelist.length > 0 && (
+        <div className="tw" style={{padding:"14px 16px",marginBottom:16,border:"1px solid #f0c040"}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+            <span style={{fontSize:14}}>📋</span>
+            <div style={{fontWeight:900,fontSize:13}}>To delist ({toDelist.length})</div>
+          </div>
+          <div style={{fontSize:11,color:"var(--txd)",marginBottom:12}}>
+            Sold in the last {DELIST_DAYS} days but still marked live elsewhere. Walter ends the eBay listing for you; tap Done once you've removed the rest.
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {toDelist.map(({item, remaining}) => (
+              <div key={item.sku} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,padding:"10px 12px",background:"var(--sf2)",borderRadius:"var(--r)"}}>
+                <div style={{minWidth:0}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                    <span className="sku">{item.sku}</span>
+                    <span style={{fontWeight:700,fontSize:12}}>{item.name}</span>
+                  </div>
+                  <div style={{fontSize:11,color:"var(--txm)",marginTop:3}}>Sold on <strong>{item.platform||"—"}</strong> · {item.daySold}</div>
+                  <div style={{fontSize:11,color:"#7a4e0e",marginTop:3}}>Still live on: {remaining.join(", ")}</div>
+                  {item.ebay_delisted_by === "walter" && <div style={{fontSize:11,color:"var(--gn)",marginTop:3}}>✓ eBay listing ended by Walter</div>}
+                </div>
+                <button onClick={()=>markDelistDone(item.sku)}
+                  style={{flexShrink:0,background:"var(--gnl)",border:"1px solid rgba(31,92,53,.2)",borderRadius:"var(--r)",padding:"6px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:"var(--gn)"}}>
+                  ✓ Done
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {needsConfirmation.length > 0 && (
         <div className="tw" style={{padding:"14px 16px",marginBottom:16,border:"1px solid #f0c040"}}>
           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
@@ -6252,7 +6306,7 @@ function SalesHistoryTab({ listings=[], setListings, hardSave }) {
                 <td>{l.daySold||"—"}</td>
                 <td><span className="sku">{l.sku}</span></td>
                 <td style={{whiteSpace:"normal",maxWidth:220}}>{l.name}</td>
-                <td>{l.platform||"—"}</td>
+                <td>{l.platform||"—"}{l.ebay_delisted_by==="walter" && <div style={{fontSize:10,color:"var(--gn)"}}>eBay ended by Walter {l.ebay_delisted_at}</div>}</td>
                 <td style={{fontWeight:700,color:"var(--gn)"}}>{fmt(l.soldPrice)}</td>
                 <td style={{color:(l.profit||0)<0?"var(--ac)":"var(--txm)"}}>{l.profit!=null ? fmt(l.profit) : "—"}</td>
               </tr>
@@ -6606,7 +6660,7 @@ function GoalCard({ title, period, profit, revenue, profitGoal, setProfit, profi
   );
 }
 
-function Dashboard({ listings, stockData, weeklyGoal: wgProp, setWeeklyGoal, monthlyGoal: mgProp, setMonthlyGoal, weeklyRevGoal: wrgProp, setWeeklyRevGoal, monthlyRevGoal: mrgProp, setMonthlyRevGoal, liveData, setLiveData, hardSave, brief, onReviewListings }) {
+function Dashboard({ listings, stockData, weeklyGoal: wgProp, setWeeklyGoal, monthlyGoal: mgProp, setMonthlyGoal, weeklyRevGoal: wrgProp, setWeeklyRevGoal, monthlyRevGoal: mrgProp, setMonthlyRevGoal, liveData, setLiveData, hardSave, brief, onReviewListings, onReviewSold }) {
   const [dashTab, setDashTab] = useState("dashboard");
   // Prefer goals from appSettings (Settings tab) — fall back to App state props
   const as = getAS(liveData);
@@ -6654,7 +6708,7 @@ function Dashboard({ listings, stockData, weeklyGoal: wgProp, setWeeklyGoal, mon
       </div>
 
       {dashTab==="brief" ? (
-        <MorningBriefTab brief={brief} onReviewListings={onReviewListings} />
+        <MorningBriefTab brief={brief} listings={listings} onReviewListings={onReviewListings} onReviewSold={onReviewSold} />
       ) : (
       <>
       {/* KPI cards */}
@@ -6791,7 +6845,7 @@ const buildMorningBrief = (listings, prevAt, slowMoverDays) => {
   };
 };
 
-function MorningBriefTab({ brief, onReviewListings }) {
+function MorningBriefTab({ brief, listings = [], onReviewListings, onReviewSold }) {
   const [schedules,     setSchedules]     = useState([]);
   const [loadingSched,  setLoadingSched]  = useState(true);
   const [schedError,    setSchedError]    = useState("");
@@ -6821,6 +6875,18 @@ function MorningBriefTab({ brief, onReviewListings }) {
       } catch { /* table not created yet — no card */ }
     })();
   }, []);
+
+  // Items an automated check flagged as "looks sold" — same rule as Sales History → Needs Confirmation.
+  const soldFlags = useMemo(() => {
+    const now = Date.now();
+    return listings.filter(l => !l.sold && DETECTABLE_PLATFORMS.some(({key}) => {
+      if (!l[`${key}_sold_detected`]) return false;
+      const snoozedAt = l[`${key}_sold_detected_snoozed_at`];
+      return !(snoozedAt && (now - new Date(snoozedAt).getTime()) < SNOOZE_HOURS*3600*1000);
+    }));
+  }, [listings]);
+
+  const delistCount = useMemo(() => getToDelist(listings).length, [listings]);
 
   const b = brief;
 
@@ -6856,7 +6922,7 @@ function MorningBriefTab({ brief, onReviewListings }) {
     <div>
       <div className="sh" style={{marginBottom:8}}>
         <div className="st">Morning Brief</div>
-        <div className="ss" style={{marginLeft:4}}>Generated {generatedLabel} · refreshes on first open after {BRIEF_HOUR}am</div>
+        <div className="ss" style={{marginLeft:4}}>Generated {generatedLabel}</div>
       </div>
 
       {/* Ready to list per platform + Vinted drafts */}
@@ -6891,15 +6957,28 @@ function MorningBriefTab({ brief, onReviewListings }) {
       )}
 
       {/* Needs checking — Walter's live-listing scan */}
-      {qcOpen.length > 0 && (
+      {(qcOpen.length > 0 || soldFlags.length > 0 || delistCount > 0) && (
         <div className="tw" style={{padding:"16px 18px",marginBottom:16,border:"1px solid #f0c040"}}>
           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
             <span style={{fontSize:14}}>🔔</span>
-            <div style={{fontWeight:900,fontSize:14}}>Needs checking ({qcOpen.length})</div>
-            <button onClick={()=>onReviewListings?.()} style={{marginLeft:"auto",background:"var(--ac)",color:"#fff",border:"none",borderRadius:"var(--r)",padding:"6px 12px",cursor:"pointer",fontSize:11,fontWeight:700}}>Review</button>
+            <div style={{fontWeight:900,fontSize:14}}>Needs checking ({qcOpen.length + soldFlags.length + delistCount})</div>
+            <div style={{marginLeft:"auto",display:"flex",gap:6}}>
+              {(soldFlags.length > 0 || delistCount > 0) && <button onClick={()=>onReviewSold?.()} style={{background:"var(--ac)",color:"#fff",border:"none",borderRadius:"var(--r)",padding:"6px 12px",cursor:"pointer",fontSize:11,fontWeight:700}}>Review sales</button>}
+              {qcOpen.length > 0 && <button onClick={()=>onReviewListings?.()} style={{background:"var(--ac)",color:"#fff",border:"none",borderRadius:"var(--r)",padding:"6px 12px",cursor:"pointer",fontSize:11,fontWeight:700}}>Review listings</button>}
+            </div>
           </div>
-          <div style={{fontSize:11,color:"var(--txd)",marginBottom:8}}>From Walter's scan of your live Vinted, eBay and Depop listings.</div>
+          <div style={{fontSize:11,color:"var(--txd)",marginBottom:8}}>From Walter's scans of your live Vinted, eBay and Depop listings.</div>
           <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+            {soldFlags.length > 0 && (
+              <span style={{fontSize:11,background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:20,padding:"4px 11px",color:"var(--txm)"}}>
+                Looks sold, confirm price · {soldFlags.length}
+              </span>
+            )}
+            {delistCount > 0 && (
+              <span style={{fontSize:11,background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:20,padding:"4px 11px",color:"var(--txm)"}}>
+                Sold, still to delist · {delistCount}
+              </span>
+            )}
             {Object.entries(qcOpen.reduce((a,r)=>{ a[r.kind]=(a[r.kind]||0)+1; return a; },{})).map(([k,n]) => (
               <span key={k} style={{fontSize:11,background:"var(--sf2)",border:"1px solid var(--bdd)",borderRadius:20,padding:"4px 11px",color:"var(--txm)"}}>
                 {(QC_KINDS[k]?.label || k)} · {n}
@@ -10529,6 +10608,7 @@ export default function App() {
     } catch { return null; }
   });
   const [markListedTab, setMarkListedTab] = useState("mark");
+  const [markSoldTab, setMarkSoldTab] = useState("mark");
   const briefGenRef = useRef(false);
   useEffect(() => {
     if (!session || storageStatus !== "saved" || !listings.length || briefGenRef.current) return;
@@ -10919,14 +10999,14 @@ export default function App() {
           </div>
 
           <div className="content">
-            {view==="dashboard"   && <Dashboard listings={listings} stockData={stockData} weeklyGoal={weeklyGoal} setWeeklyGoal={setWeeklyGoal} monthlyGoal={monthlyGoal} setMonthlyGoal={setMonthlyGoal} weeklyRevGoal={weeklyRevGoal} setWeeklyRevGoal={setWeeklyRevGoal} monthlyRevGoal={monthlyRevGoal} setMonthlyRevGoal={setMonthlyRevGoal} liveData={liveData} setLiveData={setLiveData} hardSave={hardSave} brief={brief} onReviewListings={() => { setMarkListedTab("history"); navigate("marklisted"); }} />}
+            {view==="dashboard"   && <Dashboard listings={listings} stockData={stockData} weeklyGoal={weeklyGoal} setWeeklyGoal={setWeeklyGoal} monthlyGoal={monthlyGoal} setMonthlyGoal={setMonthlyGoal} weeklyRevGoal={weeklyRevGoal} setWeeklyRevGoal={setWeeklyRevGoal} monthlyRevGoal={monthlyRevGoal} setMonthlyRevGoal={setMonthlyRevGoal} liveData={liveData} setLiveData={setLiveData} hardSave={hardSave} brief={brief} onReviewListings={() => { setMarkListedTab("history"); navigate("marklisted"); }} onReviewSold={() => { setMarkSoldTab("history"); navigate("marksold"); }} />}
             {view==="stock"       && <StockTab stockData={stockData} setStockData={setStockData} listings={listings} setListings={setListings} hardSave={hardSave} liveData={liveData} setLiveData={setLiveData} />}
             {view==="listings"    && <ListingsTab listings={listings} setListings={setListings} stockData={stockData} customPlatforms={customPlatforms} liveData={liveData} setLiveData={setLiveData} hardSave={hardSave} />}
             {view==="movement"    && <MovementTracker listings={listings} />}
             {view==="listingdata" && <ListingDataTab listings={listings} liveData={liveData} />}
             {view==="marklisted"  && <MarkAsListed listings={listings} setListings={setListings} customPlatforms={customPlatforms} liveData={liveData} hardSave={hardSave} initialTab={markListedTab} onTabUsed={()=>setMarkListedTab("mark")} />}
             {view==="drafter"     && <ListingDrafter listings={listings} setListings={setListings} liveData={liveData} hardSave={hardSave} />}
-            {view==="marksold"    && <QuickMarkSold listings={listings} setListings={setListings} customPlatforms={customPlatforms} liveData={liveData} hardSave={hardSave} />}
+            {view==="marksold"    && <QuickMarkSold listings={listings} setListings={setListings} customPlatforms={customPlatforms} liveData={liveData} hardSave={hardSave} initialTab={markSoldTab} onTabUsed={()=>setMarkSoldTab("mark")} />}
             {view==="shipping"    && <ShippingTab listings={listings} setListings={setListings} hardSave={hardSave} />}
             {view==="livedata"    && <LiveData listings={listings} stockData={stockData} liveData={liveData} setLiveData={setLiveData} customPlatforms={customPlatforms} />}
             {view==="calculator"  && <PriceCalculator listings={listings} />}
