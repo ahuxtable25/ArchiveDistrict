@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+#import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 /* ── Supabase client ── */
@@ -6067,7 +6067,7 @@ const DETECTABLE_PLATFORMS = [
 const SNOOZE_HOURS = 24;
 
 /* Sold in the last 30 days but still marked live somewhere else. Walter ends the eBay listing itself
-   (ebay_delisted_at), so eBay only counts here until it has. "Done" stamps delistDoneAt. */
+   (ebay_delisted_at), and Walter's scans record platforms an item is no longer live on (confirmed_gone). "Done" stamps delistDoneAt. */
 const DELIST_DAYS = 30;
 const getToDelist = (listings) => {
   const cut = new Date(Date.now() - DELIST_DAYS * 86400000).toISOString().slice(0, 10);
@@ -6075,10 +6075,25 @@ const getToDelist = (listings) => {
     .filter(l => l.sold && l.daySold && l.daySold >= cut && !l.delistDoneAt)
     .map(l => ({
       item: l,
-      remaining: (l.platforms || []).filter(p => p !== l.platform && !(getPlatFamily(p) === "eBay" && l.ebay_delisted_at)),
+      remaining: (l.platforms || []).filter(p => p !== l.platform && !(l.confirmed_gone || []).includes(p) && !(getPlatFamily(p) === "eBay" && l.ebay_delisted_at)),
     }))
     .filter(r => r.remaining.length > 0)
     .sort((a, b) => String(b.item.daySold).localeCompare(String(a.item.daySold)));
+};
+
+/* Link to where an item is still live, from the platform ids Walter stores on the listing.
+   Vinted keeps a single id, so it only links when the item has just one Vinted account left. */
+const getListingUrl = (l, platform, remaining = []) => {
+  const fam = getPlatFamily(platform);
+  if (fam === "Depop" && l.depop_product_id) {
+    const raw = String(l.depop_product_id);
+    return raw.startsWith("http") ? raw : raw.startsWith("/") ? `https://www.depop.com${raw}` : `https://www.depop.com/products/${raw}`;
+  }
+  if (fam === "eBay" && l.ebay_item_id) return `https://www.ebay.co.uk/itm/${l.ebay_item_id}`;
+  if (fam === "Vinted" && l.vinted_item_id && remaining.filter(p => getPlatFamily(p) === "Vinted").length === 1) {
+    return `https://www.vinted.co.uk/items/${l.vinted_item_id}`;
+  }
+  return null;
 };
 
 function SalesHistoryTab({ listings=[], setListings, hardSave }) {
@@ -6195,14 +6210,21 @@ function SalesHistoryTab({ listings=[], setListings, hardSave }) {
           </div>
           <div style={{display:"flex",flexDirection:"column",gap:8}}>
             {toDelist.map(({item, remaining}) => (
-              <div key={item.sku} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,padding:"10px 12px",background:"var(--sf2)",borderRadius:"var(--r)"}}>
+              <div key={item.sku} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap",padding:"10px 12px",background:"var(--sf2)",borderRadius:"var(--r)"}}>
                 <div style={{minWidth:0}}>
                   <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                     <span className="sku">{item.sku}</span>
                     <span style={{fontWeight:700,fontSize:12}}>{item.name}</span>
                   </div>
                   <div style={{fontSize:11,color:"var(--txm)",marginTop:3}}>Sold on <strong>{item.platform||"—"}</strong> · {item.daySold}</div>
-                  <div style={{fontSize:11,color:"#7a4e0e",marginTop:3}}>Still live on: {remaining.join(", ")}</div>
+                  <div style={{fontSize:11,color:"#7a4e0e",marginTop:3}}>Still live on: {remaining.map((p, i) => {
+                    const href = getListingUrl(item, p, remaining);
+                    return (
+                      <span key={p}>{i > 0 && ", "}{href
+                        ? <a href={href} target="_blank" rel="noopener noreferrer" style={{color:"var(--ac)",fontWeight:700,textDecoration:"none"}}>{p} ↗</a>
+                        : p}</span>
+                    );
+                  })}</div>
                   {item.ebay_delisted_by === "walter" && <div style={{fontSize:11,color:"var(--gn)",marginTop:3}}>✓ eBay listing ended by Walter</div>}
                 </div>
                 <button onClick={()=>markDelistDone(item.sku)}
@@ -6244,7 +6266,7 @@ function SalesHistoryTab({ listings=[], setListings, hardSave }) {
                       </div>
                     </div>
                     {!isConfirming && (
-                      <div style={{display:"flex",gap:6,flexShrink:0}}>
+                      <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                         <button onClick={()=>startConfirm(row)}
                           style={{background:"var(--gnl)",border:"1px solid rgba(31,92,53,.2)",borderRadius:"var(--r)",padding:"5px 11px",cursor:"pointer",fontSize:11,fontWeight:700,color:"var(--gn)"}}>
                           ✓ Confirm sale
@@ -6819,6 +6841,12 @@ const buildMorningBrief = (listings, prevAt, slowMoverDays) => {
     return slim(l, { labels, fromDraft: !!(l.vinted_draft_confirmed_at && l.vinted_draft_confirmed_at.slice(0, 10) >= prevDate) });
   }).filter(Boolean) : [];
 
+  // eBay listings Walter ended since the last brief because the item sold elsewhere.
+  const ebayDelisted = prevDate
+    ? listings.filter(l => l.ebay_delisted_by === "walter" && l.ebay_delisted_at && l.ebay_delisted_at >= prevDate)
+        .map(l => slim(l, { platform: l.platform || "" }))
+    : [];
+
   const soldWk = listings.filter(l => l.sold && l.daySold && l.daySold >= WEEK_START);
   const slow = listings
     .filter(l => l.listed && !l.sold && l.dayListed)
@@ -6836,7 +6864,7 @@ const buildMorningBrief = (listings, prevAt, slowMoverDays) => {
       vintedDrafts: draftPending.length,
     },
     draftPending: draftPending.map(l => slim(l, { account: l.vinted_draft_account })),
-    sold, listed,
+    sold, listed, ebayDelisted,
     weekSold: soldWk.length,
     weekRevenue: soldWk.reduce((a, l) => a + (l.soldPrice || 0), 0),
     slowMoverDays,
@@ -7057,6 +7085,22 @@ function MorningBriefTab({ brief, listings = [], onReviewListings, onReviewSold 
           </div>
         )}
       </div>
+
+      {/* eBay listings Walter ended */}
+      {(b.ebayDelisted || []).length > 0 && (
+        <div className="tw" style={{padding:"16px 18px",marginBottom:16}}>
+          <div style={{fontWeight:900,fontSize:14,marginBottom:4}}>Delisted From eBay ({b.ebayDelisted.length})</div>
+          <div style={{fontSize:11,color:"var(--txd)",marginBottom:10}}>Walter ended these eBay listings because they sold elsewhere — nothing for you to do.</div>
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            {b.ebayDelisted.map(l => (
+              <div key={l.sku} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,gap:8}}>
+                <span><span className="sku">{l.sku}</span> {l.name}</span>
+                <span style={{fontWeight:700,color:"var(--gn)",textAlign:"right"}}>sold on {l.platform || "—"}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Slow movers */}
       <div className="tw" style={{padding:"16px 18px"}}>
