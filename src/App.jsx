@@ -4258,7 +4258,6 @@ function ListingDataTab({ listings, liveData }) {
           </div>
         ))}
       </div>
-
       {/* Tab bar */}
       <div className="tab-bar">
         <div className={`tab ${ldTab==="tolist"?"active":""}`} onClick={()=>setLdTab("tolist")}>
@@ -6697,6 +6696,233 @@ function GoalCard({ title, period, profit, revenue, profitGoal, setProfit, profi
   );
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   DASHBOARD CHARTS — weekly revenue, sales by platform, top brands.
+   Every chart can be flipped between a bar view and a pie view, and the
+   whole section has a 4 / 12 / 26 week range. Plain HTML/SVG, no chart
+   library; colours come from the theme variables so dark mode works.
+═══════════════════════════════════════════════════════════════ */
+const CHART_PALETTE = ["#c0273a","#1a2840","#a06518","#1f5c35","#6d4aa8","#2a7f9e","#b5588a","#8a8577"];
+const CHART_PLAT_COL = { Depop:"#e63946", Vinted:"#09b1ba", eBay:"#2f6fdb", Whatnot:"#7c3aed", Tilt:"#f59e0b", "Facebook Marketplace":"#5b6bbf", Grailed:"#3a3a3a" };
+const chartShort = (n) => n >= 10000 ? `£${Math.round(n/1000)}k` : n >= 1000 ? `£${(n/1000).toFixed(1).replace(/\.0$/,"")}k` : `£${Math.round(n)}`;
+const chartNiceMax = (v) => {
+  if (v <= 0) return 10;
+  const p = Math.pow(10, Math.floor(Math.log10(v)));
+  const m = v / p;
+  return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 2.5 ? 2.5 : m <= 5 ? 5 : 10) * p;
+};
+
+function ChartToggle({ value, onChange, options }) {
+  return (
+    <div style={{display:"inline-flex",border:"1px solid var(--bd)",borderRadius:"var(--r)",overflow:"hidden",flexShrink:0}}>
+      {options.map(o => (
+        <button key={o.id} type="button" onClick={()=>onChange(o.id)}
+          style={{
+            padding:"4px 10px",fontSize:10,fontWeight:700,letterSpacing:".4px",textTransform:"uppercase",cursor:"pointer",
+            border:"none",borderLeft:o.id===options[0].id?"none":"1px solid var(--bd)",
+            background:value===o.id?"var(--ac)":"var(--sf)",color:value===o.id?"#fff":"var(--txm)",
+          }}>{o.label}</button>
+      ))}
+    </div>
+  );
+}
+
+function PieView({ data, valueFmt }) {
+  const total = data.reduce((a,d)=>a+d.value,0);
+  const R = 84, r = 50, C = 90;
+  let ang = -Math.PI/2;
+  const arcs = data.map(d => {
+    const a0 = ang, a1 = ang + (d.value/total)*Math.PI*2; ang = a1;
+    const big = a1 - a0 > Math.PI ? 1 : 0;
+    const full = a1 - a0 >= Math.PI*2 - 0.0001;
+    const pt = (rad, a) => `${(C + rad*Math.cos(a)).toFixed(2)} ${(C + rad*Math.sin(a)).toFixed(2)}`;
+    const path = full
+      ? `M ${C-R} ${C} A ${R} ${R} 0 1 1 ${C+R} ${C} A ${R} ${R} 0 1 1 ${C-R} ${C} M ${C-r} ${C} A ${r} ${r} 0 1 0 ${C+r} ${C} A ${r} ${r} 0 1 0 ${C-r} ${C} Z`
+      : `M ${pt(R,a0)} A ${R} ${R} 0 ${big} 1 ${pt(R,a1)} L ${pt(r,a1)} A ${r} ${r} 0 ${big} 0 ${pt(r,a0)} Z`;
+    return { ...d, path };
+  });
+  return (
+    <div style={{display:"flex",alignItems:"center",gap:18,flexWrap:"wrap",justifyContent:"center",minHeight:190}}>
+      <svg width="180" height="180" viewBox="0 0 180 180" style={{flexShrink:0}}>
+        {arcs.map((a,i) => (
+          <path key={i} d={a.path} fill={a.colour} fillRule="evenodd" stroke="var(--sf)" strokeWidth="2"><title>{`${a.label}: ${valueFmt(a.value)} (${Math.round(a.value/total*100)}%)`}</title></path>
+        ))}
+        <text x="90" y="86" textAnchor="middle" style={{fontSize:10,fill:"var(--txm)",fontWeight:700,letterSpacing:".5px"}}>TOTAL</text>
+        <text x="90" y="104" textAnchor="middle" style={{fontSize:15,fill:"var(--tx)",fontWeight:800}}>{`£${Math.round(total).toLocaleString("en-GB")}`}</text>
+      </svg>
+      <div style={{flex:"0 1 250px",minWidth:150,display:"flex",flexDirection:"column",gap:5}}>
+        {data.map((d,i) => (
+          <div key={i} style={{display:"flex",alignItems:"center",gap:7,fontSize:11}}>
+            <span style={{width:10,height:10,borderRadius:3,background:d.colour,flexShrink:0}}/>
+            <span style={{flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:"var(--tx)",fontWeight:600}}>{d.label}</span>
+            <span style={{color:"var(--txm)",fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>{chartShort(d.value)} · {Math.round(d.value/total*100)}%</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function HBarsView({ data: all, valueFmt }) {
+  const data = all.filter(d => !d.rest);
+  const max = Math.max(...data.map(d=>d.value), 1);
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:7,minHeight:190,justifyContent:"center"}}>
+      {data.map((d,i) => (
+        <div key={i} title={`${d.label}: ${valueFmt(d.value)}${d.sub?` · ${d.sub}`:""}`} style={{display:"flex",alignItems:"center",gap:9,fontSize:11}}>
+          <span style={{width:96,flexShrink:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontWeight:600,color:"var(--tx)"}}>{d.label}</span>
+          <div style={{flex:1,height:16,background:"var(--sf2)",borderRadius:4,overflow:"hidden"}}>
+            <div style={{width:`${Math.max(d.value/max*100,2)}%`,height:"100%",background:d.colour,borderRadius:4}}/>
+          </div>
+          <span style={{width:92,flexShrink:0,textAlign:"right",fontVariantNumeric:"tabular-nums",fontWeight:700,color:"var(--tx)"}}>
+            {valueFmt(d.value)}{d.sub && <span style={{color:"var(--txm)",fontWeight:500}}> · {d.sub}</span>}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function WeekColumns({ weeks, goal }) {
+  const top = Math.max(...weeks.map(w=>w.revenue), goal||0, 1);
+  const max = chartNiceMax(top);
+  const step = Math.ceil(weeks.length / 10);
+  const gap = weeks.length > 16 ? 3 : 6;
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:6}}>
+      <div style={{position:"relative",height:190,marginLeft:42}}>
+        {[0,.25,.5,.75,1].map(f => (
+          <div key={f} style={{position:"absolute",left:0,right:0,bottom:`${f*100}%`,borderTop:`1px ${f===0?"solid":"dashed"} var(--bd)`}}>
+            <span style={{position:"absolute",left:-42,top:-7,width:36,textAlign:"right",fontSize:9,color:"var(--txm)"}}>{chartShort(max*f)}</span>
+          </div>
+        ))}
+        {goal > 0 && goal <= max && (
+          <div style={{position:"absolute",left:0,right:0,bottom:`${goal/max*100}%`,borderTop:"2px dashed var(--am)",zIndex:2}}>
+            <span style={{position:"absolute",right:2,top:-16,fontSize:9,fontWeight:700,color:"var(--am)",background:"var(--sf)",padding:"0 3px"}}>Goal {chartShort(goal)}</span>
+          </div>
+        )}
+        <div style={{position:"absolute",inset:0,display:"flex",alignItems:"flex-end",gap}}>
+          {weeks.map((w,i) => (
+            <div key={i} title={`w/c ${w.label}\nRevenue ${fmt(w.revenue)}\nProfit ${fmt(w.profit)}\n${w.sold} sold`}
+              style={{flex:1,height:"100%",display:"flex",alignItems:"flex-end"}}>
+              <div style={{width:"100%",height:`${w.revenue/max*100}%`,background:"var(--ac)",borderRadius:"3px 3px 0 0",position:"relative",minHeight:w.revenue>0?2:0}}>
+                {w.revenue > 0 && w.profit > 0 && (
+                  <div style={{position:"absolute",left:0,right:0,bottom:0,height:`${Math.min(w.profit/w.revenue*100,100)}%`,background:"var(--gn)",opacity:.85}}/>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div style={{display:"flex",gap,marginLeft:42}}>
+        {weeks.map((w,i) => (
+          <div key={i} style={{flex:1,minWidth:0,textAlign:"center",fontSize:9,color:"var(--txm)",whiteSpace:"nowrap",visibility:i%step===0?"visible":"hidden"}}>{w.label}</div>
+        ))}
+      </div>
+      <div style={{display:"flex",gap:14,fontSize:10,color:"var(--txm)",marginLeft:42}}>
+        <span><span style={{display:"inline-block",width:9,height:9,background:"var(--ac)",borderRadius:2,marginRight:5}}/>Revenue</span>
+        <span><span style={{display:"inline-block",width:9,height:9,background:"var(--gn)",borderRadius:2,marginRight:5}}/>of which profit</span>
+        {goal > 0 && <span><span style={{display:"inline-block",width:12,borderTop:"2px dashed var(--am)",marginRight:5,verticalAlign:"middle"}}/>Weekly revenue goal</span>}
+      </div>
+    </div>
+  );
+}
+
+function ChartCard({ title, sub, mode, setMode, children, empty, style }) {
+  return (
+    <div style={{background:"var(--sf)",border:"1px solid var(--bd)",borderRadius:"var(--r2)",padding:"14px 16px",boxShadow:"var(--sh)",...(style||{})}}>
+      <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:10,marginBottom:12}}>
+        <div>
+          <div style={{fontSize:11,fontWeight:800,letterSpacing:".6px",textTransform:"uppercase",color:"var(--tx)"}}>{title}</div>
+          <div style={{fontSize:10,color:"var(--txm)",marginTop:2}}>{sub}</div>
+        </div>
+        <ChartToggle value={mode} onChange={setMode} options={[{id:"bar",label:"Bar"},{id:"pie",label:"Pie"}]} />
+      </div>
+      {empty
+        ? <div style={{minHeight:190,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,color:"var(--txd)"}}>No sales in this period yet</div>
+        : children}
+    </div>
+  );
+}
+
+function DashCharts({ listings, weeklyRevGoal }) {
+  const load = () => { try { return JSON.parse(localStorage.getItem("dashChartPrefs")||"{}"); } catch { return {}; } };
+  const init = load();
+  const [range, setRange] = useState([4,12,26].includes(init.range) ? init.range : 12);
+  const [modes, setModes] = useState({ week:"bar", plat:"bar", brand:"bar", ...(init.modes||{}) });
+  useEffect(() => { try { localStorage.setItem("dashChartPrefs", JSON.stringify({ range, modes })); } catch {} }, [range, modes]);
+  const setMode = (k) => (v) => setModes(m => ({ ...m, [k]: v }));
+
+  const { weeks, plats, brands, soldCount } = useMemo(() => {
+    const wk = [];
+    for (let i = range - 1; i >= 0; i--) {
+      const ws = new Date(_wsd); ws.setDate(ws.getDate() - i*7);
+      const we = new Date(ws);   we.setDate(we.getDate() + 6);
+      const a = localDateStr(ws), b = localDateStr(we);
+      const rows = listings.filter(l => l.sold && l.daySold && l.daySold >= a && l.daySold <= b);
+      wk.push({
+        label: ws.toLocaleDateString("en-GB",{day:"numeric",month:"short"}),
+        sold: rows.length,
+        revenue: rows.reduce((s,l)=>s+(l.soldPrice||0),0),
+        profit:  rows.reduce((s,l)=>s+(l.profit||0),0),
+      });
+    }
+    const first = new Date(_wsd); first.setDate(first.getDate() - (range-1)*7);
+    const cutoff = localDateStr(first);
+    const inRange = listings.filter(l => l.sold && l.daySold && l.daySold >= cutoff);
+    const group = (keyFn) => {
+      const m = {};
+      inRange.forEach(l => { const k = keyFn(l); (m[k] = m[k] || { label:k, value:0, n:0 }); m[k].value += (l.soldPrice||0); m[k].n += 1; });
+      return Object.values(m).sort((x,y) => y.value - x.value);
+    };
+    const top = (arr, n, colourFn) => {
+      const head = arr.slice(0, n), rest = arr.slice(n);
+      const out = head.map((d,i) => ({ label:d.label, value:d.value, sub:`${d.n} sold`, colour: colourFn ? colourFn(d.label, i) : CHART_PALETTE[i % CHART_PALETTE.length] }));
+      if (rest.length) out.push({ label:"Other", rest:true, value:rest.reduce((s,d)=>s+d.value,0), sub:`${rest.reduce((s,d)=>s+d.n,0)} sold`, colour:"#8a8577" });
+      return out;
+    };
+    return {
+      weeks: wk,
+      soldCount: inRange.length,
+      plats:  top(group(l => getPlatFamily(l.platform) || "Unknown"), 7, (name, i) => CHART_PLAT_COL[name] || CHART_PALETTE[i % CHART_PALETTE.length]),
+      brands: top(group(l => (l.brand||"").trim() || "Unbranded"), 7),
+    };
+  }, [listings, range]);
+
+  const weekPie = useMemo(() => {
+    const ranked = weeks.filter(w=>w.revenue>0).map(w => ({ label:w.label, value:w.revenue })).sort((a,b)=>b.value-a.value);
+    const head = ranked.slice(0,7).map((d,i) => ({ ...d, colour:CHART_PALETTE[i%CHART_PALETTE.length] }));
+    const rest = ranked.slice(7);
+    if (rest.length) head.push({ label:"Other weeks", value:rest.reduce((s,d)=>s+d.value,0), colour:"#8a8577" });
+    return head;
+  }, [weeks]);
+
+  const goal = parseFloat(weeklyRevGoal) || 0;
+  const periodTxt = `Last ${range} weeks`;
+  const noSales = soldCount === 0;
+
+  return (
+    <div style={{marginTop:16}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:10,flexWrap:"wrap"}}>
+        <div style={{fontSize:11,fontWeight:800,letterSpacing:".8px",textTransform:"uppercase",color:"var(--txm)"}}>Performance</div>
+        <ChartToggle value={range} onChange={setRange} options={[{id:4,label:"4 wks"},{id:12,label:"12 wks"},{id:26,label:"26 wks"}]} />
+      </div>
+      <ChartCard title="Revenue by week" sub={modes.week==="pie" ? `Share of revenue by week · ${periodTxt}` : `${periodTxt} · revenue with profit shown inside`}
+        mode={modes.week} setMode={setMode("week")} empty={noSales} style={{marginBottom:11}}>
+        {modes.week==="pie" ? <PieView data={weekPie} valueFmt={fmt} /> : <WeekColumns weeks={weeks} goal={goal} />}
+      </ChartCard>
+      <div className="two-col">
+        <ChartCard title="Sales by platform" sub={`Revenue · ${periodTxt}`} mode={modes.plat} setMode={setMode("plat")} empty={noSales}>
+          {modes.plat==="pie" ? <PieView data={plats} valueFmt={fmt} /> : <HBarsView data={plats} valueFmt={chartShort} />}
+        </ChartCard>
+        <ChartCard title="Top brands" sub={`Revenue · ${periodTxt}`} mode={modes.brand} setMode={setMode("brand")} empty={noSales}>
+          {modes.brand==="pie" ? <PieView data={brands} valueFmt={fmt} /> : <HBarsView data={brands} valueFmt={chartShort} />}
+        </ChartCard>
+      </div>
+    </div>
+  );
+}
+
 function Dashboard({ listings, stockData, weeklyGoal: wgProp, setWeeklyGoal, monthlyGoal: mgProp, setMonthlyGoal, weeklyRevGoal: wrgProp, setWeeklyRevGoal, monthlyRevGoal: mrgProp, setMonthlyRevGoal, liveData, setLiveData, hardSave, brief, onReviewListings, onReviewSold, setListings }) {
   const [dashTab, setDashTab] = useState("dashboard");
   // Prefer goals from appSettings (Settings tab) — fall back to App state props
@@ -6800,6 +7026,8 @@ function Dashboard({ listings, stockData, weeklyGoal: wgProp, setWeeklyGoal, mon
           </div>
         ))}
       </div>
+
+      <DashCharts listings={listings} weeklyRevGoal={weeklyRevGoal} />
       </>
       )}
     </div>
